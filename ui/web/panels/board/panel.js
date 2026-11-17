@@ -375,6 +375,7 @@ export default {
             wrows: {}, whist: {}, view: "" };
     // 보기: 보드 전체 또는 워커 하나(드롭다운, 주소 ?view=)
     els.viewSel = ui.select([["", "보드 전체"]], "", (val) => setView(ctx, val), "보기: 보드 전체 또는 워커 하나");
+    els.viewSel.style.marginLeft = "10px";
     els.wv = buildWorkerView(ctx);
     els.pill = ui.workerPill(null);
     els.controls = ui.workerControls(ctx, id);
@@ -435,7 +436,7 @@ export default {
         h("thead", {}, h("tr", {}, ["워커", "type", "상태", "재시작", "CPU", "메모리", "프로세스", "스레드", "마지막 오류", ""].map((t) => h("th", {}, t)))),
         els.workers = h("tbody")))));
     el.append(
-      ui.panelHead({ title: "시스템 모니터", badges: [h("span", { class: "muted", style: "margin-right:4px" }, "보기"), els.viewSel, els.pill],
+      ui.panelHead({ title: "시스템 모니터", badges: [els.viewSel, els.pill],
         actions: [settingsBtn, h("span", { class: "ph-sep" }), els.controls] }),
       els.boardView,
       els.workerView);

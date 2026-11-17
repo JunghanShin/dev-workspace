@@ -7,7 +7,7 @@
 # Python: manager/test_schema.py(스키마·프리셋), dev/test_workers.py(워커 폴더 구성·사본 라이브러리·패널 id·Python 도우미),
 #         rest/test_stream.py(텔레메트리 중계)
 # Python 도구: workers/_template/python/test_comm.py(Python ↔ C++ 워커 통신, 틀 빌드 뒤)
-# 빌드: workers/_template + workers/*/ 마다 cmake → ctest, 결과는 /tmp/workspace-check/<워커>-<ON|OFF>
+# 빌드: workers/_template + workers/*/ 마다 cmake → ctest, 결과는 /tmp/workspace-check/<저장소 폴더>/<워커>-<ON|OFF>
 # ThreadSanitizer(제공 도구, design.md 6.6.9 ③): libworker·libframebus 단위·스트레스 시험, 템플릿과 모든 워커의 시험을 TSan 빌드로.
 #   워커가 빼려면 그 시험에 CTest 라벨 no_tsan(set_tests_properties(<시험> PROPERTIES LABELS no_tsan))
 # Jetson(크로스 빌드 + QEMU) 시험은 확정할 때 워커마다 jetson-build --test (design.md 11.3)
@@ -15,7 +15,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 QUICK=0
 [[ "${1:-}" == --quick ]] && QUICK=1
-OUT=/tmp/workspace-check
+OUT="/tmp/workspace-check/$(basename "$ROOT")"  # 저장소마다 따로(같은 PC의 다른 워크스페이스와 CMake 캐시가 섞이지 않게)
 mkdir -p "$OUT"
 fail=()
 
