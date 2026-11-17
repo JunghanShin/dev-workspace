@@ -1,0 +1,1 @@
+{"id": "replay", "title": "녹화·재생", "group": "개발 도구", "order": 90, "worker_types": ["replay_worker"], "icon": "record"}

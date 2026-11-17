@@ -1,0 +1,43 @@
+#!/bin/bash
+# Jetson 전원 모드(nvpmodel)를 이름으로 맞춘다(root). 워크스페이스 설치(install_workspace.sh, 기본 MAXN_SUPER)와
+# 제품 설치(install.sh, 제품 빌드에서 고른 모드)가 쓴다(워크스페이스 design.md 11.1·11.4).
+#
+#   workspace-power-mode <이름>        예: MAXN_SUPER, 25W. 이미 그 모드면 아무것도 안 함
+#   workspace-power-mode --check <이름>  이 장비에 그 모드가 있는지만(바꾸지 않음)
+#   workspace-power-mode --list        이 장비의 모드 이름
+#
+# 번호는 모듈마다 달라서 이름으로 받고 /etc/nvpmodel.conf에서 번호를 찾는다.
+# 종료 코드: 0 맞춤(또는 이미 그 모드), 2 이 장비에 없는 이름, 3 Jetson이 아님(nvpmodel 없음), 1 실패.
+# 재부팅이 있어야 적용되는 모드면 "reboot required"를 출력하고 0으로 끝난다(여기서 재부팅하지 않음).
+set -uo pipefail
+
+CONF=/etc/nvpmodel.conf
+CHECK=0
+case "${1:-}" in
+  --list) [[ -r "$CONF" ]] || exit 3; grep -o 'POWER_MODEL ID=[0-9]* NAME=[^ >]*' "$CONF" | sed 's/.*NAME=//'; exit 0 ;;
+  --check) CHECK=1; shift ;;
+esac
+NAME="${1:?usage: workspace-power-mode [--check] <name> | --list}"
+
+command -v nvpmodel >/dev/null && [[ -r "$CONF" ]] || { echo "power mode: no nvpmodel (not a Jetson), skipped"; exit 3; }
+ID="$(grep -o "POWER_MODEL ID=[0-9]* NAME=$NAME\b" "$CONF" | head -1 | sed 's/POWER_MODEL ID=\([0-9]*\).*/\1/')"
+if [[ -z "$ID" ]]; then
+  echo "power mode: $NAME not on this device (have: $(grep -o 'POWER_MODEL ID=[0-9]* NAME=[^ >]*' "$CONF" | sed 's/.*NAME=//' | tr '\n' ' '))" >&2
+  exit 2
+fi
+(( CHECK )) && { echo "power mode: $NAME (id $ID) available"; exit 0; }
+
+CUR="$(nvpmodel -q 2>/dev/null | sed -n 's/^NV Power Mode: *//p' | head -1)"
+if [[ "$CUR" == "$NAME" ]]; then
+  echo "power mode: already $NAME"
+  exit 0
+fi
+# 재부팅이 필요한 모드면 nvpmodel이 지금 재부팅할지 묻는다 → NO(설치 중에 재부팅하지 않음)
+OUT="$(echo NO | nvpmodel -m "$ID" 2>&1)"; RC=$?
+echo "$OUT" | grep -v '^$' | sed 's/^/  nvpmodel: /'
+if echo "$OUT" | grep -qi "reboot"; then
+  echo "power mode: $NAME set (was ${CUR:-?}), reboot required to apply"
+  exit 0
+fi
+(( RC == 0 )) || { echo "power mode: nvpmodel -m $ID failed" >&2; exit 1; }
+echo "power mode: $NAME (was ${CUR:-?})"

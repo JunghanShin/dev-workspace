@@ -1,0 +1,64 @@
+{
+  "_comment": "source 모듈 설정 칸 원본(화면 설정 폼 조각, 워크스페이스 design.md 6.10). workspace/worker-types.json config_schema에 묶음마다 \"section\": \"source\"를 붙여 옮긴다(같은지 manager/test_schema.py가 확인)",
+  "section": "source",
+  "groups": [
+    {
+      "title": "데이터 만들기(source)",
+      "hint": "예제: 주기마다 숫자 배열을 만들어 데이터 버스·스트림으로 내보냄",
+      "fields": [
+        {
+          "key": "rate_hz",
+          "label": "생성 주기",
+          "type": "number",
+          "unit": "Hz",
+          "min": 0.1,
+          "max": 1000,
+          "default": 10,
+          "hint": "바로 적용(다시 시작 없음)"
+        },
+        {
+          "key": "size",
+          "label": "표본 값 개수",
+          "type": "int",
+          "min": 1,
+          "max": 4096,
+          "default": 256
+        },
+        {
+          "key": "amplitude",
+          "label": "진폭",
+          "type": "number",
+          "min": 0,
+          "max": 1000000,
+          "default": 1,
+          "hint": "바로 적용"
+        },
+        {
+          "key": "bus_slots",
+          "label": "데이터 버스 슬롯",
+          "type": "int",
+          "min": 2,
+          "max": 64,
+          "default": 8,
+          "advanced": true,
+          "hint": "받는 쪽이 느릴 때 쌓일 수 있는 수"
+        },
+        {
+          "key": "bus_socket",
+          "label": "데이터 버스 소켓",
+          "type": "string",
+          "advanced": true,
+          "empty_label": "기본 위치(<데이터>/run/frames/<id>.sock)"
+        },
+        {
+          "key": "helper_cmd",
+          "label": "자식 프로세스",
+          "type": "string",
+          "advanced": true,
+          "empty_label": "없음",
+          "hint": "외부 프로그램을 띄우고 감시하는 예(예: sleep 3600). 죽으면 2초 뒤 다시"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# 워크스페이스 로컬 미디어 서버(MediaMTX v1.21.3) 설정. 데이터 폴더(<데이터>/config/mediamtx.yml)에 없을 때만 복사된다.
+# 고친 뒤: sudo systemctl restart workspace-mediamtx
+# 여기 없는 항목은 MediaMTX 기본값을 쓴다(전체 항목: install/mediamtx/ 압축 파일 안의 mediamtx.yml).
+#
+#   워커 ──RTSP/SRT──▶ 이 서버(127.0.0.1) ──┬─▶ 로컬 브라우저 (WebRTC :8889, HLS :8888)
+#                                          └─▶ 원격 미디어 서버로 중계 (아래 paths, 기본은 끔)
+#
+# 워커 송출 주소: rtsp://127.0.0.1:8554/<경로>  (워커 설정 url)
+
+logLevel: info
+logDestinations: [stdout]
+
+# 쓰지 않는 기능은 끈다
+api: false
+metrics: false
+pprof: false
+playback: false
+rtmp: false
+moq: false
+
+# 수신: RTSP(워커 기본), SRT(워커 transport=srt)
+rtsp: true
+rtspAddress: :8554
+rtpAddress: :8000
+rtcpAddress: :8001
+srt: true
+srtAddress: :8890
+
+# 로컬 시청: WebRTC(지연 최소, 브라우저 http://<Jetson>:8889/<경로>), HLS(예비, :8888)
+webrtc: true
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+hls: true
+hlsAddress: :8888
+
+paths:
+  # 원격 미디어 서버로 중계: 들어온 경로마다 그대로(-c copy) 같은 이름으로 보낸다. 기본은 끔(로컬 시청만).
+  # 원격 주소는 현장 값이다(프로필에 둔다). 켜려면 아래 all_others: {} 를 지우고 그 아래 세 줄의 # 를 지운다.
+  # 원격 구간(LTE 등)은 워커 기본과 같게 UDP(pkt_size 1200: VPN MTU 1420에서도 쪼개지지 않게).
+  # 링크가 끊기면 ffmpeg가 끝나고 다시 시작한다. 로컬 시청은 영향 없다.
+  all_others: {}
+  #all_others:
+  #  runOnAvailable: ffmpeg -hide_banner -loglevel warning -rtsp_transport tcp -i rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH -c copy -f rtsp -rtsp_transport udp -pkt_size 1200 rtsp://<원격 미디어 서버>:8554/$MTX_PATH
+  #  runOnAvailableRestart: true

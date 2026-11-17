@@ -1,0 +1,10 @@
+{
+  "sysmon": {
+    "exec": ["/usr/bin/python3", "@WORKSPACE_ROOT@/monitor/sysmon.py"],
+    "start_timeout_sec": 10,
+    "watchdog_sec": 5,
+    "stop_timeout_sec": 3,
+    "builtin": {"id": "system-monitor", "autostart": true, "config": {}},
+    "requires": ["tegrastats"]
+  }
+}

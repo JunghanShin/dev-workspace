@@ -1,0 +1,55 @@
+// 명령 소켓 서버 (design.md 9.6). Unix SOCK_STREAM, 명령 1건 = 연결 1개, UTF-8 JSON 한 줄.
+// 논블로킹이라 느린 연결이 이벤트 루프를 막지 않는다. 스레드 안전하지 않다.
+#pragma once
+
+#include <poll.h>
+
+#include <chrono>
+#include <functional>
+#include <map>
+#include <string>
+#include <vector>
+
+namespace worker {
+
+class CommandServer {
+public:
+    using Clock = std::chrono::steady_clock;
+    // 한 줄을 받으면 호출한다. 응답은 reply(conn, ...)로 바로 또는 나중에 보낸다.
+    using Handler = std::function<void(int conn, const std::string& line)>;
+
+    explicit CommandServer(Handler handler) : handler_(std::move(handler)) {}
+    ~CommandServer();
+
+    // 기존 파일을 지우고 bind, 권한 0600. 폴더가 없으면 만든다.
+    bool open(const std::string& path, std::string* error);
+    void close();
+
+    // poll()에 넣을 fd 목록과, 그 결과 처리.
+    void add_pollfds(std::vector<pollfd>& fds) const;
+    void on_poll(const std::vector<pollfd>& fds);
+    // 한 줄을 보내지 않고 오래 머무는 연결을 끊는다.
+    void on_timer(Clock::time_point now);
+
+    // 응답 한 줄을 쓰고 연결을 닫는다. 이미 닫혔으면 아무 일도 하지 않는다.
+    void reply(int conn, const std::string& line);
+
+private:
+    struct Conn {
+        int fd;
+        std::string in;
+        Clock::time_point opened;
+        bool answered = false;
+    };
+    void accept_all();
+    void read_conn(int id);
+    void drop(int id);
+
+    Handler handler_;
+    std::string path_;
+    int listen_fd_ = -1;
+    int next_id_ = 1;
+    std::map<int, Conn> conns_;
+};
+
+}  // namespace worker

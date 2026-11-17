@@ -1,0 +1,15 @@
+{
+  "_comment": "replay 모듈 설정 칸(화면 설정 폼 조각, 워크스페이스 design.md 6.10). 원본은 이 파일이다. 워커의 workspace/worker-types.json config_schema에 묶음마다 \"section\": \"replay\"를 붙여 그대로 옮긴다(같은지 워크스페이스 manager/test_schema.py가 확인)",
+  "section": "replay",
+  "groups": [
+    {"title": "녹화", "hint": "녹화·재생은 패널의 명령으로(설정은 폴더·상한만)", "fields": [
+      {"key": "max_total_mb", "label": "녹화 폴더 전체 상한", "type": "number", "unit": "MB", "min": 1, "max": 1000000, "default": 4096, "hint": "넘으면 녹화를 멈춤"},
+      {"key": "max_record_sec", "label": "녹화 하나 최대 길이", "type": "number", "unit": "s", "min": 1, "max": 86400, "default": 600}
+    ]},
+    {"title": "고급", "advanced": true, "fields": [
+      {"key": "dir", "label": "녹화 폴더", "type": "string", "empty_label": "기본 위치(<데이터>/records/framebus)"},
+      {"key": "bus_slots", "label": "재생 데이터 버스 슬롯", "type": "int", "min": 2, "max": 64, "default": 8},
+      {"key": "bus_socket", "label": "재생 데이터 버스 소켓", "type": "string", "empty_label": "기본 위치(<데이터>/run/frames/<id>.sock)"}
+    ]}
+  ]
+}

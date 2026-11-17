@@ -1,0 +1,101 @@
+{
+  "replay_worker": {
+    "exec": [
+      "@WORKER_EXEC@"
+    ],
+    "start_timeout_sec": 10,
+    "watchdog_sec": 5,
+    "stop_timeout_sec": 6,
+    "config_schema": {
+      "groups": [
+        {
+          "title": "녹화",
+          "hint": "녹화·재생은 패널의 명령으로(설정은 폴더·상한만)",
+          "fields": [
+            {
+              "key": "max_total_mb",
+              "label": "녹화 폴더 전체 상한",
+              "type": "number",
+              "unit": "MB",
+              "min": 1,
+              "max": 1000000,
+              "default": 4096,
+              "hint": "넘으면 녹화를 멈춤"
+            },
+            {
+              "key": "max_record_sec",
+              "label": "녹화 하나 최대 길이",
+              "type": "number",
+              "unit": "s",
+              "min": 1,
+              "max": 86400,
+              "default": 600
+            }
+          ],
+          "section": "replay"
+        },
+        {
+          "title": "고급",
+          "advanced": true,
+          "fields": [
+            {
+              "key": "dir",
+              "label": "녹화 폴더",
+              "type": "string",
+              "empty_label": "기본 위치(<데이터>/records/framebus)"
+            },
+            {
+              "key": "bus_slots",
+              "label": "재생 데이터 버스 슬롯",
+              "type": "int",
+              "min": 2,
+              "max": 64,
+              "default": 8
+            },
+            {
+              "key": "bus_socket",
+              "label": "재생 데이터 버스 소켓",
+              "type": "string",
+              "empty_label": "기본 위치(<데이터>/run/frames/<id>.sock)"
+            }
+          ],
+          "section": "replay"
+        },
+        {
+          "title": "워커 공통",
+          "advanced": true,
+          "hint": "워커 호스트(libworker) 설정",
+          "fields": [
+            {
+              "key": "watchdog_sec",
+              "label": "자체 워치독",
+              "type": "number",
+              "unit": "s",
+              "min": 1,
+              "max": 60,
+              "default": 3
+            },
+            {
+              "key": "stop_timeout_sec",
+              "label": "종료 대기",
+              "type": "number",
+              "unit": "s",
+              "min": 1,
+              "max": 60,
+              "default": 5
+            },
+            {
+              "key": "thread_stall_sec",
+              "label": "스레드 멈춤 판정",
+              "type": "number",
+              "unit": "s",
+              "min": 0.5,
+              "max": 60,
+              "default": 2
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

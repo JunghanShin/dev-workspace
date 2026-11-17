@@ -1,0 +1,1 @@
+{"id": "example", "title": "예제 워커", "group": "페이로드", "order": 40, "worker_types": ["example_worker"], "icon": "info"}

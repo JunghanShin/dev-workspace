@@ -1,0 +1,25 @@
+{
+  "_comment": "송출 한 항목(StreamConfig)의 설정 스키마. 장치 워커의 worker-types.json config_schema 안 streams 목록의 fields에 이 내용을 그대로 넣는다(형식: workspace design.md 6.10). default가 없는 칸은 비우면 장치 워커가 기본값을 준다",
+  "fields": [
+    {"key": "name", "label": "이름", "type": "string", "required": true, "pattern": "^[A-Za-z0-9_-]{1,32}$", "hint": "워커 안에서 고유. 명령·지표에 쓰임"},
+    {"key": "autostart", "label": "워커와 함께 시작", "type": "bool", "default": true, "hint": "끄면 필요할 때 송출 시작 버튼으로"},
+    {"key": "url", "label": "보낼 주소", "type": "string", "required": true, "format": "stream_url", "placeholder": "rtsp://127.0.0.1:8554/이름"},
+    {"key": "mode", "label": "처리", "type": "enum", "options": [["relay", "그대로 보냄"], ["encode", "다시 압축(NVENC)"]], "hint": "비우면 장치 워커 기본값"},
+    {"key": "bitrate_kbps", "label": "비트레이트", "type": "int", "unit": "kbps", "min": 100, "max": 50000, "default": 1500, "hint": "다시 압축할 때"},
+    {"key": "overlay_time", "label": "시각 표시", "type": "bool", "default": false, "hint": "영상에 보드 시각을 그림(다시 압축할 때)"},
+    {"key": "transport", "label": "보내는 방식", "type": "enum", "options": [["rtsp_udp", "RTSP UDP"], ["rtsp_tcp", "RTSP TCP"], ["srt", "SRT"]], "default": "rtsp_udp"},
+    {"key": "fps", "label": "fps", "type": "int", "min": 1, "max": 240, "default": 30, "advanced": true},
+    {"key": "input", "label": "입력", "type": "enum", "options": [["rtsp", "카메라 RTSP"], ["framebus", "프레임 버스"]], "advanced": true, "hint": "비우면 장치 워커 기본값"},
+    {"key": "source", "label": "입력 주소", "type": "string", "advanced": true, "hint": "비우면 장치 워커 기본값"},
+    {"key": "source_codec", "label": "입력 코덱", "type": "enum", "options": ["h264", "h265"], "default": "h264", "advanced": true},
+    {"key": "keyframe_sec", "label": "키프레임 간격", "type": "number", "unit": "s", "min": 0.1, "max": 60, "default": 2, "advanced": true},
+    {"key": "intra_refresh_sec", "label": "인트라 리프레시", "type": "number", "unit": "s", "min": 0, "max": 10, "default": 0.5, "advanced": true},
+    {"key": "pkt_size", "label": "패킷 크기", "type": "int", "unit": "byte", "min": 188, "max": 9000, "default": 1200, "advanced": true},
+    {"key": "srt_port", "label": "SRT 포트", "type": "int", "min": 1, "max": 65535, "default": 8890, "advanced": true},
+    {"key": "srt_latency_ms", "label": "SRT 지연", "type": "int", "unit": "ms", "min": 20, "max": 10000, "default": 300, "advanced": true},
+    {"key": "retry_sec", "label": "다시 시도 간격", "type": "number", "unit": "s", "min": 0.5, "max": 60, "default": 2, "advanced": true},
+    {"key": "stall_sec", "label": "멈춤 판정", "type": "number", "unit": "s", "min": 1, "max": 120, "default": 5, "advanced": true},
+    {"key": "ffmpeg", "label": "ffmpeg 경로", "type": "string", "default": "ffmpeg", "advanced": true},
+    {"key": "gst_launch", "label": "gst-launch 경로", "type": "string", "default": "gst-launch-1.0", "advanced": true}
+  ]
+}

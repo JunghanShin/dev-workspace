@@ -1,0 +1,9 @@
+build/
+workers/*/build/
+__pycache__/
+*.pyc
+*.tar
+.vscode/
+install/mediamtx/mediamtx
+dev/board.env
+dist/

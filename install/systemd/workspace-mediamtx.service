@@ -1,0 +1,16 @@
+# 워크스페이스 로컬 미디어 서버(MediaMTX). install_mediamtx.sh가 @...@를 채워 설치한다.
+# 워크스페이스(workspace.service)와 독립이다. 워크스페이스를 다시 시작해도 영상 수신·원격 중계는 유지된다.
+[Unit]
+Description=Workspace local media server (MediaMTX: workers -> local view + relay to remote)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@WORKSPACE_USER@
+ExecStart=@WORKSPACE_ROOT@/install/mediamtx/mediamtx @WORKSPACE_DATA@/config/mediamtx.yml
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

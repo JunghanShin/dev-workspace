@@ -1,0 +1,16 @@
+{
+  "label": "가짜 장치(시험)",
+  "config": {
+    "sim": {
+      "cmd": "@EXEC_DIR@/example-sim 0"
+    },
+    "source": {
+      "rate_hz": 10,
+      "size": 256
+    },
+    "processor": {
+      "window": 50
+    },
+    "peer": {}
+  }
+}

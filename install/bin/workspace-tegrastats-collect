@@ -1,0 +1,21 @@
+#!/bin/bash
+# root로 tegrastats를 돌려 최신 한 줄만 파일에 둔다 (design.md 6.9).
+# 메모리 대역폭(EMC), 전용 HW(NVENC·VIC·DLA 등) 클럭은 root로 실행해야 나온다.
+# 시스템 모니터 sysmon(일반 계정)이 이 파일을 읽는다. workspace-start.sh가 띄우고 종료한다.
+#
+#   workspace-tegrastats-collect <출력 파일> [interval_ms]
+#
+# 파일은 매번 통째로 바꾼다(임시 파일 → rename). 크기가 늘지 않는다.
+set -uo pipefail
+
+OUT="${1:?usage: workspace-tegrastats-collect <out file> [interval_ms]}"
+INTERVAL="${2:-1000}"
+
+coproc TS { exec tegrastats --interval "$INTERVAL"; }
+trap 'kill "$TS_PID" 2>/dev/null; rm -f "$OUT.tmp"; exit 0' TERM INT
+
+while IFS= read -r line <&"${TS[0]}"; do
+  printf '%s\n' "$line" > "$OUT.tmp" && mv -f "$OUT.tmp" "$OUT"
+done
+echo "workspace-tegrastats-collect: tegrastats exited" >&2
+exit 1

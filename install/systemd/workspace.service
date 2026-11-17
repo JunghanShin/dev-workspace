@@ -1,0 +1,21 @@
+[Unit]
+Description=Workspace (workspace-start.sh: Manager, REST, logger, workers)
+Wants=network-online.target
+After=network-online.target NetworkManager.service
+# 워크스페이스가 없거나 옮겨져 시작 셸을 못 찾으면 실패가 아니라 "건너뜀"으로 끝난다.
+# 부팅은 그대로 진행되고, 경로를 고친 뒤 install_workspace.sh를 다시 실행하면 된다
+ConditionPathExists=@WORKSPACE_ROOT@/workspace-start.sh
+
+[Service]
+Type=simple
+# bash로 직접 실행: 복사 중 실행 권한이 빠져도 동작한다
+ExecStart=/bin/bash @WORKSPACE_ROOT@/workspace-start.sh --service
+# 종료 신호는 시작 셸에만 보낸다. 시작 셸이 REST → Manager(워커 정리) → logger 순서로 내린다.
+# TimeoutStopSec 안에 끝나지 않으면 남은 프로세스 전체를 SIGKILL
+KillMode=mixed
+TimeoutStopSec=45
+# 자동 재실행 없음. 멈추면 @WORKSPACE_ROOT@/workspace-start.sh로 다시 시작
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

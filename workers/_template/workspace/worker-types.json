@@ -1,0 +1,149 @@
+{
+  "example_worker": {
+    "exec": [
+      "@WORKER_EXEC@"
+    ],
+    "live_keys": [
+      "source.rate_hz",
+      "source.amplitude",
+      "processor.window"
+    ],
+    "start_timeout_sec": 10,
+    "watchdog_sec": 5,
+    "stop_timeout_sec": 6,
+    "config_schema": {
+      "groups": [
+        {
+          "title": "데이터 만들기(source)",
+          "hint": "예제: 주기마다 숫자 배열을 만들어 데이터 버스·스트림으로 내보냄",
+          "fields": [
+            {
+              "key": "rate_hz",
+              "label": "생성 주기",
+              "type": "number",
+              "unit": "Hz",
+              "min": 0.1,
+              "max": 1000,
+              "default": 10,
+              "hint": "바로 적용(다시 시작 없음)"
+            },
+            {
+              "key": "size",
+              "label": "표본 값 개수",
+              "type": "int",
+              "min": 1,
+              "max": 4096,
+              "default": 256
+            },
+            {
+              "key": "amplitude",
+              "label": "진폭",
+              "type": "number",
+              "min": 0,
+              "max": 1000000,
+              "default": 1,
+              "hint": "바로 적용"
+            },
+            {
+              "key": "bus_slots",
+              "label": "데이터 버스 슬롯",
+              "type": "int",
+              "min": 2,
+              "max": 64,
+              "default": 8,
+              "advanced": true,
+              "hint": "받는 쪽이 느릴 때 쌓일 수 있는 수"
+            },
+            {
+              "key": "bus_socket",
+              "label": "데이터 버스 소켓",
+              "type": "string",
+              "advanced": true,
+              "empty_label": "기본 위치(<데이터>/run/frames/<id>.sock)"
+            },
+            {
+              "key": "helper_cmd",
+              "label": "자식 프로세스",
+              "type": "string",
+              "advanced": true,
+              "empty_label": "없음",
+              "hint": "외부 프로그램을 띄우고 감시하는 예(예: sleep 3600). 죽으면 2초 뒤 다시"
+            }
+          ],
+          "section": "source"
+        },
+        {
+          "title": "워커 안 처리(processor)",
+          "hint": "source의 포트로 받은 표본을 최근 N개 창으로 처리",
+          "fields": [
+            {
+              "key": "window",
+              "label": "창 크기",
+              "type": "int",
+              "min": 2,
+              "max": 10000,
+              "default": 50,
+              "hint": "바로 적용"
+            }
+          ],
+          "section": "processor"
+        },
+        {
+          "title": "워커 간 받기(peer)",
+          "hint": "다른 워커의 데이터 버스·스트림을 받고 명령을 보냄. 비우면 꺼짐",
+          "fields": [
+            {
+              "key": "peer",
+              "label": "상대 워커",
+              "type": "string",
+              "format": "worker_id",
+              "empty_label": "없음(꺼짐)"
+            },
+            {
+              "key": "bus_socket",
+              "label": "상대 데이터 버스 소켓",
+              "type": "string",
+              "advanced": true,
+              "empty_label": "상대 id의 기본 위치"
+            }
+          ],
+          "section": "peer"
+        },
+        {
+          "title": "워커 공통",
+          "advanced": true,
+          "hint": "워커 호스트(libworker) 설정",
+          "fields": [
+            {
+              "key": "watchdog_sec",
+              "label": "자체 워치독",
+              "type": "number",
+              "unit": "s",
+              "min": 1,
+              "max": 60,
+              "default": 3
+            },
+            {
+              "key": "stop_timeout_sec",
+              "label": "종료 대기",
+              "type": "number",
+              "unit": "s",
+              "min": 1,
+              "max": 60,
+              "default": 5
+            },
+            {
+              "key": "thread_stall_sec",
+              "label": "스레드 멈춤 판정",
+              "type": "number",
+              "unit": "s",
+              "min": 0.5,
+              "max": 60,
+              "default": 2
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

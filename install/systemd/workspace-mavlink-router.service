@@ -1,0 +1,17 @@
+# 워크스페이스 MAVLink 라우터 (FC <-> Jetson <-> 서버). install_mavlink_router.sh가 @...@를 채워 설치한다.
+# 워크스페이스(workspace.service)와 독립이다. 워크스페이스가 내려가도 FC 링크는 유지된다.
+[Unit]
+Description=Workspace MAVLink router (FC <-> Jetson <-> server)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@WORKSPACE_USER@
+SupplementaryGroups=dialout
+ExecStart=@WORKSPACE_ROOT@/install/bin/mavlink-routerd -c @WORKSPACE_DATA@/config/mavlink-router.conf -d @WORKSPACE_DATA@/config/mavlink-router.d
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

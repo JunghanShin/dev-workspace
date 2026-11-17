@@ -1,0 +1,21 @@
+{
+  "_comment": "processor 모듈 설정 칸 원본(화면 설정 폼 조각, 워크스페이스 design.md 6.10). workspace/worker-types.json config_schema에 묶음마다 \"section\": \"processor\"를 붙여 옮긴다(같은지 manager/test_schema.py가 확인)",
+  "section": "processor",
+  "groups": [
+    {
+      "title": "워커 안 처리(processor)",
+      "hint": "source의 포트로 받은 표본을 최근 N개 창으로 처리",
+      "fields": [
+        {
+          "key": "window",
+          "label": "창 크기",
+          "type": "int",
+          "min": 2,
+          "max": 10000,
+          "default": 50,
+          "hint": "바로 적용"
+        }
+      ]
+    }
+  ]
+}

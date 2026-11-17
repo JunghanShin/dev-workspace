@@ -1,0 +1,26 @@
+{
+  "_comment": "peer 모듈 설정 칸 원본(화면 설정 폼 조각, 워크스페이스 design.md 6.10). workspace/worker-types.json config_schema에 묶음마다 \"section\": \"peer\"를 붙여 옮긴다(같은지 manager/test_schema.py가 확인)",
+  "section": "peer",
+  "groups": [
+    {
+      "title": "워커 간 받기(peer)",
+      "hint": "다른 워커의 데이터 버스·스트림을 받고 명령을 보냄. 비우면 꺼짐",
+      "fields": [
+        {
+          "key": "peer",
+          "label": "상대 워커",
+          "type": "string",
+          "format": "worker_id",
+          "empty_label": "없음(꺼짐)"
+        },
+        {
+          "key": "bus_socket",
+          "label": "상대 데이터 버스 소켓",
+          "type": "string",
+          "advanced": true,
+          "empty_label": "상대 id의 기본 위치"
+        }
+      ]
+    }
+  ]
+}
