@@ -2,12 +2,12 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.34 |
+| 문서 버전 | 0.35 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
 | 현장 값 | 주소·장비 구성 등은 프로필(`install/profiles/<이름>/`)에. 이 문서는 `<보드 주소>`처럼 자리만 쓴다 |
-| 상태 | 구현 반영(0.34 기준 코드와 일치). 미결은 15장 |
+| 상태 | 구현 반영(0.35 기준 코드와 일치). 미결은 15장 |
 
 절 번호는 코드 주석이 참조하므로(예: "design.md 9.5") 바꾸지 않는다. 변경 이력은 부록 B.
 
@@ -376,6 +376,8 @@ Manager API(워커 시작·정지·설정·상태)를 쓰는 워커. 외부 운�
 | 멈춤 감지 | 스레드는 루프마다 `beat()`. 호스트는 `ThreadWatch::all_alive()`일 때만 워치독·heartbeat를 갱신한다. 한 스레드라도 멈추면 워커가 끝나고 Manager가 다시 띄운다 |
 | 스레드 실패 | 예외로 끝나면 `failed()` → 호스트가 exit 4 |
 
+실행 구조는 개발자가 정한다. 위 규칙을 손으로 엮지 않고 쓰고 싶으면 템플릿의 제공 도구(입력·출력 단계, 처리 시간 예산, 우선순위)를, 구조와 상관없이 항상 켜지는 안전망(예외 잡기, 루프 시간, 재시작 간격)은 6.6.9.
+
 #### 6.6.2 텔레메트리 발행 (발행-구독)
 
 명령은 요청-응답(명령 소켓, 9.6), 계속 바뀌는 텔레메트리는 발행-구독(스트림 소켓, 9.7). 화면이 상태 전체를 폴링하면 보는 화면 수만큼 워커 부담이 늘어서 쓰지 않는다.
@@ -466,7 +468,7 @@ workers/_template/
 ├─ test/test_worker.cpp      워커 통합 시험: 실행 파일 둘(a, b peer=a) — 명령·포트·데이터 버스·구독·명령 전달·다시 붙음, 가짜 장치 모드
 ├─ tools/example-sim.cpp     가짜 장치 프로그램 틀(가짜 장치 모드 6.6.8, 프리셋 sim)
 ├─ lib/
-│  ├─ libworker/             실행 뼈대 원본(0.8.0): Host·Module·WorkerThread·BoundedQueue·
+│  ├─ libworker/             실행 뼈대 원본(0.9.0): Host·Module·WorkerThread·BoundedQueue·
 │  │                         CommandServer·Publisher·ThreadWatch·config 도우미·자식 프로세스,
 │  │                         워커 간 통신 Subscriber·CommandClient(peer.hpp), manager_call   ②
 │  │  └─ src/workspace/      워크스페이스 연동(heartbeat, 데이터 폴더 경로)                  ③
@@ -573,6 +575,87 @@ dev/new-worker.sh [--video] <폴더> [type]    틀 복사·워커 이름 바꾸�
 
 **데이터 버스 녹화·재생**(가짜 장치를 보완): 가짜 장치는 장치 프로토콜을 흉내 내고, 녹화·재생은 장치 뒤 실제 데이터를 되풀이한다. 워커 `workers/replay`(type `replay_worker`, 개발 도구)가 다른 워커의 데이터 버스를 받아 `<데이터>/records/framebus/<이름>/`에 저장하고(`replay.record_start {source}`), 원래 시간 간격(배속·반복)대로 자기 데이터 버스로 다시 낸다(`replay.play_start {name, speed, loop}`). 받는 워커는 설정 상대 워커(peer)를 replay 워커 id로 바꾸면 장치 대신 녹화를 받는다. 형식·명령은 그 워커의 design.md.
 
+#### 6.6.9 안전망과 제공 도구 (libworker 0.9.0)
+
+워커 구조(스레드를 몇 개 어떻게 둘지, 큐 크기, 우선순위, 잠금, 모듈 나누기)는 **개발자가 정한다.** 워크스페이스는 워커를 관리하는 데 꼭 필요한 것만 요구하고(①), 구조와 상관없이 뒤에서 받쳐 주며(②), 필요한 개발자가 골라 쓰는 부품을 준다(③).
+
+| 층 | 성격 | 개발자가 할 일 |
+|---|---|---|
+| ① 필수(워커 계약) | 워크스페이스가 워커를 관리하려면 꼭 있어야 하는 것(9장) | 지킨다(libworker 호스트를 쓰면 저절로) |
+| ② 기본 안전망 | 호스트·Manager가 항상 켜 두는 것. 워커 구조에 관여하지 않는다 | 없음(원하면 `safe_state()`만 채움) |
+| ③ 제공 도구 | 쓰면 편하고 안전해지는 부품·본보기. 안 써도 된다 | 필요하면 골라 씀 |
+| 개발자 몫 | 워크스페이스가 정하지 않는다 | 실행 구조 설계 |
+
+**① 필수 (워커 계약, 지금과 같음)**
+
+| 항목 | 내용 |
+|---|---|
+| 시작·살아 있음 | READY, 1초 heartbeat(9.5) |
+| 자체 워치독 | 호스트 루프가 `watchdog_sec` 동안 돌지 않으면 스스로 끝난다 |
+| 스레드 멈춤 감지 | 스레드를 쓰면 `host.watch()`에 등록하고 루프마다 `beat()`. 하나라도 `thread_stall_sec` 동안 beat가 없으면 워치독을 갱신하지 않는다(멈춘 워커는 끝나고 다시 뜬다) |
+| 종료 | SIGTERM에 정리하고 `stop_timeout_sec` 안에 끝냄. exit 코드: 0 정상, 1 설정 오류, 3 시작 실패, 4 실패 |
+| 스레드 이름 | `<모듈>.<역할>`(시스템 모니터에 보임) |
+
+**② 기본 안전망 (항상 켜짐)**
+
+| 항목 | 하는 일 |
+|---|---|
+| 예외 잡기 | 모듈의 모든 진입점(`on_poll`, `on_timer`, `handle`, `status`, `metrics`) 예외를 호스트가 잡아 세고 로그. 명령 하나의 예외는 그 명령에 오류로 응답(지금과 같음). `on_timer`·`on_poll`이 연달아 3번 예외면 상태가 깨졌다고 보고 정상 절차로 exit 4. 꼭 끝내야 하는 오류는 워커가 `throw worker::Fatal` |
+| 루프 시간 | 호스트 루프 한 번 걸린 시간을 재서 지표 `host_loop_ms`(1초 최대). `watchdog_sec`의 절반을 넘으면 경고 로그(죽기 전에 보이게) |
+| 안전 상태 훅 | `Module::safe_state()`(기본은 아무것도 안 함). 정상 종료와 스스로 끝내는 경로(exit 4, 멈춤 감지)에서 끝나기 전에 부른다. 워커가 장치를 안전하게 둘 기회(정지 명령 등). 짧게 |
+| 재시작 간격 | Manager가 다시 띄우는 간격을 2 s에서 두 배씩 최대 30 s까지 늘림(1분 정상이면 처음으로) |
+| 연속 실패 | 5분 안에 5번 죽으면 상태 `crash_loop: true`, 이벤트, 화면 배지 |
+| 스레드 정보 | 시스템 모니터가 스레드마다 우선순위(정책·값)·CPU 고정·사용률을 보드에서 읽어 보여 줌(워커가 할 일 없음) |
+
+**③ 제공 도구 (골라 씀)**
+
+| 도구 | 쓰면 얻는 것 | 쓰는 법 |
+|---|---|---|
+| 입력 단계 `host.input<T>(이름, 읽기, 처리)` | 스레드 + 큐 + 대기 상한 + 멈춤 감지 + 밀림·버림·오류 지표를 한 번에. 읽기 예외는 세고 잠깐 쉰 뒤 계속 | `읽기(in)`: 장치에서 한 번 읽고 `in.push(항목)`, 넘겨받은 `wait_ms` 안에 돌아옴. `처리(항목, 시각)`: 호스트 루프에서 상태 갱신 |
+| 출력 단계 `host.output<T>(이름, 쓰기)` | 스레드 + 큐(넘치면 거절·버림) + 대기 상한 + 지표. `push`는 막히지 않고 성공 여부를 돌려줌 | `쓰기(항목)`: 장치에 한 번 씀 |
+| 처리 시간 예산 | 입력 단계 처리를 루프 한 번에 `loop_budget_ms`까지만, 남으면 다음 차례 | 설정 `loop_budget_ms`(입력 단계를 쓸 때) |
+| 스레드 우선순위·CPU | 실시간(SCHED_FIFO)·nice·CPU 고정. 권한이 없으면 경고하고 보통으로 계속(죽지 않음), 상태에 적용 결과 | 단계 설정, 또는 `worker::apply_thread_options(스레드, 옵션)`으로 직접 만든 스레드에도 |
+| 우선순위 상속 잠금 `worker::Mutex` | 실시간 스레드와 잠금을 나눌 때 우선순위 뒤집힘 방지 | `std::mutex` 대신 |
+| 워커별 우선순위 | Manager가 워커를 띄울 때 프로세스 그룹에 nice·CPU 적용 | worker type 또는 워커 설정 맨 위 `"process": {"nice": -5, "cpu": [4,5]}` |
+| ThreadSanitizer | `dev/check.sh`가 워커 시험을 TSan 빌드로도 돌려 데이터 경합을 찾음(기본으로 켬) | 끄려면 워커 `CMakeLists.txt`에서 시험을 TSan 제외로 표시 |
+| 장애 주입 | 시험 빌드에서만 켜지는 호스트 명령 `__fault`(환경 `WORKER_FAULT_INJECTION=1`): 단계·스레드 멈추기, 처리 예외, 입력 폭주, 출력 막기 | 템플릿 워커 시험이 본보기. 필요한 것만 복사 |
+
+단계 설정(맨 위 호스트 키 `stages`, 모두 선택):
+
+```json
+"stages": {
+  "<모듈>.<역할>": {"queue": 1024, "overflow": "drop_oldest", "wait_ms": 100,
+                    "priority": "normal", "rt_priority": 50, "nice": 0, "cpu": [2]}
+},
+"loop_budget_ms": 50
+```
+
+| 키 | 기본 | 뜻 |
+|---|---|---|
+| `queue` | 입력 1024, 출력 256 | 큐 크기 |
+| `overflow` | 입력 `drop_oldest`, 출력 `reject` | 넘칠 때: 오래된 것 버림 / 새것 거절(실패 응답) / 새것 버림 `drop_newest` |
+| `wait_ms` | 100 | 읽기·쓰기 한 번의 대기 상한(`thread_stall_sec`의 1/10 이하, 설정 검사) |
+| `priority`, `rt_priority`, `nice`, `cpu` | 보통, 50, 0, 전체 | 우선순위·CPU |
+| `loop_budget_ms` | 50 | 입력 단계 처리에 루프 한 번 쓰는 시간 상한 |
+
+단계를 쓰면 지표가 저절로 나온다(단계 이름의 `.`은 `_`로): `<단계>_q`(지금 길이), `<단계>_q_max`(지금까지 최대), `<단계>_lag_ms`(큐에 들어와 처리·쓰기까지, 1초 최대), `<단계>_drops`, `<단계>_errors`. `get_status`의 `runtime` 칸에 단계·스레드 우선순위(요청·실제)·루프 시간·경고가 붙고, 시스템 모니터 워커 보기(6.11)가 그대로 보여 준다. 직접 만든 스레드·큐도 그대로 동작하며, 그때는 스레드와 자원만 보인다.
+
+실시간 우선순위를 쓰려면 서비스(`workspace.service`, 제품 서비스)에 `LimitRTPRIO`가 있어야 한다. 설치가 넣는다(시작 셸이 워커를 일반 계정으로 낮출 때 그대로 넘어감).
+
+**설계 점검 목록 (권장)**: 개발자가 자기 실행 구조를 돌아볼 때 쓰는 질문. 강제가 아니다.
+
+| 위험 | 돌아볼 질문 |
+|---|---|
+| 지연·막힘 | 모든 대기에 상한이 있나? 모든 큐에 크기와 넘칠 때 동작이 정해져 있나? 상태를 가진 루프가 한 번에 오래 붙잡지 않나? |
+| 동시성 | 같은 상태를 여러 스레드가 바꾸지 않나(한 곳이 소유하고 큐로 주고받나)? 잠금이 있다면 짧은가, 잠금 안에서 기다리거나 입출력하지 않나, 순서가 고정인가? |
+| 우선순위 | 늦으면 안 되는 일(장치 받기 등)이 다른 일에 밀리지 않나? 실시간 스레드와 보통 스레드가 잠금을 나누지 않나? |
+| 예외·오류 | 메시지·명령 하나의 오류가 워커 전체를 멈추지 않나? 계속해도 되는 오류와 끝내야 하는 오류가 구분되나? |
+| 자원 | 메모리·파일·디스크가 끝없이 늘지 않나(보관 수·용량 상한)? |
+| 재시작 | 다시 떴을 때 빨리 원래 상태로 돌아오나(장치 다시 연결, 설정 다시 요청)? |
+| 바깥 영향 | 워커가 죽으면 장치는 어떤 상태가 되나? 안전한가? |
+
+**옮기는 순서:** libworker 0.9.0(② 안전망, ③ 도구) + 점검(TSan) + Manager(재시작 간격·연속 실패·워커별 우선순위) + 시스템 모니터 워커 보기 → 템플릿 예제·replay로 검증 → 프로젝트 워커는 ②를 저절로 받고, ③은 각 워커 설계 때 고른다. libworker는 워커마다 사본이라 사본을 맞추고 확정본을 다시 만든다.
+
 ### 6.7 프레임 버스 (데이터 버스)
 
 생산 워커가 소유하는 대용량 데이터 공유 통로. 버퍼는 공유하고 알림만 소켓으로 보낸다. 구현 `lib/libframebus`: 지금 버퍼는 CPU 공유 메모리(memfd). NvBufSurface(DMA-buf)로 바꿔도 인터페이스는 같다.
@@ -623,7 +706,7 @@ Manager /proc 측정 ───────┘                                   
 |---|---|
 | 워커 지표 | heartbeat의 1초 지표(`<모듈>_<이름>`) |
 | 워커별 자원 | Manager가 1초마다 프로세스 그룹 CPU·메모리·프로세스·스레드 수(8.2 `resources`) |
-| 워커 내부 | REST `/workers/{id}/tasks`: 프로세스·스레드와 스레드별 CPU(화면에서 워커 줄을 펼칠 때만 측정) |
+| 워커 내부 | REST `/workers/{id}/tasks`: 프로세스·스레드와 스레드별 CPU, 스레드 우선순위(정책·값)·CPU 고정(시스템 모니터 워커 보기를 열었을 때만 측정). 루프 시간·안전망과 (단계 도구를 쓰면) 단계·큐는 워커 `get_status`의 `runtime`(6.6.9) |
 | 시스템 모니터 | 기본 탑재 워커 `system-monitor`(`monitor/sysmon.py`, Python). root 수집기가 쓴 tegrastats 한 줄 → CPU·GPU·메모리·온도·전력·전용 HW 지표. tegrastats가 없으면(PC) 사용 안 함 |
 | `workspace-logger` | 상태·지표·명령 이력을 같은 시간축으로 부팅 단위 파일에 기록 |
 | 지난 지표 | `logger/workspace_history.py`가 기록을 기간·칸 평균으로 줄임(REST `/history`, 화면 그래프·CSV) |
@@ -687,6 +770,15 @@ workers/<워커>/workspace/panel/       워커 패널(id = panel.json "id")
 | 패널이 쓰는 경로 | `ctx.api(method, path)` → `/api/board/<REST 경로>`, `/api/remote/<이름>`(보드 읽기), `/api/ui`(제목·갱신 주기·영상 주소 틀) |
 | 워커 패널 | 머리에 `workerControls`(시작/정지), 설정은 `workerSettings`(자동 시작 + 스키마 폼) 하나. 실시간 값은 스트림(SSE) 또는 `get_status` |
 | 워커 없이 | 패널이 없는 워커도 시스템 모니터 워커 목록에서 시작·정지·설정·내부(프로세스·스레드)를 본다 |
+
+**시스템 모니터 보기 구성:** 패널 머리 제목 옆에 드롭다운 `보기: [보드 전체 ▾]`(공통 부품 `ui.select`, 항목이 많아도 한 줄). 목록은 맨 위 `보드 전체`, 그 아래 워커(상태 점, 오류·재시작 중인 워커 먼저, 나머지 이름순). 고른 보기는 주소에 남긴다(`?view=<워커 id>`, 새로고침·공유해도 같음). 보드 전체의 워커 목록에서 워커를 누르면 그 워커 보기로 간다.
+
+| 보기 | 내용 |
+|---|---|
+| 보드 전체 | 지금 화면: 요약 숫자, CPU 코어, 자원, 추이 그래프, 워커 목록(요약 한 줄씩, 누르면 워커 보기) |
+| 워커 | 요약(상태, CPU, 메모리, 루프 시간, 재시작, 연속 실패 배지), 스레드·우선순위(스레드마다 우선순위 요청·적용, CPU, 사용률, 마지막 beat), 단계·큐(채움, 최대, 밀림, 버림, 오류), 안전망(잡은 예외, 경고, 연속 실패, 죽었을 때 장치 상태), 추이 그래프(CPU·메모리·지표, 실시간·1·6·24시간), 자식 프로세스 |
+
+어떤 워커든 스레드·우선순위·자원·루프 시간·안전망은 보인다. 단계·큐 칸은 단계 도구(6.6.9 ③)를 쓴 워커에만 나온다.
 
 공용 패널:
 
@@ -754,11 +846,12 @@ workers/<워커>/workspace/panel/       워커 패널(id = panel.json "id")
 
 ```json
 {
-  "id": "example", "type": "example_worker", "autostart": false, "preset": "default", "temp": false, "libworker": "0.8.0", "sim": false,
+  "id": "example", "type": "example_worker", "autostart": false, "preset": "default", "temp": false, "libworker": "0.9.0", "sim": false,
   "exec": "/home/user/dev-workspace/workers/example/workspace/bin/example-worker",
   "desired_state": "running", "actual_state": "running",
   "pid": 3884, "last_exit_code": null, "last_signal": null, "last_error": null,
-  "restart_count": 0, "started_at": "2026-11-13T10:00:00+09:00",
+  "restart_count": 0, "crash_loop": false, "restart_in_s": null, "process": {"nice": -5},
+  "started_at": "2026-11-13T10:00:00+09:00",
   "last_heartbeat_ms_ago": 120, "progress": 1834,
   "config_version": 4, "applied_version": 4,
   "metrics": {"source_seq": 1834, "peer_link": 1},
@@ -772,6 +865,7 @@ workers/<워커>/workspace/panel/       워커 패널(id = panel.json "id")
 - `config_version` ≠ `applied_version`이면 새 설정이 아직 적용되지 않음
 - `metrics`: 최근 heartbeat 지표, `resources`: 프로세스 그룹 합계(`cpu_pct`는 코어 1개 = 100). 실행 중이 아니면 `null`
 - `peers`: 설정에서 `format: worker_id`인 칸 `{설정 경로: 워커 id}`(빈 칸은 빠짐, 6.6.7)
+- `crash_loop`: `restart.crash_window_s` 안에 `restart.crash_count`번 넘게 죽음(6.6.9). `restart_in_s`: 재시작 대기 중이면 남은 초. `process`: worker type `process`로 적용을 요청한 nice·CPU
 
 ### 8.3 System status
 
@@ -833,7 +927,7 @@ stdout/stderr는 Manager가 `<데이터>/state/logs/{id}.log`로 직접 리다�
 | 식별 | `SCM_CREDENTIALS`의 pid. 메시지 id는 보조 |
 
 ```text
-READY=1 id=example libworker=0.8.0
+READY=1 id=example libworker=0.9.0
 WATCHDOG=1 id=example progress=1834 config_version=4 source_seq=1834 peer_link=1
 ```
 
@@ -1068,7 +1162,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 
 **플랫폼 조건(워크스페이스 밖):** 제품 묶음은 애플리케이션 층이다. 올라갈 장비에는 JetPack 6.2.x(L4T R36), systemd, `/opt/<이름>`과 쓰기 가능한 데이터 폴더만 있으면 된다(장치 접근 udev·그룹은 묶음의 `install.sh`가 처리). 디스크 암호화·보안 부팅·읽기 전용 루트·A/B 갱신 같은 OS·보드 층 보호는 이 저장소가 아니라 보드 이미지 저장소(이미지 빌드·플래시 스크립트)에서, 고객 요구나 양산 단계에 따로 한다.
 
-## 12. 현재 상태 (0.34)
+## 12. 현재 상태 (0.35)
 
 | 영역 | 상태 |
 |---|---|
@@ -1191,6 +1285,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.35 | **안전망과 제공 도구(6.6.9), 시스템 모니터 보기(6.11).** libworker 0.9.0: 기본 안전망(모든 진입점 예외 잡기, 연달아 3번·`worker::Fatal`이면 exit 4, 루프 시간 `host_loop_ms`, 멈춤이면 워치독보다 먼저 `safe_state()` 뒤 exit 4, `get_status` `runtime`), 제공 도구(입력·출력 단계 `host.input`/`host.output`과 설정 `stages`·`loop_budget_ms`, `ThreadOptions` 실시간·nice·CPU, `worker::Mutex` 우선순위 상속, `Overflow::DropNewest`, 장애 주입 `__fault`), 실행 중 스레드 등록 경합 수정. Manager: 재시작 간격 늘림(최대 30 s), 연속 실패 `crash_loop`, worker type `process`(nice·CPU). REST: 스레드 정책·rt·nice·CPU 고정. 화면: 시스템 모니터 보기 드롭다운(보드 전체 / 워커: 스레드·우선순위, 단계·큐, 안전망, 추이, 자식 프로세스), 공통 부품 `select`. 점검: 모든 워커 시험을 ThreadSanitizer로도. 서비스 `LimitRTPRIO`·`LimitNICE`. 템플릿 `source.gen`을 입력 단계로 |
 | 0.34 | **공개 플랫폼 정리.** 분야 전용 부품을 플랫폼에서 뺌: MAVLink 라우터(설치·서비스·설정·문서·FC 시험)는 그것을 쓰는 장치 워커가 맡는다(워커 `install.sh`). 프로필은 정해진 파일 목록 대신 폴더 맨 위의 설정 파일을 모두 넣는다(워커가 쓰는 설정도 함께, 6.12). 운용 인터페이스 예시를 일반 용어로. README를 워크스페이스 → 워커 순서로, 제품 빌드·프로젝트 저장소로 쓰기 절 |
 | 0.33 | **미결 없음(15장), 깃 기능 없앰, 전원 모드.** 워크스페이스는 깃에 쓰지 않는다(깃에 올리기·`/system/git` 없앰, 커밋은 사용자, 6.3.1). 설치가 전원 모드를 맞춤: 개발 보드 MAXN_SUPER(`install_workspace.sh --power-mode`), 제품은 빌드에서 고른 모드(`product.json` `power_mode`, 모달, `--power-mode`)를 `install.sh`가 맞춤(`install/bin/workspace-power-mode`). 예전 미결은 워커 쪽으로 넘기거나 지움 |
 | 0.32 | **화면 제품 빌드와 제품 기본 화면(11.4).** 설정 > 워크스페이스 [제품 빌드]: 점검 → 진행(진행 막대·로그·취소) → 내려받기 모달, 보드가 스스로 컴파일(`build_product.py --local`, `--check`, `--profiles`, `--replace`, 진행 줄), REST `/system/product-build`(제품 모드 404), 마지막 묶음 하나 `<데이터>/dist/`. 제품 화면은 기본만: 시스템 모니터 + 워커 패널, 진단·설정 패널은 묶음에서 뺌, kit.js 제품 모드(`setProduct`, `settingsButton`: 설정 창·프리셋·시작/정지·자동 시작 없음). 고객용 화면은 REST로 별도 |

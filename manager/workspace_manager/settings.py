@@ -29,8 +29,14 @@ DEFAULTS = {
         "subscriber_timeout_s": 5.0,
     },
     "restart": {
-        # 실패 시 이 간격으로 계속 재시작. 횟수 제한 없음 (멈추려면 외부에서 stop)
+        # 실패 시 계속 재시작(횟수 제한 없음, 멈추려면 외부에서 stop). 간격은 interval_s에서 연달아 실패할 때마다
+        # 두 배씩 max_interval_s까지. healthy_s 넘게 돌았으면 처음으로. crash_window_s 안에 crash_count번 죽으면
+        # 상태 crash_loop(화면 배지·기록). design.md 6.6.9 ②
         "interval_s": 2.0,
+        "max_interval_s": 30.0,
+        "healthy_s": 60.0,
+        "crash_window_s": 300.0,
+        "crash_count": 5,
     },
     "worker_defaults": {
         "start_timeout_sec": 10,

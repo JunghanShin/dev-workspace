@@ -22,7 +22,12 @@
 //   모듈 이름 칸({"<모듈>": {...}}). 그 밖의 키는 설정 오류(exit 1)
 //
 // 규칙: 모듈의 on_*·handle은 짧게 끝낸다(호스트 루프 하나를 같이 쓴다). 기다리거나 무거운 일은 모듈이
-// start()에서 WorkerThread(host.watch())와 BoundedQueue로 따로 돌린다. 스레드 이름은 "<모듈>.<역할>"(15자까지).
+// start()에서 WorkerThread(host.watch())와 BoundedQueue로 따로 돌리거나, 제공 도구 host.input/host.output(입력·출력
+// 단계, worker/stage.hpp)을 쓴다. 스레드 이름은 "<모듈>.<역할>"(15자까지). 실행 구조는 개발자가 정한다(design.md 6.6.9).
+//
+// 기본 안전망(항상 켜짐, design.md 6.6.9 ②): 모듈의 모든 진입점 예외를 호스트가 잡는다(명령 하나는 오류 응답,
+// on_timer·on_poll이 연달아 3번이면 safe_state() 뒤 exit 4, worker::Fatal은 바로), 루프 한 번 시간 지표 host_loop_ms,
+// 스레드가 멈추면 safe_state() 뒤 exit 4.
 #pragma once
 
 #include <poll.h>
@@ -37,6 +42,7 @@
 #include <vector>
 
 #include "worker/config.hpp"
+#include "worker/stage.hpp"
 #include "worker/thread.hpp"
 
 namespace worker {
@@ -100,6 +106,9 @@ public:
     virtual uint64_t progress() const { return 0; }
     // 되돌릴 수 없는 실패(스레드 예외 등). 참이면 호스트가 exit 4로 끝내고 Manager가 다시 띄운다
     virtual bool failed(std::string* why) const { (void)why; return false; }
+    // 안전 상태(기본 안전망): 정상 종료와 스스로 끝내는 경로(exit 4, 스레드 멈춤)에서 stop 전에 한 번 부른다.
+    // 장치를 안전하게 둘 기회(정지 명령 등). 짧게. 기본은 아무것도 안 함
+    virtual void safe_state() {}
     virtual void stop() {}
 
 protected:
@@ -137,6 +146,30 @@ public:
         for (const auto& k : keys) legacy_[k] = module;
     }
 
+    // ---- 제공 도구: 입력·출력 단계(worker/stage.hpp, design.md 6.6.9 ③). 모듈의 start() 안에서 만든다 ----
+    // 설정 "stages"의 같은 이름 칸이 defaults를 덮어쓴다. 만든 즉시 스레드가 돈다. 모듈이 stop되기 전에 호스트가 정지한다
+    template <class T>
+    Input<T>& input(const std::string& name, typename Input<T>::Reader read, typename Input<T>::Handler handle,
+                    StageOptions defaults = {}) {
+        auto st = std::make_unique<Input<T>>(name, stage_options(name, defaults), *watch_, std::move(read), std::move(handle));
+        Input<T>& ref = *st;
+        add_stage(std::move(st));
+        return ref;
+    }
+    template <class T>
+    Output<T>& output(const std::string& name, typename Output<T>::Writer write, StageOptions defaults = output_defaults()) {
+        auto st = std::make_unique<Output<T>>(name, stage_options(name, defaults), *watch_, std::move(write));
+        Output<T>& ref = *st;
+        add_stage(std::move(st));
+        return ref;
+    }
+    static StageOptions output_defaults() {
+        StageOptions o;
+        o.queue = 256;
+        o.overflow = Overflow::Reject;
+        return o;
+    }
+
     int run(int argc, char** argv);
     // 설정 파일 읽기와 모듈별 칸 나눠 주기(run이 부른다. 시험에서 직접 불러도 된다). 실패하면 false와 error
     bool configure_file(const std::string& path, std::string* error);
@@ -148,6 +181,7 @@ public:
 
     // start() 안에서 쓴다
     ThreadWatch& watch() { return *watch_; }
+    double thread_stall_sec() const { return thread_stall_sec_; }
     const std::string& program() const { return program_; }
     const std::string& id() const { return id_; }
     long config_version() const { return config_version_; }
@@ -165,6 +199,17 @@ public:
 private:
     Json read_config(const std::string& path, std::string* id, long* version);
     Json host_keys(const Json& cfg) const;
+    StageOptions stage_options(const std::string& name, StageOptions defaults) const;
+    void add_stage(std::unique_ptr<Stage> st);
+    void stop_stages_of(size_t module);
+    // 기본 안전망: 모듈 진입점을 부르고 예외를 잡는다. 끝내야 하면 fatal_에 이유
+    template <class F>
+    bool guard(size_t module, const char* where, bool counts_toward_exit, F&& f);
+    void note_error(const std::string& what);
+    void call_safe_state();
+    Json runtime_status() const;
+    std::string host_metrics();
+    bool fault(const Json& args, std::string* error);
 
     std::string program_;
     std::string config_path_;
@@ -185,6 +230,26 @@ private:
     int sim_restarts_ = 0;
     void sim_tick(TimePoint now);
     TimePoint sim_next_start_{};
+
+    // 제공 도구: 단계
+    Json stages_cfg_ = Json::object();
+    int loop_budget_ms_ = 50;
+    std::vector<std::unique_ptr<Stage>> stages_;
+    std::vector<size_t> stage_owner_;  // stages_[i]를 만든 모듈 번호
+    size_t starting_module_ = 0;
+    // 기본 안전망
+    std::string fatal_;                      // 비어 있지 않으면 루프를 끝내고 exit 4
+    std::map<std::string, int> consecutive_errors_;  // "<모듈>.on_timer"·"<모듈>.on_poll"마다 연속 예외
+    uint64_t host_errors_ = 0, budget_overruns_ = 0;
+    int64_t loop_last_us_ = 0, loop_max_us_ = 0, loop_report_max_us_ = 0;
+    std::vector<std::string> warnings_;      // 최근 경고(10개)
+    TimePoint last_loop_warn_{}, stall_since_{};
+    bool safe_state_done_ = false;
+    // 장애 주입(시험 빌드: 환경 WORKER_FAULT_INJECTION=1)
+    bool fault_enabled_ = false;
+    int fault_throw_timer_ = 0, fault_throw_poll_ = 0;
+    bool fault_fatal_ = false;
+    size_t fault_module_ = 0;
 };
 
 // 이 실행 파일이 있는 폴더(/proc/self/exe 기준). 설정의 "@EXEC_DIR@"을 이것으로 바꾼다(가짜 장치 프로그램·라이브러리 경로)

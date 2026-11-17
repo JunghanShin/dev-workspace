@@ -227,7 +227,8 @@ async function loadModule(id) {
 let routeSeq = 0;
 async function route() {
   const seq = ++routeSeq;  // 빠르게 연달아 바뀌면 마지막 것만 그린다
-  const key = decodeURIComponent(location.hash.replace(/^#\//, ""));
+  // "#/<패널>/<워커>?view=..." — 물음표 뒤는 패널이 읽는 값(예: 시스템 모니터 보기), 경로가 아님
+  const key = decodeURIComponent(location.hash.replace(/^#\//, "").split("?")[0]);
   const items = navItems();
   const it = items.find((i) => i.key === key) || (key ? null : items[0]);
   if (current && current.mod.unmount) { try { current.mod.unmount(current.ctx); } catch {} }

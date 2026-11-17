@@ -8,7 +8,8 @@
 #         rest/test_stream.py(텔레메트리 중계)
 # Python 도구: workers/_template/python/test_comm.py(Python ↔ C++ 워커 통신, 틀 빌드 뒤)
 # 빌드: workers/_template + workers/*/ 마다 cmake → ctest, 결과는 /tmp/workspace-check/<워커>-<ON|OFF>
-# 데이터 버스: 틀의 lib/libframebus 단위·스트레스 시험을 ThreadSanitizer로(동시성 검사, design.md 6.7)
+# ThreadSanitizer(제공 도구, design.md 6.6.9 ③): libworker·libframebus 단위·스트레스 시험, 템플릿과 모든 워커의 시험을 TSan 빌드로.
+#   워커가 빼려면 그 시험에 CTest 라벨 no_tsan(set_tests_properties(<시험> PROPERTIES LABELS no_tsan))
 # Jetson(크로스 빌드 + QEMU) 시험은 확정할 때 워커마다 jetson-build --test (design.md 11.3)
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
@@ -57,9 +58,31 @@ if (( ! QUICK )); then
   run_py test_comm "$ROOT/workers/_template/python" test_comm
   # 데이터 버스 동시성: ThreadSanitizer 빌드로 단위·스트레스 시험(경고가 하나라도 있으면 실패).
   # 최신 커널의 넓은 주소 무작위화와 TSan이 맞지 않아 setarch -R(그 실행만 무작위화 끔)로 돌린다
+  tsan="-fsanitize=thread -g -O1"
+  # libworker 단위 시험(스레드·큐·단계·잠금)과 템플릿·모든 워커의 시험(연동 ON). 경고가 하나라도 있으면 실패
+  for target in "$ROOT/workers/_template/lib/libworker" "$ROOT"/workers/*/; do
+    target="${target%/}"
+    [[ -f "$target/CMakeLists.txt" ]] || continue
+    name="$(basename "$target")"
+    [[ "$name" == libworker ]] && name="libworker"
+    step "$name ThreadSanitizer"
+    b="$OUT/$name-tsan"
+    if cmake -S "$target" -B "$b" -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="$tsan" -DCMAKE_C_FLAGS="$tsan"          -DCMAKE_EXE_LINKER_FLAGS="$tsan" -DCMAKE_SHARED_LINKER_FLAGS="$tsan" >"$b.cfg.log" 2>&1        && cmake --build "$b" -j"$(nproc)" >"$b.build.log" 2>&1; then
+      if (cd "$b" && TSAN_OPTIONS="halt_on_error=1 second_deadlock_stack=1" setarch "$(uname -m)" -R             ctest -LE no_tsan --output-on-failure --timeout 300 >"$b.test.log" 2>&1); then
+        echo "$name: OK ($(grep -E "tests passed" "$b.test.log" | tail -1))"
+      else
+        echo "$name: FAILED ($b.test.log)"
+        grep -m8 -E "WARNING: ThreadSanitizer|FAIL|Failed" "$b.test.log"
+        fail+=("$name-tsan")
+      fi
+    else
+      echo "build failed: $b.build.log"
+      grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null
+      fail+=("$name-tsan build")
+    fi
+  done
   step "libframebus ThreadSanitizer"
   b="$OUT/libframebus-tsan"
-  tsan="-fsanitize=thread -g -O1"
   if cmake -S "$ROOT/workers/_template/lib/libframebus" -B "$b" -DCMAKE_BUILD_TYPE=Debug \
        -DCMAKE_CXX_FLAGS="$tsan" -DCMAKE_EXE_LINKER_FLAGS="$tsan" >"$b.cfg.log" 2>&1 \
      && cmake --build "$b" -j"$(nproc)" >"$b.build.log" 2>&1; then

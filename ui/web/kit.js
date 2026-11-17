@@ -13,6 +13,7 @@
 //   segmented(options, onPick)     아이콘 묶음 선택. .set(value)
 //   dialog(title, ...children)     대화창. .show() .close(), 열림 여부 .open
 //   kvList(rows)                   [[이름, 값]...] 작은 키·값 목록
+//   select(options, value, onChange, title)  드롭다운([[값, 이름]...]). 항목이 많은 선택(예: 시스템 모니터 보기). .set(options, value)
 //   media(opts)                    16:9 영상 틀(iframe). .setUrl(url) .setMessage(text), onPoint(xr, yr) 클릭 위치(0~1)
 //   panelHead(opts)                패널 머리: 제목, 배지 자리, 오른쪽 아이콘 버튼 자리
 //   formRows(rows)                 [[이름, 입력 요소, 단위?]...] 설정 폼
@@ -252,6 +253,20 @@ export function dialog(title, ...children) {
   d.show = () => { if (!d.open) d.showModal(); };  // 열려 있는지는 d.open(기본 속성)
   d.dispose = () => d.remove();
   return d;
+}
+
+// 드롭다운(항목이 많을 때). options: [[값, 이름]...]. .set(options, value) .value
+export function select(options = [], value = "", onChange = null, title = "") {
+  const s = el("select", "sel");
+  if (title) s.title = title;
+  s.set = (opts, v) => {
+    const cur = v !== undefined ? v : s.value;
+    s.replaceChildren(...opts.map(([val, label]) => { const o = el("option", null, label); o.value = val; return o; }));
+    if (opts.some(([val]) => val === cur)) s.value = cur;
+  };
+  s.set(options, value);
+  if (onChange) s.addEventListener("change", () => onChange(s.value));
+  return s;
 }
 
 export function kvList(rows = []) {

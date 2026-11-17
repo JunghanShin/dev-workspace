@@ -200,6 +200,15 @@ public:
 
 예: 다른 워커와 통신하지 않는 워커는 `peer`를 뗀다. 데이터 버스도 안 쓰면 `lib/libframebus`도 지운다(`source`가 쓰므로 `source`를 고친 뒤).
 
+## 안전망과 제공 도구 (design.md 6.6.9)
+
+실행 구조(스레드·큐·우선순위·잠금)는 워커 개발자가 정한다. 워크스페이스는 받쳐 주고 도구를 준다.
+
+- **기본 안전망(항상 켜짐, 할 일 없음):** 호스트가 모듈의 모든 진입점 예외를 잡는다(명령 하나는 오류 응답, `on_timer`·`on_poll`이 연달아 3번이면 exit 4, 꼭 끝내야 하면 `throw worker::Fatal`). 루프 시간 지표 `host_loop_ms`. 스레드가 멈추면 워치독보다 먼저 `safe_state()`를 부르고 exit 4. 장치를 안전하게 둘 일이 있으면 `Module::safe_state()`만 채운다(예: `lib/source`)
+- **제공 도구(골라 씀):** 입력·출력 단계 `host.input<T>` / `host.output<T>`(예: `lib/source`의 `source.gen`), 스레드 우선순위·CPU(`ThreadOptions`, 설정 `stages`), 우선순위 상속 잠금 `worker::Mutex`, ThreadSanitizer(`dev/check.sh`가 모든 워커 시험을 TSan으로도 돌림, 빼려면 시험에 라벨 `no_tsan`), 장애 주입(시험 빌드 `WORKER_FAULT_INJECTION=1`의 `__fault` 명령, `test/test_worker.cpp` 4단계)
+- 설정 예(맨 위 호스트 키): `"stages": {"source.gen": {"queue": 64, "priority": "realtime", "rt_priority": 50, "cpu": [2]}}, "loop_budget_ms": 50`
+- 시스템 모니터에서 워커를 고르면(보기 드롭다운) 스레드 우선순위, 단계·큐, 안전망이 보인다
+
 ## 워커 간 통신 (design.md 6.6.7)
 
 | 통로 | 받는 쪽 도구 | 본보기(`lib/peer`) |

@@ -122,6 +122,9 @@ Wants=network-online.target
 After=network-online.target NetworkManager.service
 
 [Service]
+# 워커 스레드 실시간 우선순위·워커 nice 낮추기 허용(제공 도구, design.md 6.6.9). 일반 계정으로 낮춰도 이어짐
+LimitRTPRIO=95
+LimitNICE=40
 Type=simple
 Environment=WORKSPACE_DATA=$DATA
 Environment=WORKSPACE_UNIT=$UNIT

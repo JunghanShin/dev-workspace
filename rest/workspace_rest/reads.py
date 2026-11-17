@@ -8,7 +8,7 @@
   GET /records/commands?lines=200     명령 기록(workspace-logger)         {"lines": [JSON 문자열...]}
   GET /system/processes?lines=12      CPU 순 프로세스               {"processes": [{pid, name, cpu, mem, rss_kb}]}
   GET /system/power_modes             nvpmodel 모드 이름            {"modes": {"0": "MAXN_SUPER", ...}}
-  GET /workers/{id}/tasks?pid=N       워커(프로세스 그룹 N = 워커 pid)의 프로세스·스레드와 스레드별 CPU
+  GET /workers/{id}/tasks?pid=N       워커(프로세스 그룹 N = 워커 pid)의 프로세스·스레드와 스레드별 CPU·우선순위(정책, rt, nice)·CPU 고정
                                       {"pid", "processes": [{pid, ppid, name, rss_mb, cpu, threads: [{tid, name, cpu}]}]}
   GET /system/workspace              이 보드의 워크스페이스·프로필: 적용한 프로필, 설정 파일(기본 + 프로필, 내용·출처),
                                       workspace.env 키별 값·기본값·설명 (profile.py, 비밀값은 가림)
@@ -80,6 +80,21 @@ def _stat(path):
     return data[data.find("(") + 1:data.rfind(")")], data[data.rfind(")") + 2:].split()
 
 
+_POLICY = {0: "normal", 1: "realtime(fifo)", 2: "realtime(rr)", 3: "batch", 5: "idle"}
+
+
+def _cpus_allowed(pid, tid):
+    """스레드가 돌 수 있는 CPU 목록(예: "0-7", "2")"""
+    try:
+        with open("/proc/%s/task/%s/status" % (pid, tid), encoding="ascii", errors="replace") as f:
+            for line in f:
+                if line.startswith("Cpus_allowed_list:"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
 def _group_tasks(pgid):
     """프로세스 그룹(워커와 자식)의 프로세스·스레드. 스레드 CPU는 TASK_SAMPLE_S 동안의 사용률(코어 1개 = 100)"""
     def snapshot():
@@ -97,8 +112,10 @@ def _group_tasks(pgid):
                 tids = []
             for tid in tids:
                 ts = _stat("/proc/%s/task/%s/stat" % (name, tid))
-                if ts is not None and len(ts[1]) > 12:
-                    threads[int(tid)] = (ts[0], int(ts[1][11]) + int(ts[1][12]))
+                if ts is not None and len(ts[1]) > 38:
+                    # [11]+[12] utime+stime, [16] nice, [37] rt_priority, [38] policy (stat 14·15·19·40·41번째 칸)
+                    threads[int(tid)] = (ts[0], int(ts[1][11]) + int(ts[1][12]), int(ts[1][16]), int(ts[1][37]),
+                                         int(ts[1][38]), name)
             procs[int(name)] = {"name": st[0], "ppid": int(st[1][1]), "rss_pages": int(st[1][21]), "threads": threads}
         return procs
 
@@ -110,11 +127,12 @@ def _group_tasks(pgid):
     for pid, p in sorted(b.items()):
         prev = a.get(pid, {}).get("threads", {})
         threads = []
-        for tid, (tname, ticks) in p["threads"].items():
+        for tid, (tname, ticks, nice, rt, policy, owner) in p["threads"].items():
             cpu = None
             if tid in prev:
                 cpu = round(max(ticks - prev[tid][1], 0) / _CLK_TCK / TASK_SAMPLE_S * 100, 1)
-            threads.append({"tid": tid, "name": tname, "cpu": cpu})
+            threads.append({"tid": tid, "name": tname, "cpu": cpu, "policy": _POLICY.get(policy, str(policy)),
+                            "rt_priority": rt, "nice": nice, "cpus": _cpus_allowed(owner, tid)})
         threads.sort(key=lambda t: -(t["cpu"] or 0))
         out.append({"pid": pid, "ppid": p["ppid"], "name": p["name"],
                     "rss_mb": round(p["rss_pages"] * _PAGE / 2 ** 20, 1),

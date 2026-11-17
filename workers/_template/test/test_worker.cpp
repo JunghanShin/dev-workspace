@@ -2,6 +2,8 @@
 //   1) 워커 하나: 명령·상태·워커 안 연결(source → 포트 → processor)
 //   2) 워커 둘(a: 생산, b: peer = a): 워커 간 데이터 버스(순서대로 전부)·스트림 구독·명령, a가 다시 시작해도 b가 다시 붙음
 //   3) 가짜 장치 모드: 설정 "sim"이면 가짜 장치 프로그램을 자식으로 띄우고 상태에 표시
+//   4) 기본 안전망·장애 주입(WORKER_FAULT_INJECTION=1): 예외는 세고 계속, 짧은 멈춤은 견딤, 연속 예외·긴 멈춤·Fatal은
+//      safe_state 뒤 exit 4, 단계 설정("stages")과 runtime 상태
 //
 //   test_worker [에뮬레이터...] <example-worker 경로>
 #include <signal.h>
@@ -73,6 +75,17 @@ static int stop(pid_t pid) {
     int st = 0;
     waitpid(pid, &st, 0);
     return WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
+}
+
+// 끝나기를 기다린다(죽이지 않음). 끝났으면 종료 코드, 시간이 지나면 -1
+static int wait_exit(pid_t pid, int ms) {
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    while (std::chrono::steady_clock::now() < end) {
+        int st = 0;
+        if (waitpid(pid, &st, WNOHANG) == pid) return WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return -1;
 }
 
 static Json cmd(const std::string& id, const std::string& c, const Json& args = Json::object()) {
@@ -150,6 +163,44 @@ int main(int argc, char** argv) {
         }, 8000));
         CHECK(stop(s) == 0);  // 워커가 끝나면 가짜 장치도 함께 끝난다(Host가 kill_wait)
     }
+    // 4) 기본 안전망·장애 주입(시험 빌드 전용 명령 __fault)
+    setenv("WORKER_FAULT_INJECTION", "1", 1);
+    const Json fcfg = {{"source", {{"rate_hz", 50}, {"size", 8}}}, {"stages", {{"source.gen", {{"queue", 16}}}}},
+                       {"thread_stall_sec", 1}, {"watchdog_sec", 2}};
+    pid_t f = start("f", fcfg);
+    CHECK(wait_until([] { return status("f").contains("runtime"); }, 8000));
+    {
+        const Json rt = status("f")["runtime"];
+        CHECK(rt["stages"]["source.gen"]["queue"] == 16 && rt["stages"]["source.gen"]["overflow"] == "drop_oldest");
+        CHECK(rt.value("fault_injection", false) && rt["loop"]["budget_ms"] == 50);
+    }
+    CHECK(cmd("f", "__fault", {{"kind", "throw"}, {"where", "timer"}, {"count", 2}}).value("ok", false));
+    CHECK(wait_until([] { return status("f").value("runtime", Json::object()).value("errors", 0) >= 2; }, 3000));
+    const uint64_t seq0 = mod("f", "source").value("seq", 0ull);
+    CHECK(wait_until([&] { return mod("f", "source").value("seq", 0ull) > seq0 + 5; }, 3000));  // 예외 뒤에도 계속
+    CHECK(cmd("f", "__fault", {{"kind", "stall"}, {"stage", "source.gen"}, {"ms", 400}}).value("ok", false));
+    std::this_thread::sleep_for(std::chrono::milliseconds(700));
+    CHECK(wait_exit(f, 10) == -1);  // 판정(1 s)보다 짧은 멈춤은 견딘다
+    const uint64_t seq1 = mod("f", "source").value("seq", 0ull);
+    CHECK(wait_until([&] { return mod("f", "source").value("seq", 0ull) > seq1 + 5; }, 3000));
+    CHECK(cmd("f", "__fault", {{"kind", "throw"}, {"where", "timer"}, {"count", 3}}).value("ok", false));
+    CHECK(wait_exit(f, 5000) == 4);  // 연달아 3번: 상태가 깨졌다고 보고 safe_state 뒤 exit 4
+
+    pid_t g = start("g", fcfg);
+    CHECK(wait_until([] { return status("g").contains("runtime"); }, 8000));
+    CHECK(cmd("g", "__fault", {{"kind", "stall"}, {"stage", "source.gen"}, {"ms", 5000}}).value("ok", false));
+    CHECK(wait_exit(g, 6000) == 4);  // 긴 멈춤: 워치독(SIGALRM)보다 먼저 safe_state 뒤 exit 4
+
+    pid_t h = start("h", fcfg);
+    CHECK(wait_until([] { return status("h").contains("runtime"); }, 8000));
+    CHECK(cmd("h", "__fault", {{"kind", "fatal"}}).value("ok", false));
+    CHECK(wait_exit(h, 5000) == 4);  // worker::Fatal
+    unsetenv("WORKER_FAULT_INJECTION");
+    pid_t n = start("n", fcfg);      // 시험 빌드 변수가 없으면 장애 주입 명령은 없다
+    CHECK(wait_until([] { return status("n").contains("runtime"); }, 8000));
+    CHECK(cmd("n", "__fault", {{"kind", "fatal"}})["ok"] == false);
+    CHECK(stop(n) == 0);
+
     std::string rm = "rm -rf " + g_dir;
     (void)std::system(rm.c_str());
     if (failures) {

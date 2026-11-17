@@ -1,4 +1,5 @@
-// libworker 단위 시험: BoundedQueue, ThreadWatch, WorkerThread(스레드 이름), Publisher, Host·Module
+// libworker 단위 시험: BoundedQueue, ThreadWatch, WorkerThread(스레드 이름·우선순위), Publisher, Host·Module,
+// 입력·출력 단계, Mutex, 기본 안전망(설정·상태)
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -17,6 +18,8 @@
 #include <pthread.h>
 
 #include "worker/host.hpp"
+#include "worker/mutex.hpp"
+#include "worker/stage.hpp"
 #include "worker/peer.hpp"
 #include "worker/publisher.hpp"
 #include "worker/queue.hpp"
@@ -430,6 +433,267 @@ static void peer_subscriber_and_command() {
     cmd.stop();
 }
 
+
+static void queue_drop_newest() {
+    BoundedQueue<int> q(2, Overflow::DropNewest);
+    CHECK(q.push(1) && q.push(2));
+    CHECK(q.push(3));  // 넣은 쪽은 성공으로 보고 새것만 버림
+    CHECK(q.try_pop() == 1 && q.try_pop() == 2 && !q.try_pop());
+    CHECK(q.stats().dropped == 1);
+}
+
+// 등록과 beat가 동시에 일어나도 안전(스레드를 실행 중에 더 만드는 워커). TSan 빌드에서 경합이 없어야 한다
+static void watch_dynamic_registration() {
+    ThreadWatch watch(1000ms);
+    std::vector<std::unique_ptr<WorkerThread>> ts;
+    for (int i = 0; i < 20; ++i) {
+        ts.push_back(std::make_unique<WorkerThread>("t" + std::to_string(i), watch, [](WorkerThread& t) {
+            while (!t.stopping()) {
+                t.beat();
+                std::this_thread::sleep_for(1ms);
+            }
+        }));
+        ts.back()->start();
+    }
+    CHECK(watch.all_alive(ThreadWatch::Clock::now()));
+    // 할 일을 다 하고 끝난 스레드는 멈춤으로 보지 않는다
+    WorkerThread once("once", watch, [](WorkerThread&) {});
+    once.start();
+    once.join();
+    std::this_thread::sleep_for(20ms);
+    CHECK(!watch.ages_ms(ThreadWatch::Clock::now()).contains("once"));
+    for (auto& t : ts) t->request_stop();
+    ts.clear();
+}
+
+static void thread_options() {
+    ThreadWatch watch(1000ms);
+    worker::ThreadOptions o;
+    o.nice = 5;          // 올리는 것(낮은 우선순위)은 권한 없이 됨
+    o.cpus = {0};
+    std::atomic<int> got_cpu{-1};
+    WorkerThread t("opt", watch, [&](WorkerThread& th) {
+        got_cpu.store(sched_getcpu());
+        while (!th.stopping()) std::this_thread::sleep_for(5ms);
+    });
+    t.set_options(o);
+    t.start();
+    CHECK(wait_until([&] { return got_cpu.load() >= 0; }, 2000));
+    std::this_thread::sleep_for(20ms);
+    auto info = t.info();
+    CHECK(info["requested"]["nice"] == 5 && info["requested"]["cpu"][0] == 0);
+    CHECK(info["applied"] == true && got_cpu.load() == 0);
+    t.request_stop();
+    t.join();
+    // 실시간: 권한이 없으면(보통 계정) 적용 실패로 보고하고 스레드는 계속 돈다
+    worker::ThreadOptions rt;
+    rt.priority = "realtime";
+    rt.rt_priority = 10;
+    std::atomic<bool> ran{false};
+    WorkerThread r("rt", watch, [&](WorkerThread& th) {
+        ran.store(true);
+        while (!th.stopping()) std::this_thread::sleep_for(5ms);
+    });
+    r.set_options(rt);
+    r.start();
+    CHECK(wait_until([&] { return ran.load(); }, 2000));
+    std::this_thread::sleep_for(20ms);
+    auto ri = r.info();
+    CHECK(ri["requested"]["priority"] == "realtime" && !r.failed());
+    CHECK(ri["applied"] == true || ri.contains("error"));
+    r.request_stop();
+    r.join();
+}
+
+static void mutex_pi() {
+    worker::Mutex m;
+    int counter = 0;
+    std::vector<std::thread> ts;
+    for (int i = 0; i < 4; ++i)
+        ts.emplace_back([&] {
+            for (int k = 0; k < 1000; ++k) {
+                std::lock_guard<worker::Mutex> lock(m);
+                ++counter;
+            }
+        });
+    for (auto& t : ts) t.join();
+    CHECK(counter == 4000);
+    CHECK(m.try_lock());
+    m.unlock();
+}
+
+static void stage_options_parse() {
+    worker::StageOptions base;
+    auto o = worker::parse_stage_options(worker::Json::parse(R"({"queue":8,"overflow":"reject","wait_ms":20,"priority":"realtime","rt_priority":40,"cpu":[1,2]})"),
+                                         "m.rx", base);
+    CHECK(o.queue == 8 && o.overflow == Overflow::Reject && o.wait_ms == 20 && o.thread.priority == "realtime" &&
+          o.thread.rt_priority == 40 && o.thread.cpus.size() == 2);
+    bool threw = false;
+    try {
+        worker::parse_stage_options(worker::Json::parse(R"({"overflow":"sometimes"})"), "m.rx", base);
+    } catch (const worker::ConfigError&) {
+        threw = true;
+    }
+    CHECK(threw);
+    threw = false;
+    try {
+        worker::parse_stage_options(worker::Json::parse(R"({"queue_size":8})"), "m.rx", base);
+    } catch (const worker::ConfigError&) {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
+static void input_stage() {
+    ThreadWatch watch(1000ms);
+    worker::StageOptions o;
+    o.queue = 4;
+    o.wait_ms = 10;
+    std::atomic<int> produced{0};
+    std::atomic<bool> burst{false};
+    int handled = 0, bad_seen = 0;
+    worker::Input<int> in("m.rx", o, watch,
+        [&](worker::Input<int>::Context& ctx) {
+            if (burst.exchange(false))
+                for (int i = 0; i < 10; ++i) ctx.push(100 + i);  // 큐 4개: 오래된 것 버림
+            const int n = produced.load();
+            if (n < 5) {
+                ctx.push(n);
+                produced.store(n + 1);
+            }
+            if (n == 5) {
+                produced.store(6);
+                throw std::runtime_error("device glitch");  // 세고 계속
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(ctx.wait_ms()));
+        },
+        [&](int& v) {
+            if (v == 3) {
+                ++bad_seen;
+                throw std::runtime_error("bad item");  // 그 항목만 버림
+            }
+            ++handled;
+        });
+    CHECK(wait_until([&] { in.process(worker::Stage::Clock::now() + 50ms); return handled == 4 && bad_seen == 1; }, 3000));
+    CHECK(wait_until([&] { return in.status()["errors"].get<uint64_t>() >= 2; }, 2000));  // read 1 + handle 1
+    burst.store(true);
+    CHECK(wait_until([&] { return in.status()["dropped"].get<uint64_t>() >= 6; }, 2000));
+    const std::string m = in.metrics();
+    CHECK(m.find("m_rx_q=") != std::string::npos && m.find("m_rx_drops=") != std::string::npos &&
+          m.find("m_rx_lag_ms=") != std::string::npos && m.find("m_rx_errors=") != std::string::npos);
+    CHECK(watch.all_alive(ThreadWatch::Clock::now()));
+    in.stop();
+    std::string why;
+    CHECK(!in.failed(&why));
+    // 주입된 멈춤: beat가 끊겨 멈춤으로 보이고, 풀리면 다시 살아남
+    ThreadWatch fast(100ms);
+    worker::Input<int> p("m.p", o, fast, [](worker::Input<int>::Context& ctx) { std::this_thread::sleep_for(std::chrono::milliseconds(ctx.wait_ms())); },
+                         [](int&) {});
+    p.fault_pause(400);
+    CHECK(wait_until([&] { return !fast.all_alive(ThreadWatch::Clock::now()); }, 1000));
+    CHECK(wait_until([&] { return fast.all_alive(ThreadWatch::Clock::now()); }, 2000));
+    p.stop();
+}
+
+static void input_budget() {
+    ThreadWatch watch(1000ms);
+    worker::StageOptions o;
+    o.queue = 1000;
+    std::atomic<bool> done{false};
+    worker::Input<int> in("m.in", o, watch,
+        [&](worker::Input<int>::Context& ctx) {
+            if (!done.exchange(true))
+                for (int i = 0; i < 200; ++i) ctx.push(i);
+            std::this_thread::sleep_for(5ms);
+        },
+        [&](int&) { std::this_thread::sleep_for(1ms); });  // 항목마다 1 ms
+    CHECK(wait_until([&] { return in.status()["size"].get<size_t>() == 200; }, 2000));
+    const auto t0 = worker::Stage::Clock::now();
+    const bool more = in.process(t0 + 20ms);  // 예산 20 ms
+    const auto spent = worker::Stage::Clock::now() - t0;
+    CHECK(more && spent < 60ms);  // 예산에서 멈추고 남은 것을 알림
+    in.stop();
+}
+
+static void output_stage() {
+    ThreadWatch watch(1000ms);
+    std::vector<int> written;
+    std::mutex wm;
+    std::atomic<bool> block{false};
+    worker::Output<int> out("m.tx", worker::Host::output_defaults(), watch, [&](const int& v) {
+        while (block.load()) std::this_thread::sleep_for(1ms);
+        if (v == 7) throw std::runtime_error("write failed");  // 세고 계속
+        std::lock_guard<std::mutex> lock(wm);
+        written.push_back(v);
+    });
+    for (int i = 0; i < 10; ++i) CHECK(out.push(i));
+    CHECK(wait_until([&] { std::lock_guard<std::mutex> lock(wm); return written.size() == 9; }, 2000));
+    CHECK(out.status()["errors"] == 1 && out.status()["overflow"] == "reject");
+    block.store(true);
+    std::this_thread::sleep_for(20ms);
+    int accepted = 0;
+    for (int i = 0; i < 400; ++i) accepted += out.push(i) ? 1 : 0;
+    CHECK(accepted <= 257 && out.status()["dropped"].get<uint64_t>() > 0);  // 출력 기본 256, 가득 차면 거절
+    block.store(false);
+    out.stop();
+}
+
+static void host_stage_config_and_runtime() {
+    struct Cfg : worker::Module {
+        std::string name() const override { return "m"; }
+    };
+    char tmpl[] = "/tmp/hoststageXXXXXX";
+    const std::string dir = mkdtemp(tmpl);
+    const std::string path = dir + "/w.json";
+    auto write = [&](const char* txt) {
+        std::FILE* f = std::fopen(path.c_str(), "w");
+        std::fputs(txt, f);
+        std::fclose(f);
+    };
+    std::string err;
+    write(R"({"id":"t","config":{"stages":{"m.rx":{"queue":8,"priority":"realtime"}},"loop_budget_ms":20}})");
+    worker::Host ok("test");
+    ok.add<Cfg>();
+    CHECK(ok.configure_file(path, &err));
+    write(R"({"id":"t","config":{"stages":{"m.rx":{"overflow":"never"}}}})");
+    worker::Host bad("test");
+    bad.add<Cfg>();
+    CHECK(!bad.configure_file(path, &err) && err.find("overflow") != std::string::npos);
+    write(R"({"id":"t","config":{"loop_budget_ms":0}})");
+    worker::Host bad2("test");
+    bad2.add<Cfg>();
+    CHECK(!bad2.configure_file(path, &err) && err.find("loop_budget_ms") != std::string::npos);
+    // 상태에 runtime(루프·안전망), 장애 주입 명령은 꺼져 있으면 모르는 명령
+    worker::Json r;
+    ok.dispatch(R"({"cmd":"get_status"})", [&r](const worker::Json& j) { r = j; });
+    CHECK(r["data"]["runtime"]["loop"]["budget_ms"] == 20 && r["data"]["runtime"]["errors"] == 0);
+    ok.dispatch(R"({"cmd":"__fault","args":{"kind":"throw"}})", [&r](const worker::Json& j) { r = j; });
+    CHECK(r["ok"] == false);
+    std::remove(path.c_str());
+    ::rmdir(dir.c_str());
+}
+
+// 명령 처리 중 예외: 그 명령에 오류로 응답하고, 셈(워커는 계속)
+static void host_handle_exception() {
+    struct Thrower : worker::Module {
+        std::string name() const override { return "x"; }
+        bool handle(const std::string& cmd, const worker::Json&, worker::Reply reply) override {
+            if (cmd == "boom") throw std::runtime_error("oops");
+            reply(worker::ok_reply());
+            return true;
+        }
+    };
+    worker::Host host("test");
+    host.add<Thrower>();
+    worker::Json r;
+    host.dispatch(R"({"cmd":"boom"})", [&r](const worker::Json& j) { r = j; });
+    CHECK(r["error"]["code"] == "internal");
+    host.dispatch(R"({"cmd":"ok"})", [&r](const worker::Json& j) { r = j; });
+    CHECK(r["ok"] == true);
+    host.dispatch(R"({"cmd":"get_status"})", [&r](const worker::Json& j) { r = j; });
+    CHECK(r["data"]["runtime"]["errors"] == 1 && r["data"]["runtime"]["warnings"].size() == 1);
+}
+
 int main() {
     queue_drop_oldest();
     queue_reject();
@@ -444,6 +708,16 @@ int main() {
     host_sim_config();
     thread_names();
     peer_subscriber_and_command();
+    queue_drop_newest();
+    watch_dynamic_registration();
+    thread_options();
+    mutex_pi();
+    stage_options_parse();
+    input_stage();
+    input_budget();
+    output_stage();
+    host_stage_config_and_runtime();
+    host_handle_exception();
     if (failures) {
         std::printf("%d check(s) failed\n", failures);
         return 1;

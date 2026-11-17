@@ -6,6 +6,7 @@
   - adp: Manager API를 쓰는 워커(워커 선언 "manager_api": true). Manager 소켓(WORKSPACE_MANAGER_SOCKET)으로 명령을 보내고 결과를 파일에 쓴다
   - dev: 일반 워커(자동 시작 안 함)
 확인: Manager API를 쓰는 워커가 다른 워커를 켬, 자기 자신은 못 건드림, 일반 워커에는 Manager 소켓이 없음,
+재시작 간격 늘림·연속 실패 표시·워커 프로세스 우선순위(nice, design.md 6.6.9 ②③),
 읽기 전용 소켓(manager.sock, logger)의 쓰기는 거부. 예전 설정(config/mode, manager.json "control")은 무시
 """
 import json
@@ -66,11 +67,14 @@ def wait_for(fn, timeout=15.0):
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "Unix sockets, Linux only")
 class ManagerApiWorker(unittest.TestCase):
-    def start(self, product=False):
+    def start(self, product=False, crash=False):
         self.tmp = tempfile.mkdtemp(prefix="ws-mgrapi-")
         root, data = os.path.join(self.tmp, "ws"), os.path.join(self.tmp, "data")
-        self.out = {n: os.path.join(self.tmp, n + ".out") for n in ("adp", "dev")}
-        for name, src, api, autostart in (("adp", ADP, True, True), ("dev", DEV, False, False)):
+        self.out = {n: os.path.join(self.tmp, n + ".out") for n in ("adp", "dev", "crash")}
+        workers = [("adp", ADP, True, True), ("dev", DEV, False, False)]
+        if crash:
+            workers.append(("crash", "import sys\nsys.exit(2)\n", False, True))  # 띄우자마자 실패
+        for name, src, api, autostart in workers:
             ws = os.path.join(root, "workers", name, "workspace")
             os.makedirs(os.path.join(ws, "presets"))
             shutil.copyfile(HELPER, os.path.join(ws, "workspace_worker.py"))
@@ -84,6 +88,8 @@ class ManagerApiWorker(unittest.TestCase):
                     "start_timeout_sec": 10, "watchdog_sec": 5, "stop_timeout_sec": 3}
             if api:
                 decl["manager_api"] = True
+            if name == "dev":
+                decl["process"] = {"nice": 5}  # 워커 프로세스 우선순위(올리는 것은 권한 없이 됨)
             else:  # 실행 파일 후보: 없는 첫째는 건너뛰고 있는 것을 쓴다(개발 빌드 build/ → 확정 workspace/bin/)
                 decl["exec_candidates"] = [os.path.join(self.tmp, "no-such-build", "python3"), sys.executable]
             os.makedirs(os.path.join(data, "config", "worker-types.d"), exist_ok=True)
@@ -96,9 +102,12 @@ class ManagerApiWorker(unittest.TestCase):
             open(f, "w").close()
         # 예전 보드에 남은 설정: 무시되어야 한다(운용 모드·제어권 없음, design.md 6.1)
         open(os.path.join(data, "config", "mode"), "w").write("operation\n")
-        json.dump({"control": {"operation": "rest"}}, open(os.path.join(data, "config", "manager.json"), "w"))
+        mj = {"control": {"operation": "rest"}}
+        if crash:  # 시험이 빨리 끝나게 짧은 간격
+            mj["restart"] = {"interval_s": 0.2, "max_interval_s": 0.8, "crash_count": 3, "crash_window_s": 60}
+        json.dump(mj, open(os.path.join(data, "config", "manager.json"), "w"))
         # 워커 실행 인자: exec 뒤에 --config <파일>이 붙는다. w.py는 load_config가 argv에서 --config만 읽도록 "-"를 둔다
-        for name in ("adp", "dev"):
+        for name in ("adp", "dev"):  # crash는 인자를 읽지 않음
             p = os.path.join(root, "workers", name, "workspace", "w.py")
             s = open(p).read().replace("ww.load_config()", "ww.load_config(argv=sys.argv[sys.argv.index('--config'):])")
             open(p, "w").write(s.replace("sys.argv[3]", "sys.argv[2]"))
@@ -156,6 +165,39 @@ class ManagerApiWorker(unittest.TestCase):
         self.assertEqual(self.status()["dev"]["exec"], sys.executable)  # 있는 후보로 띄움
         for f in self.stale:  # 지금 구성에 없는 데이터는 정리됨
             self.assertFalse(os.path.exists(f), f)
+
+    def test_restart_backoff_and_crash_loop(self):
+        self.start(crash=True)
+        self.assertTrue(wait_for(lambda: os.path.exists(self.sock)))
+        st = wait_for(lambda: (lambda w: w if w.get("crash_loop") else None)(self.status().get("crash", {})), 20)
+        self.assertTrue(st, "crash loop flagged after 3 quick failures")
+        self.assertGreaterEqual(st["restart_count"], 3)
+        self.assertEqual(st["last_error"], "exit 2")
+        # 간격은 늘었다가 max_interval_s(0.8)에서 멈춘다
+        seen = []
+        end = time.time() + 4
+        while time.time() < end:
+            v = self.status()["crash"].get("restart_in_s")
+            if v is not None:
+                seen.append(v)
+            time.sleep(0.05)
+        self.assertTrue(seen and max(seen) <= 0.8 and max(seen) > 0.2, seen)
+        # start 명령이면 처음부터(연속 실패 표시 지움)
+        r = self.call(os.path.join(self.run, "manager-rest.sock"), {"op": "start", "id": "crash"})
+        self.assertTrue(r["ok"], r)
+        self.assertFalse(r["data"]["crash_loop"])
+
+    def test_process_priority(self):
+        self.start()
+        self.assertTrue(wait_for(lambda: os.path.exists(self.sock)))
+        r = self.call(os.path.join(self.run, "manager-rest.sock"), {"op": "start", "id": "dev"})
+        self.assertTrue(r["ok"], r)
+        st = wait_for(lambda: (lambda w: w if w.get("actual_state") == "running" else None)(self.status()["dev"]))
+        self.assertTrue(st)
+        self.assertEqual(st["process"], {"nice": 5})
+        with open("/proc/%d/stat" % st["pid"]) as f:
+            nice = int(f.read().rsplit(")", 1)[1].split()[16])  # 19번째 칸(nice)
+        self.assertEqual(nice, 5)
 
     def test_read_only_sockets(self):
         self.start()

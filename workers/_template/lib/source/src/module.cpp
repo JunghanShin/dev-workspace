@@ -54,7 +54,7 @@ Config Module::parse(const Json& c, const std::string& worker_id) {
 
 void Module::configure(const Json& c) {
     cfg_ = parse(c, host() ? host()->id() : "source");
-    std::lock_guard<std::mutex> lock(gen_mu_);
+    std::lock_guard<worker::Mutex> lock(gen_mu_);
     gen_.set_config(cfg_.gen);
 }
 
@@ -65,7 +65,7 @@ bool Module::reconfigure(const Json& c) {
         next.helper_cmd != cfg_.helper_cmd)
         return false;
     cfg_ = next;
-    std::lock_guard<std::mutex> lock(gen_mu_);
+    std::lock_guard<worker::Mutex> lock(gen_mu_);
     gen_.set_config(cfg_.gen);
     return true;
 }
@@ -83,38 +83,10 @@ void Module::start(worker::Host& host) {
     pub_ = std::make_unique<worker::Publisher>(host.watch(), po);
     if (!pub_->open(host.stream_socket(), &error)) throw std::runtime_error("stream: " + error);
 
-    made_ = std::make_unique<worker::BoundedQueue<Made>>(64, worker::Overflow::DropOldest);
-    thread_ = std::make_unique<worker::WorkerThread>("source.gen", host.watch(), [this](worker::WorkerThread& t) {
-        while (!t.stopping()) {
-            const auto now = Clock::now();
-            Made m;
-            int64_t next_ms;
-            bool due;
-            {
-                std::lock_guard<std::mutex> lock(gen_mu_);
-                due = gen_.due(ms(now));
-                if (due) {
-                    m.values = gen_.make();
-                    m.seq = gen_.seq();
-                    m.ts_ms = ms(now);
-                }
-                next_ms = gen_.next_due_ms();
-            }
-            if (due) {
-                // 데이터 버스에 쓴다. 빈 슬롯이 없으면 그 표본은 버린다(생산자는 기다리지 않는다, dropped 지표)
-                if (auto slot = bus_->acquire()) {
-                    const size_t n = std::min(slot->bytes, m.values.size() * sizeof(float));
-                    std::memcpy(slot->data, m.values.data(), n);
-                    bus_->publish(*slot, m.seq, m.ts_ms * 1000000, n);
-                }
-                made_->push(std::move(m));
-            }
-            const int64_t wait = std::max<int64_t>(1, std::min<int64_t>(50, next_ms - ms(Clock::now())));
-            std::this_thread::sleep_for(std::chrono::milliseconds(wait));  // 시간 제한 있는 대기
-            t.beat();
-        }
-    });
-    thread_->start();
+    // 입력 단계(제공 도구): 큐 64개, 넘치면 오래된 것 버림. 설정 "stages": {"source.gen": {...}}로 바꿀 수 있다
+    worker::StageOptions so;
+    so.queue = 64;
+    host.input<Made>("source.gen", [this](worker::Input<Made>::Context& in) { make_once(in); }, [this](Made& m) { take(m); }, so);
 
     if (!cfg_.helper_cmd.empty()) {
         helper_ = worker::spawn(split(cfg_.helper_cmd));
@@ -123,18 +95,47 @@ void Module::start(worker::Host& host) {
     std::printf("source: %.1f Hz x %d values -> data bus %s\n", cfg_.gen.rate_hz, cfg_.gen.size, cfg_.bus_socket.c_str());
 }
 
-void Module::add_pollfds(std::vector<pollfd>& fds) { fds.push_back({made_->wake_fd(), POLLIN, 0}); }
+// source.gen 스레드: 때가 되면 표본 하나를 만들어 데이터 버스에 쓰고 워커 루프로 넘긴다. wait_ms 안에 돌아온다
+void Module::make_once(worker::Input<Made>::Context& in) {
+    const auto now = Clock::now();
+    Made m;
+    int64_t next_ms;
+    bool due;
+    {
+        std::lock_guard<worker::Mutex> lock(gen_mu_);
+        due = gen_.due(ms(now));
+        if (due) {
+            m.values = gen_.make();
+            m.seq = gen_.seq();
+            m.ts_ms = ms(now);
+        }
+        next_ms = gen_.next_due_ms();
+    }
+    if (due) {
+        // 데이터 버스에 쓴다. 빈 슬롯이 없으면 그 표본은 버린다(생산자는 기다리지 않는다, dropped 지표)
+        if (auto slot = bus_->acquire()) {
+            const size_t n = std::min(slot->bytes, m.values.size() * sizeof(float));
+            std::memcpy(slot->data, m.values.data(), n);
+            bus_->publish(*slot, m.seq, m.ts_ms * 1000000, n);
+        }
+        in.push(std::move(m));
+    }
+    const int64_t wait = std::max<int64_t>(1, std::min<int64_t>(in.wait_ms(), next_ms - ms(Clock::now())));
+    std::this_thread::sleep_for(std::chrono::milliseconds(wait));  // 시간 제한 있는 대기
+}
+
+// 워커 루프: 표본 하나 처리(호스트가 처리 시간 예산 안에서 부른다)
+void Module::take(Made& m) {
+    seq_ = m.seq;
+    double sum = 0;
+    for (float v : m.values) sum += v;
+    last_mean_ = m.values.empty() ? 0.0f : static_cast<float>(sum / m.values.size());
+    const Sample s{m.seq, m.ts_ms, &m.values};
+    for (const auto& fn : listeners_) fn(s);  // 워커 안 연결(포트)
+    stream_dirty_ = true;
+}
 
 void Module::on_timer(worker::TimePoint now) {
-    while (auto m = made_->try_pop()) {
-        seq_ = m->seq;
-        double sum = 0;
-        for (float v : m->values) sum += v;
-        last_mean_ = m->values.empty() ? 0.0f : static_cast<float>(sum / m->values.size());
-        const Sample s{m->seq, m->ts_ms, &m->values};
-        for (const auto& fn : listeners_) fn(s);  // 워커 안 연결(포트)
-        stream_dirty_ = true;
-    }
     publish_stream(now);
     check_helper(now);
 }
@@ -150,7 +151,7 @@ void Module::publish_stream(worker::TimePoint now) {
     stream_dirty_ = false;
     double rate;
     {
-        std::lock_guard<std::mutex> lock(gen_mu_);
+        std::lock_guard<worker::Mutex> lock(gen_mu_);
         rate = gen_.config().rate_hz;
     }
     const double t = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -182,7 +183,7 @@ bool Module::handle(const std::string& cmd, const Json& args, worker::Reply repl
             reply(worker::error_reply("bad_request", "args.hz must be a number"));
             return true;
         }
-        std::lock_guard<std::mutex> lock(gen_mu_);
+        std::lock_guard<worker::Mutex> lock(gen_mu_);
         GeneratorConfig g = gen_.config();
         g.rate_hz = args["hz"].get<double>();
         try {
@@ -196,7 +197,7 @@ bool Module::handle(const std::string& cmd, const Json& args, worker::Reply repl
         return true;
     }
     if (cmd == "reset") {
-        std::lock_guard<std::mutex> lock(gen_mu_);
+        std::lock_guard<worker::Mutex> lock(gen_mu_);
         gen_.reset();
         reply(worker::ok_reply({{"seq", 0}}));
         return true;
@@ -227,21 +228,19 @@ void Module::metrics(worker::Metrics& m) const {
 }
 
 bool Module::failed(std::string* why) const {
-    for (const worker::WorkerThread* t : {thread_.get(), pub_ ? &pub_->thread() : nullptr}) {
-        if (t && t->failed()) {
-            *why = t->name() + ": " + t->error();
-            return true;
-        }
+    // source.gen 단계의 실패는 호스트가 본다
+    if (pub_ && pub_->thread().failed()) {
+        *why = pub_->thread().name() + ": " + pub_->thread().error();
+        return true;
     }
     return false;
 }
 
+// 안전 상태(기본 안전망): 끝나기 전에 한 번. 실제 워커는 장치를 멈추는 명령 등. 예제는 기록만
+void Module::safe_state() { std::printf("source: safe state (example: nothing to stop)\n"); }
+
 void Module::stop() {
-    if (thread_) {
-        thread_->request_stop();
-        thread_->join();
-    }
-    if (made_) made_->close();
+    // source.gen 단계는 호스트가 이 stop 전에 정지했다
     if (pub_) pub_->close();
     if (bus_) bus_->stop();
     if (helper_ > 0) worker::kill_wait(helper_);

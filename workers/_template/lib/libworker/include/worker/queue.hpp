@@ -1,6 +1,7 @@
 // 스레드 사이 큐 (워커 구조 기준: 스레드는 큐로만 잇는다. design.md 6.6.1).
 //
-// - 용량 제한. 넘칠 때 정책을 정한다: DropOldest(텔레메트리처럼 최신이 중요) / Reject(명령처럼 잃으면 안 됨)
+// - 용량 제한. 넘칠 때 정책을 정한다: DropOldest(텔레메트리처럼 최신이 중요) / Reject(명령처럼 잃으면 안 됨, 넣은 쪽이 실패를 앎)
+//   / DropNewest(넣은 쪽이 몰라도 되는 새것을 버림)
 // - push는 절대 막히지 않는다(생산자는 기다리지 않는다)
 // - 소비자는 pop_for(시간 제한)로 기다리거나, poll()에 wake_fd()를 넣어 다른 fd와 함께 기다린다
 // - close() 후에는 push가 실패하고, 남은 것을 다 꺼내면 pop이 비어 있음을 돌려준다(정지용)
@@ -21,7 +22,7 @@
 
 namespace worker {
 
-enum class Overflow { DropOldest, Reject };
+enum class Overflow { DropOldest, Reject, DropNewest };
 
 template <class T>
 class BoundedQueue {
@@ -31,7 +32,7 @@ public:
         size_t high_water = 0;  // 지금까지 가장 많이 쌓인 수
         uint64_t pushed = 0;
         uint64_t popped = 0;
-        uint64_t dropped = 0;   // DropOldest로 버린 수 + Reject로 거절한 수
+        uint64_t dropped = 0;   // 넘쳐서 버리거나 거절한 수
     };
 
     BoundedQueue(size_t capacity, Overflow policy) : capacity_(capacity), policy_(policy) {
@@ -45,7 +46,7 @@ public:
     BoundedQueue& operator=(const BoundedQueue&) = delete;
 
     // 막히지 않는다. DropOldest: 가득 차면 가장 오래된 것을 버리고 넣는다(true).
-    // Reject: 가득 차면 넣지 않고 false. close() 뒤에는 false.
+    // Reject: 가득 차면 넣지 않고 false. DropNewest: 가득 차면 넣지 않고 true(버린 수만 셈). close() 뒤에는 false.
     bool push(T item) {
         {
             std::lock_guard<std::mutex> lock(mu_);
@@ -53,6 +54,7 @@ public:
             if (items_.size() >= capacity_) {
                 ++stats_.dropped;
                 if (policy_ == Overflow::Reject) return false;
+                if (policy_ == Overflow::DropNewest) return true;
                 items_.pop_front();
             }
             items_.push_back(std::move(item));

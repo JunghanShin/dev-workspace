@@ -68,6 +68,37 @@ def _child_setup():
         _libc.prctl(1, signal.SIGTERM)
 
 
+def _process_options(t):
+    """worker type "process": {"nice": -20..19, "cpu": [번호...]} → (nice, cpus). 잘못된 값은 무시(경고)"""
+    p = t.get("process") if isinstance(t, dict) else None
+    if not isinstance(p, dict):
+        return None, None
+    nice, cpus = p.get("nice"), p.get("cpu")
+    if not (isinstance(nice, int) and not isinstance(nice, bool) and -20 <= nice <= 19):
+        nice = None
+    if not (isinstance(cpus, list) and cpus and all(isinstance(c, int) and not isinstance(c, bool) and c >= 0 for c in cpus)):
+        cpus = None
+    return nice, cpus
+
+
+def _child_setup_with(nice, cpus):
+    """워커 프로세스 우선순위·CPU(exec 전에 적용해 워커의 모든 스레드가 물려받음). 실패해도 워커는 띄운다
+    (낮추는 nice·실시간은 서비스의 LimitNICE·LimitRTPRIO가 있어야 함)"""
+    def setup():
+        _child_setup()
+        if nice is not None:
+            try:
+                os.setpriority(os.PRIO_PROCESS, 0, nice)
+            except OSError:
+                pass
+        if cpus is not None:
+            try:
+                os.sched_setaffinity(0, cpus)
+            except OSError:
+                pass
+    return setup
+
+
 def _now_iso():
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -97,6 +128,10 @@ class Worker:
         self.last_signal = None
         self.last_error = None
         self.restart_count = 0  # 마지막 start 명령 이후 실패로 인한 재시작 횟수
+        self.fail_streak = 0    # 연달아 빨리 죽은 횟수(재시작 간격을 늘림)
+        self.fail_times = []    # 최근 실패 시각(연속 실패 판정)
+        self.crash_loop = False  # crash_window_s 안에 crash_count번 넘게 죽음
+        self.process = None     # 적용을 요청한 프로세스 우선순위·CPU {"nice", "cpu"}
         self.started_at = None
         self.spawn_mono = None
         self.last_hb_mono = None
@@ -138,6 +173,10 @@ class Worker:
             "last_signal": self.last_signal,
             "last_error": self.last_error,
             "restart_count": self.restart_count,
+            "crash_loop": self.crash_loop,
+            "restart_in_s": (round(max(0.0, self.next_start_mono - now), 1)
+                             if self.proc is None and self.actual == "exited" else None),
+            "process": self.process,
             "started_at": self.started_at,
             "last_heartbeat_ms_ago": hb_ago,
             "progress": self.progress,
@@ -463,6 +502,9 @@ class Supervisor:
         if w.proc is None:
             # 재시작 대기 중이어도 명령이 오면 바로 띄운다
             w.restart_count = 0
+            w.fail_streak = 0
+            w.crash_loop = False
+            w.fail_times = []
             w.next_start_mono = 0.0
         self._save_runtime()  # 현재 실행 상태만. 부팅 정책(autostart)은 바꾸지 않는다
         self._emit_worker(w)
@@ -579,6 +621,11 @@ class Supervisor:
                 w.last_error = "stalled: no READY in %ss" % t["start_timeout_sec"]
                 self._terminate(w, "stalled")
             return
+        # 오래 정상으로 돌았으면 재시작 간격·연속 실패 표시를 처음으로
+        if (w.fail_streak or w.crash_loop) and now - w.spawn_mono >= self.settings["restart"]["healthy_s"]:
+            w.fail_streak = 0
+            w.crash_loop = False
+            self._emit_worker(w)
         # Manager는 워커 프로세스만 본다(heartbeat). progress는 장비가 끊기면 정상 워커도
         # 늘지 않으므로 멈춤 판단에 쓰지 않는다(design.md 9장). 장비 상태는 워커가 지표로 보고한다.
         watchdog = t["watchdog_sec"]
@@ -629,10 +676,12 @@ class Supervisor:
             env["WORKSPACE_MANAGER_SOCKET"] = os.path.join(self.settings["run_dir"], "manager-%s.sock" % w.id)
         # 파이프를 쓰지 않는다: 파이프가 차면 워커가 블로킹된다 (design.md 9.4)
         logf = open(self.store.log_path(w.id), "ab")
+        nice, cpus = _process_options(t)
+        w.process = ({k: v for k, v in (("nice", nice), ("cpu", cpus)) if v is not None} or None)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv, stdin=asyncio.subprocess.DEVNULL, stdout=logf, stderr=logf,
-                env=env, start_new_session=True, preexec_fn=_child_setup)
+                env=env, start_new_session=True, preexec_fn=_child_setup_with(nice, cpus))
         except OSError as e:
             logf.close()
             w.last_error = "spawn failed: %s" % e
@@ -731,7 +780,17 @@ class Supervisor:
         self._emit_worker(w)
 
     def _on_failure(self, w, now):
-        interval = self.settings["restart"]["interval_s"]
+        r = self.settings["restart"]
+        # 오래 돌다 죽었으면 간격을 처음으로, 빨리 연달아 죽으면 두 배씩(최대 max_interval_s)
+        ran = (now - w.spawn_mono) if w.spawn_mono is not None else 0.0
+        w.fail_streak = 0 if ran >= r["healthy_s"] else w.fail_streak + 1
+        interval = min(r["max_interval_s"], r["interval_s"] * (2 ** max(0, w.fail_streak - 1)))
+        w.fail_times = [x for x in w.fail_times if now - x < r["crash_window_s"]] + [now]
+        was = w.crash_loop
+        w.crash_loop = len(w.fail_times) >= r["crash_count"]
+        if w.crash_loop and not was:
+            log.error("%s crash loop: %d failures in %.0fs (last: %s)",
+                      w.id, len(w.fail_times), r["crash_window_s"], w.last_error)
         w.restart_count += 1
         w.actual = "exited"
         w.next_start_mono = now + interval
