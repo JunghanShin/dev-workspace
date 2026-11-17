@@ -119,7 +119,7 @@ def _string(f, v, path, errs):
     elif fmt == "host_port":
         host, _, port = v.rpartition(":")
         if not host or not port.isdigit() or not 1 <= int(port) <= 65535 or not _HOST_RE.match(host):
-            errs[path] = "호스트:포트 형식이어야 합니다(예: 127.0.0.1:14551)"
+            errs[path] = "호스트:포트 형식이어야 합니다(예: 127.0.0.1:9000)"
             return
     elif fmt == "stream_url":
         if not _URL_RE.match(v):

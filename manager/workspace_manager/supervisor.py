@@ -716,7 +716,7 @@ class Supervisor:
             return
 
         # 이하 실패 (design.md 6.3 종료 판정 표). 사유만 기록하고 같은 간격으로 계속 재시작한다.
-        # 계속할지 멈출지는 외부(REST·VSM)의 start/stop이 정한다
+        # 계속할지 멈출지는 외부(REST·운용 인터페이스 워커)의 start/stop이 정한다
         if reason == "stalled":
             pass  # last_error는 판정 시점에 기록됨
         elif rc == 0:

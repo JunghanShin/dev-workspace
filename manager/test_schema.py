@@ -88,7 +88,7 @@ class SchemaFiles(unittest.TestCase):
         self.assertTrue(found)
 
 
-# 값 검사용 예시 스키마(장치 워커의 칸 모양: 카메라 짐벌, 영상 카메라, FC). 특정 워커에 기대지 않는다
+# 값 검사용 예시 스키마(장치 워커의 칸 모양: 카메라 짐벌, 영상 카메라, 네트워크 장치). 특정 워커에 기대지 않는다
 STREAM_FIELDS = load(os.path.join(ROOT, "workers/_template/lib/libvideo/stream-schema.json"))["fields"]
 GIMBAL = {"groups": [
     {"title": "카메라", "section": "siyi", "fields": [
@@ -101,37 +101,37 @@ GIMBAL = {"groups": [
         {"key": "streams", "type": "list", "item_key": "name", "fields": STREAM_FIELDS}]}]}
 CAMERA = {"groups": [{"title": "카메라", "section": "camera", "fields": [
     {"key": "downsampling", "type": "enum", "options": [[1, "원본"], [2, "2×2 비닝"]], "default": 1}]}]}
-FC = {"groups": [{"title": "FC", "section": "fc", "fields": [
-    {"key": "listen", "type": "string", "format": "host_port", "default": "127.0.0.1:14551"},
+LINK = {"groups": [{"title": "장치 링크", "section": "link", "fields": [
+    {"key": "listen", "type": "string", "format": "host_port", "default": "127.0.0.1:9000"},
     {"key": "streams", "type": "map", "key_pattern": "^[A-Z][A-Z0-9_]*$", "value_type": "number", "min": 0, "max": 500}]}]}
 
 
 class Values(unittest.TestCase):
     def setUp(self):
-        for sch in (GIMBAL, CAMERA, FC):
+        for sch in (GIMBAL, CAMERA, LINK):
             self.assertEqual(check_schema(sch), [])
-        self.siyi, self.ximea, self.fc = GIMBAL, CAMERA, FC
+        self.gimbal, self.camera, self.link = GIMBAL, CAMERA, LINK
 
     def test_empty_config_is_ok(self):
-        self.assertEqual(check_config(self.siyi, {}), {})
+        self.assertEqual(check_config(self.gimbal, {}), {})
 
     def test_unknown_keys_are_kept_unchecked(self):
-        self.assertEqual(check_config(self.siyi, {"command_socket": "/tmp/x.sock"}), {})
+        self.assertEqual(check_config(self.gimbal, {"command_socket": "/tmp/x.sock"}), {})
 
     def test_scalar_errors(self):
-        errs = check_config(self.siyi, {"siyi": {"camera_ip": "192.168.1", "center_pitch": 120,
+        errs = check_config(self.gimbal, {"siyi": {"camera_ip": "192.168.1", "center_pitch": 120,
                                                  "video_bitrate_kbps": 1.5, "time_sync": "yes",
                                                  "video_codec": "mjpeg"}})
         self.assertEqual(set(errs), {"siyi.camera_ip", "siyi.center_pitch", "siyi.video_bitrate_kbps",
                                      "siyi.time_sync", "siyi.video_codec"})
 
     def test_enum_numeric_and_bool(self):
-        self.assertEqual(check_config(self.ximea, {"camera": {"downsampling": 2}}), {})
-        self.assertIn("camera.downsampling", check_config(self.ximea, {"camera": {"downsampling": True}}))
-        self.assertIn("camera.downsampling", check_config(self.ximea, {"camera": {"downsampling": 3}}))
+        self.assertEqual(check_config(self.camera, {"camera": {"downsampling": 2}}), {})
+        self.assertIn("camera.downsampling", check_config(self.camera, {"camera": {"downsampling": True}}))
+        self.assertIn("camera.downsampling", check_config(self.camera, {"camera": {"downsampling": 3}}))
 
     def test_list_items(self):
-        errs = check_config(self.siyi, {"stream": {"streams": [
+        errs = check_config(self.gimbal, {"stream": {"streams": [
             {"name": "main", "url": "rtsp://127.0.0.1:8554/siyi"},
             {"name": "main", "url": "http://x"},
             {"url": "rtsp://a:1/b", "bitrate_kbps": 10},
@@ -140,25 +140,25 @@ class Values(unittest.TestCase):
                                      "stream.streams[2].bitrate_kbps"})
 
     def test_map(self):
-        self.assertEqual(check_config(self.fc, {"fc": {"streams": {"ATTITUDE": 10, "HEARTBEAT": 1}}}), {})
-        errs = check_config(self.fc, {"fc": {"streams": {"attitude": 10, "GPS_RAW_INT": 900}}})
-        self.assertEqual(set(errs), {"fc.streams.attitude", "fc.streams.GPS_RAW_INT"})
+        self.assertEqual(check_config(self.link, {"link": {"streams": {"STATUS": 10, "POSITION": 1}}}), {})
+        errs = check_config(self.link, {"link": {"streams": {"status": 10, "POSITION": 900}}})
+        self.assertEqual(set(errs), {"link.streams.status", "link.streams.POSITION"})
 
     def test_sections(self):
         sch = {"groups": [
-            {"title": "모듈", "section": "fc", "fields": [{"key": "listen", "type": "string", "format": "host_port"}]},
+            {"title": "모듈", "section": "link", "fields": [{"key": "listen", "type": "string", "format": "host_port"}]},
             {"title": "호스트", "fields": [{"key": "watchdog_sec", "type": "number", "min": 1}]}]}
         self.assertEqual(check_schema(sch), [])
-        self.assertEqual(check_config(sch, {"fc": {"listen": "127.0.0.1:1"}, "watchdog_sec": 3}), {})
-        self.assertEqual(set(check_config(sch, {"fc": {"listen": "x"}, "watchdog_sec": 0})), {"fc.listen", "watchdog_sec"})
-        self.assertEqual(set(check_config(sch, {"fc": 5})), {"fc"})
+        self.assertEqual(check_config(sch, {"link": {"listen": "127.0.0.1:1"}, "watchdog_sec": 3}), {})
+        self.assertEqual(set(check_config(sch, {"link": {"listen": "x"}, "watchdog_sec": 0})), {"link.listen", "watchdog_sec"})
+        self.assertEqual(set(check_config(sch, {"link": 5})), {"link"})
         self.assertEqual(check_config(sch, {}), {})
         self.assertTrue(check_schema({"groups": [{"section": "Bad-Name", "fields": []}]}))
 
     def test_host_port(self):
-        self.assertEqual(check_config(self.fc, {"fc": {"listen": "127.0.0.1:14551"}}), {})
-        for bad in ("127.0.0.1", ":14551", "host:0", "host:99999"):
-            self.assertIn("fc.listen", check_config(self.fc, {"fc": {"listen": bad}}), bad)
+        self.assertEqual(check_config(self.link, {"link": {"listen": "127.0.0.1:9000"}}), {})
+        for bad in ("127.0.0.1", ":9000", "host:0", "host:99999"):
+            self.assertIn("link.listen", check_config(self.link, {"link": {"listen": bad}}), bad)
 
     def test_worker_id_and_refs(self):
         """상대 워커 칸(format worker_id): 형식 검사, 상태 peers(빈 칸은 빠짐, 목록 안도 찾음) — design.md 6.6.7"""

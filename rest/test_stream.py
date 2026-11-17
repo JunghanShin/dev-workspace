@@ -21,7 +21,7 @@ class FakeWorker:
         self.conns = []
         self.seq = 0
         self.state = {"vehicle": {"mode": "POSCTL", "roll": 0}}
-        self.events = [{"seq": 1, "text": "fc found"}]
+        self.events = [{"seq": 1, "text": "device found"}]
         self.lock = threading.Lock()
         self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.srv.bind(path)

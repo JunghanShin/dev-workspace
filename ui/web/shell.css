@@ -135,7 +135,7 @@ details.sec > .inner { padding: 4px 16px 16px; }
 .itag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--idle); white-space: nowrap; }
 .itag .icon { width: 15px; height: 15px; }
 .itag.ok { color: var(--ok); } .itag.info { color: var(--info); } .itag.warn { color: var(--warn); } .itag.bad { color: var(--bad); }
-/* 자세 지시계(수평계): 하늘·땅·수평선·피치 눈금·기체 기호 */
+/* 자세 지시계(수평계): 하늘·땅·수평선·피치 눈금·자세 기호 */
 .ahi { display: block; width: 100%; max-width: 220px; aspect-ratio: 1; }
 .ahi .sky { fill: #1d4f80; } .ahi .ground { fill: #5a3d22; }
 .ahi .horizon { stroke: #e3e7ec; stroke-width: 1.5; }

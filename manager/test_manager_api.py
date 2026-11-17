@@ -91,7 +91,7 @@ class ManagerApiWorker(unittest.TestCase):
         # 예전 구성이 남긴 데이터: Manager가 지워야 한다(예전 이름 소켓, 빠진 워커의 실행 설정 파일)
         os.makedirs(os.path.join(data, "run"), exist_ok=True)
         os.makedirs(os.path.join(data, "state", "workers"), exist_ok=True)
-        self.stale = [os.path.join(data, "run", "manager-vsm.sock"), os.path.join(data, "state", "workers", "ghost-0.json")]
+        self.stale = [os.path.join(data, "run", "manager-ops.sock"), os.path.join(data, "state", "workers", "ghost-0.json")]
         for f in self.stale:
             open(f, "w").close()
         # 예전 보드에 남은 설정: 무시되어야 한다(운용 모드·제어권 없음, design.md 6.1)

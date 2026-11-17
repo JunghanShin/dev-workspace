@@ -1,13 +1,11 @@
 #!/bin/bash
 # 워크스페이스 보드 브링업 (design.md 11.1). 시스템에 남기는 것은 최소한이다:
 #   - systemd 서비스 파일 1개(/etc/systemd/system/workspace.service): 부팅 시 워크스페이스의 workspace-start.sh 실행
-#   - MAVLink 라우터 서비스 파일 1개(/etc/systemd/system/workspace-mavlink-router.service): install_mavlink_router.sh.
-#     이미 설치되어 있으면(수동 설치 포함) 건너뛴다. 실행 파일은 워크스페이스, 설정은 데이터 폴더
 #   - 로컬 미디어 서버 서비스 파일 1개(/etc/systemd/system/workspace-mediamtx.service): install_mediamtx.sh.
-#     라우터와 같은 방식. 원격 중계용 ffmpeg(없을 때만 apt)
+#     이미 설치되어 있으면(수동 설치 포함) 건너뛴다. 실행 파일은 워크스페이스, 설정은 데이터 폴더. 원격 중계용 ffmpeg(없을 때만 apt)
 #   - 의존 패키지(없을 때만 apt): python3, openssh-server, util-linux(setpriv), curl
 #   - Jetson 전원 모드(nvpmodel): 개발 보드는 최대 성능 MAXN_SUPER로(install/bin/workspace-power-mode)
-#   - 워커의 시스템 설치: 고른 워커의 workers/<폴더>/workspace/install.sh (udev 규칙, 패키지, SDK)
+#   - 워커의 시스템 설치: 고른 워커의 workers/<폴더>/workspace/install.sh (udev 규칙, 패키지, SDK, 워커가 쓰는 서비스)
 # 코드·설정·상태·기록은 시스템 폴더(/etc, /opt, /var)에 두지 않는다.
 # 워크스페이스와 데이터 폴더(<워크스페이스>_data)에만 있다. 데이터 폴더는 workspace-start.sh가 만든다.
 #
@@ -17,13 +15,13 @@
 #   sudo bash install_workspace.sh --reset-config        프로필 값으로 보드 설정을 되돌림(기존은 백업)
 #   sudo bash install_workspace.sh --power-mode <이름|keep>  전원 모드(기본 MAXN_SUPER, keep = 건드리지 않음)
 #
-# 프로필 = 프로젝트·현장마다 다른 설정 파일을 모은 폴더. install/profiles/<이름>/에 둔다. 들어 있는 파일만
-# <데이터>/config/에 복사한다: network.conf, manager.json, workspace.env,
-# mavlink-router.conf, mediamtx.yml. 처음 설치할 때만 넣는다: 보드에 이미 그 파일이 있으면(화면·명령으로
+# 프로필 = 프로젝트·현장마다 다른 설정 파일을 모은 폴더. install/profiles/<이름>/에 둔다. 폴더 맨 위의 설정 파일을
+# 모두 <데이터>/config/에 복사한다(README·*.md·product.json·하위 폴더 제외). 워크스페이스 파일(network.conf,
+# manager.json, workspace.env, mediamtx.yml)과 워커가 쓰는 설정(워커 install.sh가 읽음)을 함께 둔다. 처음 설치할 때만 넣는다: 보드에 이미 그 파일이 있으면(화면·명령으로
 # 바꾼 값은 Manager가 이 파일에 바로 저장한다) 그대로 두고, --reset-config일 때만 config/backup-<시각>/에
-# 남기고 덮어쓴다. 그 뒤의 설치(워커, 라우터, 미디어 서버)는 데이터 폴더 설정을 따른다.
+# 남기고 덮어쓴다. 그 뒤의 설치(워커, 미디어 서버)는 데이터 폴더 설정을 따른다.
 # default = 프로필을 복사하지 않음: 데이터 폴더에 있는 설정은 그대로, 없는 파일만 기본값(install/config/)으로
-# 만든다(라우터 FC 포트 자동 찾기 포함).
+# 만든다.
 #
 # 워커 = workers/ 아래 workspace/worker-types.json이 있는 폴더. 설치는 워커를 등록하지 않는다:
 # 워크스페이스가 시작할 때마다 워커 폴더를 보고 목록을 맞춘다(design.md 6.3.1). 여기서는 워커가 필요로 하는
@@ -36,18 +34,24 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 SRC="$(cd "$HERE/.." && pwd)"
 UNIT=workspace.service
-PROFILE_FILES=(network.conf manager.json workspace.env mavlink-router.conf mediamtx.yml)  # 워커 설정은 워커 폴더(design.md 6.3.1)
+# 프로필 폴더의 설정 파일(맨 위 파일만, README·*.md·product.json·숨김 파일 제외). 워커 설정은 워커 폴더(design.md 6.3.1)
+profile_files() {
+  local f
+  for f in "$1"/*; do
+    [[ -f "$f" ]] || continue
+    case "$(basename "$f")" in README*|*.md|product.json|.*) continue ;; esac
+    basename "$f"
+  done
+}
 
 PROFILES_DIR="$HERE/profiles"
 
 # install/profiles/ 아래 프로필 이름(설정 파일이 하나라도 있는 폴더)
 list_profiles() {
-  local d f
+  local d
   for d in "$PROFILES_DIR"/*/; do
     [[ -d "$d" ]] || continue
-    for f in "${PROFILE_FILES[@]}"; do
-      if [[ -f "$d$f" ]]; then basename "$d"; break; fi
-    done
+    [[ -n "$(profile_files "${d%/}")" ]] && basename "$d"
   done
 }
 
@@ -183,8 +187,8 @@ if [[ -n "$PROFILE" ]]; then
   backup="$DATA/config/backup-$(date +%Y%m%d-%H%M%S)"
   copied=0
   kept=()
-  for f in "${PROFILE_FILES[@]}"; do
-    [[ -f "$PROFILE/$f" ]] || continue
+  while read -r f; do
+    [[ -n "$f" ]] || continue
     copied=$((copied + 1))
     dst="$DATA/config/$f"
     cmp -s "$PROFILE/$f" "$dst" 2>/dev/null && continue   # 이미 같음
@@ -200,8 +204,8 @@ if [[ -n "$PROFILE" ]]; then
     install -m 644 -o "$owner" -g "$OWNER_GRP" "$PROFILE/$f" "$dst"
     changed+=("$f")
     echo "  $f"
-  done
-  (( copied > 0 )) || echo "warning: no profile files in $PROFILE (${PROFILE_FILES[*]})" >&2
+  done < <(profile_files "$PROFILE")
+  (( copied > 0 )) || echo "warning: no profile files in $PROFILE" >&2
   (( ${#kept[@]} == 0 )) || echo "  보드 값 유지(프로필과 다름): ${kept[*]}  (프로필로 되돌리려면 --reset-config)"
   [[ ! -d "$backup" ]] || { chown -R "$owner:$OWNER_GRP" "$backup"; echo "  previous files: $backup"; }
   # 어느 프로필을 언제 넣었는지 기록(화면 설정 > 워크스페이스, REST GET /system/workspace)
@@ -251,22 +255,15 @@ for path in sorted(glob.glob(os.path.join(sys.argv[1], "*", "worker-types.json")
                 print("warning: built-in %r disabled on this board (missing: %s)" % (name, ", ".join(missing)), file=sys.stderr)
 PY
 
-# ---- MAVLink 라우터 (FC 연동, docs/fc-mavlink-router.md) ---------------------------------------
-# 이미 설치되어 있으면 건너뛴다. 실패해도 워크스페이스 설치는 계속하고 끝에 알린다
-echo "==== mavlink-router"
-router_failed=no
-WORKSPACE_ROOT="$SRC" WORKSPACE_DATA="$DATA" bash "$HERE/install_mavlink_router.sh" || router_failed=yes
-
 # ---- 로컬 미디어 서버 MediaMTX (워커 영상 로컬 시청 + 원격 중계, docs/local-ui-media.md) ---------------
 # 이미 설치되어 있으면 건너뛴다. 실패해도 워크스페이스 설치는 계속하고 끝에 알린다
 echo "==== mediamtx"
 mediamtx_failed=no
 WORKSPACE_ROOT="$SRC" WORKSPACE_DATA="$DATA" bash "$HERE/install_mediamtx.sh" || mediamtx_failed=yes
 
-# 프로필이 라우터·미디어 서버 설정을 바꿨으면, 이미 돌고 있던 우리 서비스에 적용
+# 프로필이 미디어 서버 설정을 바꿨으면, 이미 돌고 있던 서비스에 적용(워커가 쓰는 서비스는 워커 install.sh가 맡음)
 for f in "${changed[@]}"; do
   case "$f" in
-    mavlink-router.conf) systemctl try-restart workspace-mavlink-router.service 2>/dev/null || true ;;
     mediamtx.yml) systemctl try-restart workspace-mediamtx.service 2>/dev/null || true ;;
   esac
 done
@@ -290,10 +287,6 @@ else
   echo "warning: UI files missing in $SRC/ui/web (workspace copy incomplete?)" >&2
 fi
 failed=no
-if [[ "$router_failed" == yes ]]; then
-  echo "FAILED: mavlink-router (fix, then: sudo bash $HERE/install_mavlink_router.sh)" >&2
-  failed=yes
-fi
 if [[ "$mediamtx_failed" == yes ]]; then
   echo "FAILED: mediamtx (fix, then: sudo bash $HERE/install_mediamtx.sh)" >&2
   failed=yes

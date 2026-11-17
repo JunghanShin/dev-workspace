@@ -467,7 +467,7 @@ function checkStr(f, v) {
   if (f.format === "ipv4" && !IPV4_RE.test(v)) return "IPv4 주소여야 합니다(예: 192.168.1.10)";
   if (f.format === "host_port") {
     const i = v.lastIndexOf(":"), host = v.slice(0, i), port = v.slice(i + 1);
-    if (i <= 0 || !/^\d+$/.test(port) || +port < 1 || +port > 65535 || !HOST_RE.test(host)) return "호스트:포트 형식이어야 합니다(예: 127.0.0.1:14551)";
+    if (i <= 0 || !/^\d+$/.test(port) || +port < 1 || +port > 65535 || !HOST_RE.test(host)) return "호스트:포트 형식이어야 합니다(예: 127.0.0.1:9000)";
   }
   if (f.format === "stream_url" && !STREAM_URL_RE.test(v)) return "rtsp://호스트:포트/경로 같은 주소여야 합니다";
   if (f.format === "worker_id" && !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(v)) return "워커 id여야 합니다(영문 소문자·숫자·-·_)";

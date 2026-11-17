@@ -97,7 +97,7 @@ seed() {  # seed <파일> <기본값 파일 또는 내용>  : 없을 때만 만�
   log "created $dst (default)"
 }
 
-mkdir -p "$DATA/config/worker-types.d" "$DATA/config/mavlink-router.d" "$DATA/state" "$DATA/records" "$DATA/run" "$DATA/sdk"
+mkdir -p "$DATA/config/worker-types.d" "$DATA/state" "$DATA/records" "$DATA/run" "$DATA/sdk"
 # 더 이상 쓰지 않는 데이터 파일 정리(운용 모드 0.25에서 없앰, 예전 workers.json 옮긴 흔적): 지금 구성과 맞춘다
 for f in config/mode config/workers.json.moved state/workers.json.bak; do
   if [[ -e "$DATA/$f" ]]; then rm -f "$DATA/$f"; log "removed obsolete $DATA/$f"; fi
@@ -106,9 +106,6 @@ seed network.conf "ENABLED=no"
 seed workspace.env ""
 seed manager.json "{}"
 seed worker-types.json "{}"
-# MAVLink 라우터 설정(workspace-mavlink-router.service가 읽음). 처음에는 install_mavlink_router.sh가 FC 포트를 찾아 만든다.
-# 지워졌을 때만 여기서 기본값(/dev/ttyTHS1)으로 다시 만든다
-seed mavlink-router.conf ""
 # 로컬 미디어 서버 설정(workspace-mediamtx.service가 읽음). 원격 중계 주소가 현장 값
 seed mediamtx.yml ""
 # 페이로드 type 조각은 매번 다시 만든다(지금 워크스페이스에 있는 페이로드만)

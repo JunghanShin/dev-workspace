@@ -4,8 +4,8 @@
 
 - 코드: 워크스페이스 폴더(받은 폴더, 예: `~/dev-workspace`). 여기서 바로 실행한다
 - 데이터: 옆 폴더 **`<워크스페이스 폴더>_data`**(예: `~/dev-workspace_data`). 설정·상태·기록·SDK. 워크스페이스를 통째로 바꿔도 유지되고, 지워지면 시작할 때 다시 만든다. 워크스페이스 폴더 이름을 바꾸면 새 데이터 폴더로 시작한다. 설정 파일(`config/`)별 키·바꾸는 순서: [docs/config.md](../docs/config.md)
-- 프로필: 프로젝트·현장의 워크스페이스 설정(망, 포트, 라우터, 미디어 서버)을 모은 폴더 `install/profiles/<이름>/`. `install_workspace.sh`가 실행할 때 이름을 묻고(Enter = `default`) 데이터 폴더에 넣는다
-- 시스템에 남기는 것: 서비스 파일 3개(`/etc/systemd/system/workspace.service`, `workspace-mavlink-router.service`, `workspace-mediamtx.service`), 의존 패키지(ffmpeg 포함), 장비별 설치(XIMEA udev 규칙)
+- 프로필: 프로젝트·현장의 워크스페이스 설정(망, 포트, 미디어 서버, 워커가 쓰는 설정)을 모은 폴더 `install/profiles/<이름>/`. `install_workspace.sh`가 실행할 때 이름을 묻고(Enter = `default`) 데이터 폴더에 넣는다
+- 시스템에 남기는 것: 서비스 파일 2개(`/etc/systemd/system/workspace.service`, `workspace-mediamtx.service`), 의존 패키지(ffmpeg 포함), 장비별 설치(XIMEA udev 규칙)
 - 워커별 설치·준비 파일은 각 워커 폴더(`workers/<워커>/`)에 있다. 이 폴더는 공통 부분만 갖는다
 - **워커는 등록하지 않는다.** 워커 = 워커 폴더. 설치는 모든 워커 폴더의 시스템 설치(`workspace/install.sh`)만 하고, 워크스페이스가 시작할 때 워커 폴더를 보고 붙인다. 빼려면 폴더를 지우고 다시 시작
 - **워커 설정은 워커 폴더의 `workspace/config.json`(사용 중 프리셋, 자동 시작)과 `workspace/presets/<이름>.json`(설정 묶음)이다. 화면에서 적용·저장하고 깃으로 공유한다(design.md 6.3.1)**
@@ -16,13 +16,10 @@
 | 경로 | 내용 |
 |---|---|
 | `../workspace-start.sh`, `../workspace-stop.sh` | 시작(실행 중이면 멈추고 다시 시작)·종료(워크스페이스 최상위). systemd도 시작 셸만 실행 |
-| `install_workspace.sh` | 브링업: 프로필 선택·적용(실행 시 묻기, `--profile <이름>`), 공통 패키지, 모든 워커의 시스템 설치(`workers/<워커>/workspace/install.sh`), 프로필 되돌리기(`--reset-config`), MAVLink 라우터, MediaMTX, 서비스 파일 |
-| `install_mavlink_router.sh` | FC 연동 MAVLink 라우터 설치. 이미 설치되어 있으면(수동 설치 포함) 건너뜀. `--check`는 상태만 확인. [docs/fc-mavlink-router.md](../docs/fc-mavlink-router.md) |
+| `install_workspace.sh` | 브링업: 프로필 선택·적용(실행 시 묻기, `--profile <이름>`), 공통 패키지, 모든 워커의 시스템 설치(`workers/<워커>/workspace/install.sh`), 프로필 되돌리기(`--reset-config`), 전원 모드, MediaMTX, 서비스 파일 |
 | `install_mediamtx.sh` | 로컬 미디어 서버(MediaMTX) 설치: 워커 영상 로컬 시청(+ 켜면 원격 중계). 이미 설치되어 있으면 건너뜀. `--check`는 상태만 확인. [docs/local-ui-media.md](../docs/local-ui-media.md) |
 | `systemd/workspace.service` | 서비스 파일 원본 |
-| `systemd/workspace-mavlink-router.service` | 라우터 서비스 파일 원본. 워크스페이스와 독립(자동 재시작) |
 | `systemd/workspace-mediamtx.service` | MediaMTX 서비스 파일 원본. 워크스페이스와 독립(자동 재시작) |
-| `bin/mavlink-routerd` | mavlink-router 5e38c7a(aarch64). 서비스가 여기서 바로 실행. sha256 고정 |
 | `mediamtx/` | MediaMTX v1.21.3(arm64) 공식 압축 파일. 설치할 때 같은 폴더에 `mediamtx`를 풀고 서비스가 바로 실행. sha256 고정 |
 | `config/` | 데이터 폴더 설정 기본값(일반 값). 데이터 폴더에 없는 파일만 복사. 현장 값은 넣지 않는다 |
 | `profiles/<이름>/` | 프로필(프로젝트·현장 설정). 설치할 때 이름을 고른다. 예: `myproj` |
@@ -35,7 +32,6 @@
    ```bash
    git clone github-dev-workspace:JunghanShin/dev-workspace.git ~/dev-workspace
    ```
-2. FC를 쓰면 FC 파라미터를 먼저 맞추고 FC 전원을 켠다([docs/fc-mavlink-router.md](../docs/fc-mavlink-router.md) "FC 파라미터")
 3. 설치(프로필 이름을 묻는다. Enter = `default`, 묻지 않으려면 `--profile <이름>`):
    ```bash
    sudo bash ~/dev-workspace/install/install_workspace.sh
@@ -56,21 +52,20 @@
 |---|---|
 | `network.conf` | 보드 고정 IP |
 | `workspace.env` | 화면 제목(`WORKSPACE_UI_TITLE`), REST 포트 |
-| `mavlink-router.conf` | 원격 서버 출구 |
 | `mediamtx.yml` | 원격 미디어 서버 중계 |
 | `manager.json` | Manager 설정 |
 
 - 처음 설치할 때만 넣는다. 데이터 폴더에 이미 다른 내용이 있으면(보드에서 바꾼 값) 그대로 두고 알린다. `--reset-config`면 `config/backup-<시각>/`에 남기고 덮어쓴다
 - 넣은 프로필은 `config/profile.json`에 기록한다(이름, 폴더, 시각, 워크스페이스 커밋, 넣은 파일, 유지한 파일). 화면 설정 > 워크스페이스에서 보인다. 이 기록 전에 설치한 보드는 화면이 보드 파일과 가장 많이 같은 프로필을 "추정"으로 보여 준다
-- 라우터·미디어 서버 설정이 바뀌면 설치 끝에 그 서비스를 다시 시작한다
-- 새 프로필 만들기·프로필로 설치·프로필 고치기(따라 하는 순서): [README "프로필"](../README.md#프로필)
+- 미디어 서버 설정이 바뀌면 설치 끝에 그 서비스를 다시 시작한다(워커가 쓰는 서비스는 그 워커의 install.sh가 맡는다)
+- 새 프로필 만들기·프로필로 설치·프로필 고치기(따라 하는 순서): [README "설정: 프로필과 데이터 폴더"](../README.md#설정-프로필과-데이터-폴더)
 - PC 개발 실행도 같은 프로필을 쓴다: `dev/workspace-dev.sh --profile <이름>`
 
 ### 보드를 새로 플래시한 뒤
 
-holybro-build-image로 만든 이미지(JetPack 6.2.2 런타임, 사용자 `dev`)로 플래시했다면:
+JetPack 6.2.x 이미지로 플래시했다면:
 
-1. USB-C로 접속(`ssh dev@192.168.55.1`)하고 PC의 SSH 키 등록(`ssh-copy-id`)
+1. USB-C로 접속(`ssh <사용자>@192.168.55.1`)하고 PC의 SSH 키 등록(`ssh-copy-id`)
 2. 위 "새 보드" 1~4단계. 고정 IP(프로필), 서비스, 워커 설치(SDK·udev 규칙), ffmpeg가 모두 여기서 설치된다
 3. 필요하면 호스트 이름 변경: `sudo hostnamectl set-hostname <이름>`
 
@@ -97,7 +92,6 @@ bash ~/dev-workspace/workspace-stop.sh
 | `config/network.conf` | 고정 IP(`ENABLED=yes`일 때). SSH는 sshd 기본 22, 외부 포트 변환은 보드 밖 | 다시 시작(`workspace-start.sh`) 또는 재부팅 |
 | `config/workspace.env` | REST 바인딩·포트, 화면 영상 주소(`WORKSPACE_UI_MEDIA_URL`)·제목(`WORKSPACE_UI_TITLE`), 로그 레벨, 로거 주기·용량. 경로 키는 무시 | 다시 시작(`workspace-start.sh`) |
 | `config/manager.json` | Manager 설정(design.md 14장 값 덮어쓰기) | 다시 시작(`workspace-start.sh`) |
-| `config/mavlink-router.conf` | MAVLink 라우터: FC 포트(`Device`, `Baud`), 서버 주소, 워크스페이스 출구. 처음 설치할 때 FC 포트를 찾아 만든다 | `sudo systemctl restart workspace-mavlink-router` |
 | `config/mediamtx.yml` | 로컬 미디어 서버: 수신·시청 포트, 원격 중계 주소(`runOnAvailable`, 현장 값) | `sudo systemctl restart workspace-mediamtx` |
 | `state/logs/<id>.log` | 워커 로그 | — |
 | `run/temp_config.json` | 저장하지 않고 적용한 워커 설정(이번 부팅 동안, 재부팅하면 버림) | — |

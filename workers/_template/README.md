@@ -57,7 +57,7 @@ workers/<이름>/
 │  │  └─ test/               유닛 시험(코어만) + 모듈 시험(호스트 없이)
 │  ├─ libframebus/           데이터 버스 사본(영상 프레임·원시 레코드)
 │  ├─ libvideo/              영상 송출 사본(송출하는 워커만)
-│  └─ lib<장치>/             장치 라이브러리(예: libsiyi, mavlink 헤더)
+│  └─ lib<장치>/             장치 라이브러리(예: 장치 프로토콜 구현, 외부 헤더)
 ├─ tools/                    CLI 도구(있으면)
 ├─ build/                    빌드 결과(git 제외)
 └─ workspace/                워크스페이스 연동 전부. 밖에서 쓰면 폴더째 삭제              ③
@@ -116,12 +116,12 @@ int main(int argc, char** argv) {
 }
 ```
 
-| 이름 | 규칙 | 예 (모듈 `fc`) |
+| 이름 | 규칙 | 예 (모듈 `link`) |
 |---|---|---|
-| 설정 칸 | `config["<모듈>"]` | `{"fc": {"listen": "127.0.0.1:14551"}}` |
-| 명령 | `<모듈>.<명령>` | `fc.set_mode`, 상태는 `get_status` → `data.fc` |
-| 지표 | `<모듈>_<이름>`(호스트가 붙임) | `fc_link`, `fc_loss_pct` |
-| 스레드 | `<모듈>.<역할>` | `fc.rx`, `fc.tx`, `fc.pub` |
+| 설정 칸 | `config["<모듈>"]` | `{"link": {"listen": "127.0.0.1:9000"}}` |
+| 명령 | `<모듈>.<명령>` | `link.set_mode`, 상태는 `get_status` → `data.link` |
+| 지표 | `<모듈>_<이름>`(호스트가 붙임) | `link_link`, `link_loss_pct` |
+| 스레드 | `<모듈>.<역할>` | `link.rx`, `link.tx`, `link.pub` |
 
 ## 모듈 만들기·붙이기
 

@@ -3,7 +3,6 @@
 *.png binary
 *.tgz binary
 *.tar binary
-install/bin/mavlink-routerd binary
 *.tar.gz binary
 workers/*/bin/*-worker binary
 workers/*/bin/*-cli binary

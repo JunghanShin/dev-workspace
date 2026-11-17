@@ -1,6 +1,6 @@
 """Manager API: Unix 소켓 요청-응답·구독 (design.md 6.2).
 
-클라이언트는 REST, logger, Manager API를 쓰는 워커(워커 선언 "manager_api": true, 예: VSM 개발)다.
+클라이언트는 REST, logger, Manager API를 쓰는 워커(워커 선언 "manager_api": true, 예: 외부 운용 인터페이스)다.
 모든 프로세스가 같은 계정으로 돌므로 클라이언트는 접속한 소켓으로 구분한다:
   {run_dir}/manager-rest.sock, manager-logger.sock   플랫폼 클라이언트. logger는 읽기 전용(기록만)
   {run_dir}/manager-<워커 id>.sock                   Manager API를 쓰는 워커. 자기 워커는 못 건드림

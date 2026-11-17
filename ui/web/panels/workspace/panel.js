@@ -13,7 +13,6 @@ const FILE_DESC = {
   "network.conf": "보드 망 설정(고정 IP 등, 설치할 때 적용)",
   "manager.json": "Manager 동작(워치독·재시작 정책 등)",
   "workspace.env": "워크스페이스 실행 설정(REST 포트, 화면 제목, 기록 등)",
-  "mavlink-router.conf": "MAVLink 라우터(FC ↔ GCS·워커)",
   "mediamtx.yml": "미디어 서버(MediaMTX) 설정",
 };
 

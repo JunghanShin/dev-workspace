@@ -2,7 +2,7 @@
 
 워크스페이스 설정은 파일로만 바꾼다(design.md 6.10). 화면은 보기만 한다:
   - 적용한 프로필: <데이터>/config/profile.json (install_workspace.sh가 프로필을 넣을 때 기록)
-  - 설정 파일(프로필 파일 5개): 보드 내용, 출처(프로필 그대로 / 기본값 / 보드에서 바뀜)
+  - 설정 파일(워크스페이스 기본 파일 + 적용한 프로필의 파일): 보드 내용, 출처(프로필 그대로 / 기본값 / 보드에서 바뀜)
   - workspace.env 키마다 값, 기본값, 설명(기본 파일 install/config/workspace.env의 주석)
 비밀값(이름에 PASS·TOKEN·SECRET·API_KEY가 들어간 값)은 가린다. 파일 경로는 고정이다(요청이 경로를 정하지 않음).
 """
@@ -13,9 +13,18 @@ import re
 import subprocess
 import time
 
-# install/install_workspace.sh의 PROFILE_FILES와 같게
-PROFILE_FILES = ["network.conf", "manager.json", "workspace.env", "mavlink-router.conf",
-                 "mediamtx.yml"]
+# 워크스페이스 기본 설정 파일(install/config/의 파일 중 프로필로 바꾸는 것). 프로필은 이 밖의 파일도 가질 수 있다
+# (워커가 쓰는 설정 등, install_workspace.sh profile_files와 같은 규칙)
+NOT_PROFILE = ("worker-types.json", "product.json")
+
+
+def profile_files(folder):
+    """폴더 맨 위의 설정 파일 이름(README·*.md·product.json·숨김 제외)"""
+    if not folder or not os.path.isdir(folder):
+        return []
+    return sorted(f for f in os.listdir(folder)
+                  if os.path.isfile(os.path.join(folder, f)) and not f.startswith((".", "README"))
+                  and not f.endswith(".md") and f not in NOT_PROFILE)
 MAX_TEXT = 64 * 1024
 MASK = "••••"
 _SECRET_NAME = re.compile(r"(?i)(pass(word|wd)?|token|secret|api_?key|private_?key)")
@@ -109,9 +118,9 @@ def info(workspace, data_dir):
     if profile is None:
         # 기록 전에 설치한 보드: 보드 파일과 가장 많이 같은 프로필을 추정(비교에만 쓴다)
         best, best_n = None, 0
-        board_files = {n: _read(os.path.join(cfg, n)) for n in PROFILE_FILES}
         for d in sorted(glob.glob(os.path.join(workspace, "install", "profiles", "*", ""))):
-            n = sum(1 for f in PROFILE_FILES if board_files[f] is not None and _read(os.path.join(d, f)) == board_files[f])
+            n = sum(1 for f in profile_files(d) if _read(os.path.join(cfg, f)) is not None
+                    and _read(os.path.join(d, f)) == _read(os.path.join(cfg, f)))
             if n > best_n:
                 best, best_n = d, n
         if best:
@@ -120,7 +129,9 @@ def info(workspace, data_dir):
                        "guessed": True, "matching_files": best_n}
 
     files = []
-    for name in PROFILE_FILES:
+    names = profile_files(defaults_dir)
+    names += [f for f in profile_files(src_dir) if f not in names]
+    for name in names:
         board = _read(os.path.join(cfg, name))
         prof = _read(os.path.join(src_dir, name)) if src_dir else None
         default = _read(os.path.join(defaults_dir, name))

@@ -89,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
     timeout = 5  # 느린 HTTP 클라이언트가 스레드를 붙잡지 못하게
     client = None
     data_dir = ""
-    command_timeout = 3.0  # 워커 명령 응답 대기(초). 장치 응답(FC ACK 등)을 기다리는 명령이 있다
+    command_timeout = 3.0  # 워커 명령 응답 대기(초). 장치 응답(ACK 등)을 기다리는 명령이 있다
     hub = None             # stream.Hub (main에서 만든다)
     build_job = None       # productbuild.Job (main에서 만든다, 개발 모드)
 

@@ -10,7 +10,7 @@
   GET /system/power_modes             nvpmodel 모드 이름            {"modes": {"0": "MAXN_SUPER", ...}}
   GET /workers/{id}/tasks?pid=N       워커(프로세스 그룹 N = 워커 pid)의 프로세스·스레드와 스레드별 CPU
                                       {"pid", "processes": [{pid, ppid, name, rss_mb, cpu, threads: [{tid, name, cpu}]}]}
-  GET /system/workspace              이 보드의 워크스페이스·프로필: 적용한 프로필, 설정 파일 5개(내용·출처),
+  GET /system/workspace              이 보드의 워크스페이스·프로필: 적용한 프로필, 설정 파일(기본 + 프로필, 내용·출처),
                                       workspace.env 키별 값·기본값·설명 (profile.py, 비밀값은 가림)
   GET /history/{id}?minutes=60&points=360&keys=a,b&csv=1
                                       지난 지표(기록을 칸 평균)       {"lines": [JSON 또는 CSV 줄...]}
