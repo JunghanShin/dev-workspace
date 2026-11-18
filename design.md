@@ -463,7 +463,7 @@ main.cpp:  worker::Host host("<이름>-worker");
 workers/_template/
 ├─ CMakeLists.txt            이 폴더만으로 빌드(BUILD_TESTING, WORKER_WORKSPACE)
 ├─ README.md                 틀 사용법: 새 워커 만들기, 모듈 만들기·붙이기·떼기, 시험
-├─ new/README.md, design.md  새 워커 문서 틀(@NAME@ @TYPE@). design.md 3장이 ICD 틀(명령·상태·지표·스트림·데이터 버스·연결·설정)
+├─ new/README.md, design.md  새 워커 문서 틀(@NAME@ @TYPE@). design.md 2.2는 실행 구조 한눈 그림(structure.svg: 프로세스 경계·스레드·자식 프로세스·흐름·범례) 먼저, 3장이 ICD 틀(명령·상태·지표·스트림·데이터 버스·연결·설정)
 ├─ io.json, io/              입출력 정의: 내보내는 정의 example(io/example.json), peer가 쓰는 사본(io/uses/example.json) 6.6.7.1
 ├─ src/main.cpp              Host + source·processor(src.port())·peer 조립                  ②
 ├─ test/test_worker.cpp      워커 통합 시험: 실행 파일 둘(a, b peer=a) — 명령·포트·데이터 버스·구독·명령 전달·다시 붙음, 가짜 장치 모드
