@@ -14,7 +14,8 @@ namespace worker {
 namespace {
 
 constexpr size_t kMaxLine = 64 * 1024;
-constexpr auto kConnTimeout = std::chrono::seconds(2);
+constexpr auto kConnTimeout = std::chrono::seconds(2);    // 연결 뒤 요청 한 줄을 받을 때까지(느리거나 멈춘 연결)
+constexpr auto kReplyTimeout = std::chrono::seconds(60);  // 요청을 받은 뒤 응답까지 안전 상한(모듈이 응답을 잃었을 때)
 
 void set_nonblocking(int fd) {
     const int flags = fcntl(fd, F_GETFL, 0);
@@ -102,11 +103,16 @@ void CommandServer::on_poll(const std::vector<pollfd>& fds) {
 }
 
 void CommandServer::on_timer(Clock::time_point now) {
-    std::vector<int> stale;
+    // 요청을 받기 전에만 짧게 끊는다. 받은 뒤에는 모듈이 나중에 답할 수 있다(장치 응답 대기 등).
+    // 예전(0.9.0)에는 받은 뒤에도 연결 2 s에 끊어, 2 s 넘게 걸리는 명령은 응답 대신 빈 연결 끊김을 받았다
+    std::vector<int> stale, lost;
     for (const auto& item : conns_) {
-        if (now - item.second.opened > kConnTimeout) stale.push_back(item.first);
+        const Conn& c = item.second;
+        if (!c.answered && now - c.opened > kConnTimeout) stale.push_back(item.first);
+        if (c.answered && now - c.requested > kReplyTimeout) lost.push_back(item.first);
     }
     for (int id : stale) drop(id);
+    for (int id : lost) reply(id, R"({"ok":false,"error":{"code":"internal","message":"no reply within 60 s"}})");
 }
 
 void CommandServer::reply(int conn, const std::string& line) {
@@ -146,6 +152,7 @@ void CommandServer::read_conn(int id) {
     if (nl == std::string::npos) return;
     const std::string line = c.in.substr(0, nl);
     c.answered = true;  // 응답할 때까지 더 읽지 않는다
+    c.requested = Clock::now();
     handler_(id, line);
 }
 

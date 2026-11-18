@@ -1,5 +1,5 @@
 // libworker 단위 시험: BoundedQueue, ThreadWatch, WorkerThread(스레드 이름·우선순위), Publisher, Host·Module,
-// 입력·출력 단계, Mutex, 기본 안전망(설정·상태)
+// 입력·출력 단계, Mutex, 기본 안전망(설정·상태), 명령 소켓(나중에 답하는 명령, 연결 시간 제한)
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -17,6 +17,7 @@
 
 #include <pthread.h>
 
+#include "worker/command_server.hpp"
 #include "worker/host.hpp"
 #include "worker/mutex.hpp"
 #include "worker/stage.hpp"
@@ -694,6 +695,75 @@ static void host_handle_exception() {
     CHECK(r["data"]["runtime"]["errors"] == 1 && r["data"]["runtime"]["warnings"].size() == 1);
 }
 
+// 명령 소켓: 요청을 받은 연결은 2 s가 지나도 끊지 않고 응답을 기다린다(0.9.1). 요청 없는 연결은 2 s에 끊고,
+// 받은 뒤 60 s 안에 응답이 없으면 internal 오류로 답한다. 시각은 on_timer에 넘기는 값으로 흉내 낸다(기다리지 않음)
+static void command_server_timeouts() {
+    const std::string path = "/tmp/test_cmdsrv_" + std::to_string(getpid()) + ".sock";
+    std::vector<int> got;  // 요청을 받은 연결(답하지 않고 둔다)
+    worker::CommandServer srv([&](int conn, const std::string&) { got.push_back(conn); });
+    std::string err;
+    CHECK(srv.open(path, &err));
+    auto connect_client = [&]() {
+        const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        sockaddr_un a{};
+        a.sun_family = AF_UNIX;
+        std::strncpy(a.sun_path, path.c_str(), sizeof(a.sun_path) - 1);
+        CHECK(::connect(fd, reinterpret_cast<sockaddr*>(&a), sizeof a) == 0);
+        return fd;
+    };
+    auto pump = [&]() {  // 서버 쪽 poll 한 바퀴씩 몇 번(accept, 읽기)
+        for (int i = 0; i < 5; ++i) {
+            std::vector<pollfd> fds;
+            srv.add_pollfds(fds);
+            ::poll(fds.data(), fds.size(), 20);
+            srv.on_poll(fds);
+        }
+    };
+    auto read_line = [](int fd) {
+        std::string out;
+        char b[512];
+        while (readable(fd, 200)) {
+            const ssize_t n = ::recv(fd, b, sizeof b, 0);
+            if (n <= 0) break;
+            out.append(b, static_cast<size_t>(n));
+        }
+        return out;
+    };
+    const auto t0 = worker::CommandServer::Clock::now();
+
+    // 1) 요청을 받은 연결: 3 s 뒤에도 살아 있고, 나중에 보낸 응답이 도착한다
+    const int a = connect_client();
+    CHECK(::send(a, "{\"cmd\":\"slow\"}\n", 15, 0) == 15);
+    pump();
+    CHECK(got.size() == 1);
+    srv.on_timer(t0 + 3s);
+    if (!got.empty()) srv.reply(got[0], R"({"ok":true,"data":{"late":true}})");
+    CHECK(read_line(a).find("\"late\":true") != std::string::npos);
+    ::close(a);
+
+    // 2) 요청 없이 머무는 연결: 2 s 넘으면 끊김(받는 쪽은 아무것도 못 받고 닫힘)
+    const int b = connect_client();
+    pump();
+    srv.on_timer(t0 + 3s);
+    CHECK(read_line(b).empty());
+    char c1;
+    CHECK(::recv(b, &c1, 1, MSG_DONTWAIT) == 0);  // 닫힘
+    ::close(b);
+
+    // 3) 요청을 받았는데 모듈이 끝내 답하지 않음: 60 s 넘으면 internal 오류로 답하고 닫음
+    const int c = connect_client();
+    CHECK(::send(c, "{\"cmd\":\"lost\"}\n", 15, 0) == 15);
+    pump();
+    CHECK(got.size() == 2);
+    srv.on_timer(worker::CommandServer::Clock::now() + 30s);  // 아직
+    CHECK(!readable(c, 50));
+    srv.on_timer(worker::CommandServer::Clock::now() + 61s);
+    CHECK(read_line(c).find("\"internal\"") != std::string::npos);
+    if (got.size() == 2) srv.reply(got[1], R"({"ok":true})");  // 이미 닫힌 연결: 아무 일도 없음
+    ::close(c);
+    srv.close();
+}
+
 int main() {
     queue_drop_oldest();
     queue_reject();
@@ -718,6 +788,7 @@ int main() {
     output_stage();
     host_stage_config_and_runtime();
     host_handle_exception();
+    command_server_timeouts();
     if (failures) {
         std::printf("%d check(s) failed\n", failures);
         return 1;

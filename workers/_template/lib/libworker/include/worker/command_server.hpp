@@ -28,7 +28,8 @@ public:
     // poll()에 넣을 fd 목록과, 그 결과 처리.
     void add_pollfds(std::vector<pollfd>& fds) const;
     void on_poll(const std::vector<pollfd>& fds);
-    // 한 줄을 보내지 않고 오래 머무는 연결을 끊는다.
+    // 요청 한 줄을 2 s 안에 보내지 않는 연결을 끊는다. 요청을 받은 연결은 응답을 기다리고(모듈이 나중에 답해도 됨),
+    // 60 s 안에 응답이 없으면 internal 오류로 답하고 닫는다(design.md 9.6).
     void on_timer(Clock::time_point now);
 
     // 응답 한 줄을 쓰고 연결을 닫는다. 이미 닫혔으면 아무 일도 하지 않는다.
@@ -39,7 +40,8 @@ private:
         int fd;
         std::string in;
         Clock::time_point opened;
-        bool answered = false;
+        Clock::time_point requested{};  // 요청 한 줄을 받은 시각
+        bool answered = false;          // 요청을 받음(응답할 때까지 더 읽지 않음)
     };
     void accept_all();
     void read_conn(int id);

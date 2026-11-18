@@ -469,7 +469,7 @@ workers/_template/
 ├─ test/test_worker.cpp      워커 통합 시험: 실행 파일 둘(a, b peer=a) — 명령·포트·데이터 버스·구독·명령 전달·다시 붙음, 가짜 장치 모드
 ├─ tools/example-sim.cpp     가짜 장치 프로그램 틀(가짜 장치 모드 6.6.8, 프리셋 sim)
 ├─ lib/
-│  ├─ libworker/             실행 뼈대 원본(0.9.0): Host·Module·WorkerThread·BoundedQueue·
+│  ├─ libworker/             실행 뼈대 원본(0.9.1): Host·Module·WorkerThread·BoundedQueue·
 │  │                         CommandServer·Publisher·ThreadWatch·config 도우미·자식 프로세스,
 │  │                         워커 간 통신 Subscriber·CommandClient(peer.hpp), manager_call   ②
 │  │  └─ src/workspace/      워크스페이스 연동(heartbeat, 데이터 폴더 경로)                  ③
@@ -990,7 +990,7 @@ workers/<워커>/workspace/panel/       워커 패널(id = panel.json "id")
 
 ```json
 {
-  "id": "example", "type": "example_worker", "autostart": false, "preset": "default", "temp": false, "libworker": "0.9.0", "sim": false,
+  "id": "example", "type": "example_worker", "autostart": false, "preset": "default", "temp": false, "libworker": "0.9.1", "sim": false,
   "exec": "/home/user/dev-workspace/workers/example/workspace/bin/example-worker",
   "desired_state": "running", "actual_state": "running",
   "pid": 3884, "last_exit_code": null, "last_signal": null, "last_error": null,
@@ -1071,7 +1071,7 @@ stdout/stderr는 Manager가 `<데이터>/state/logs/{id}.log`로 직접 리다�
 | 식별 | `SCM_CREDENTIALS`의 pid. 메시지 id는 보조 |
 
 ```text
-READY=1 id=example libworker=0.9.0
+READY=1 id=example libworker=0.9.1
 WATCHDOG=1 id=example progress=1834 config_version=4 source_seq=1834 peer_link=1
 ```
 
@@ -1086,7 +1086,7 @@ WATCHDOG=1 id=example progress=1834 config_version=4 source_seq=1834 peer_link=1
 | 소켓 | `<데이터>/run/cmd/{id}.sock`(config `command_socket`), Unix `SOCK_STREAM`, `0600`. 워커가 생성 |
 | 연결 | 명령 1건 = 연결 1개 |
 | 프레이밍 | UTF-8 JSON 한 줄, 64 KiB 상한 |
-| timeout | 연결 1 s, 응답 `WORKSPACE_REST_COMMAND_TIMEOUT`. 워커는 느린 연결이 루프를 막지 않게 non-blocking |
+| timeout | 연결 1 s, 응답 `WORKSPACE_REST_COMMAND_TIMEOUT`. 워커는 느린 연결이 루프를 막지 않게 non-blocking. 워커는 요청 한 줄을 2 s 안에 못 받으면 끊고, **받은 요청은 응답을 보낼 때까지 연결을 둔다**(모듈이 장치 응답을 기다렸다 나중에 답해도 됨, 안전 상한 60 s 뒤 `internal`, libworker 0.9.1) |
 
 ```json
 {"cmd": "source.set_rate", "args": {"hz": 20}}
@@ -1433,7 +1433,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
-| 0.38 | **워커 간 통신의 입출력 정의(6.6.7).** 워커가 자기 입출력을 정의 파일로 갖는다: `io.json`(내보내는 정의·쓰는 정의 목록), `io/<정의>.json`(역할 단위 정의, 받는 명령·발행 주제·데이터 버스, 칸은 JSON Schema, 버전), `io/uses/<정의>.json`(가져온 사본). 입력 주소는 설정 `inputs`, 연결은 `<데이터>/config/connections.json` 한 곳에서 선언하고 Manager가 수집·자동 연결·검사·주입(데이터는 거치지 않음). 이번에 구현: 형식, 템플릿 예시(`example` 정의, `peer`의 `uses`), `dev/test_workers.py` 점검, `dev/new-worker.sh` 정의 이름 바꾸기, 새 워커 설계서 3장 틀. libworker·Manager·화면은 12장 순서로 |
+| 0.38 | **libworker 0.9.1:** 명령 소켓이 요청을 받은 연결을 2 s에 끊던 것을 고침(받은 요청은 응답까지 연결을 둠, 안전 상한 60 s 뒤 internal, 9.6). 2 s 넘게 걸리는 명령(장치 응답 대기)은 응답 대신 빈 연결 끊김을 받았다. **워커 간 통신의 입출력 정의(6.6.7).** 워커가 자기 입출력을 정의 파일로 갖는다: `io.json`(내보내는 정의·쓰는 정의 목록), `io/<정의>.json`(역할 단위 정의, 받는 명령·발행 주제·데이터 버스, 칸은 JSON Schema, 버전), `io/uses/<정의>.json`(가져온 사본). 입력 주소는 설정 `inputs`, 연결은 `<데이터>/config/connections.json` 한 곳에서 선언하고 Manager가 수집·자동 연결·검사·주입(데이터는 거치지 않음). 이번에 구현: 형식, 템플릿 예시(`example` 정의, `peer`의 `uses`), `dev/test_workers.py` 점검, `dev/new-worker.sh` 정의 이름 바꾸기, 새 워커 설계서 3장 틀. libworker·Manager·화면은 12장 순서로 |
 | 0.37 | `dev/release-worker.sh`가 `jetson-build --test`를 직접 돌린다(따로 빌드하게 두면 빌드가 안 돌았을 때 예전 결과가 복사돼 `BUILD`의 소스 커밋과 실행 파일이 어긋났음). 빌드·시험 실패면 아무것도 바꾸지 않음. libframebus `Consumer::skipped()` 경합 수정 |
 | 0.36 | 연결 지표 이름: `_link`와 함께 `_up`도(모듈 이름이 `link`일 때 `link_up`). `dev/system-check.sh`가 둘 다 본다 |
 | 0.35 | **안전망과 제공 도구(6.6.9), 시스템 모니터 보기(6.11).** libworker 0.9.0: 기본 안전망(모든 진입점 예외 잡기, 연달아 3번·`worker::Fatal`이면 exit 4, 루프 시간 `host_loop_ms`, 멈춤이면 워치독보다 먼저 `safe_state()` 뒤 exit 4, `get_status` `runtime`), 제공 도구(입력·출력 단계 `host.input`/`host.output`과 설정 `stages`·`loop_budget_ms`, `ThreadOptions` 실시간·nice·CPU, `worker::Mutex` 우선순위 상속, `Overflow::DropNewest`, 장애 주입 `__fault`), 실행 중 스레드 등록 경합 수정. Manager: 재시작 간격 늘림(최대 30 s), 연속 실패 `crash_loop`, worker type `process`(nice·CPU). REST: 스레드 정책·rt·nice·CPU 고정. 화면: 시스템 모니터 보기 드롭다운(보드 전체 / 워커: 스레드·우선순위, 단계·큐, 안전망, 추이, 자식 프로세스), 공통 부품 `select`. 점검: 모든 워커 시험을 ThreadSanitizer로도. 서비스 `LimitRTPRIO`·`LimitNICE`. 템플릿 `source.gen`을 입력 단계로 |
