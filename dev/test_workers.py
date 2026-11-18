@@ -132,7 +132,7 @@ class Compliance(unittest.TestCase):
 
 IO_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 IO_VERSION = re.compile(r"^(\d+)\.(\d+)$")
-IO_ERRORS = {"bad_request", "unavailable", "timeout", "internal"}
+IO_ERRORS = {"bad_request", "unavailable", "timeout", "busy", "forbidden", "internal"}  # 9.6
 SCHEMA_TYPES = {"object", "array", "string", "number", "integer", "boolean", "null"}
 
 
@@ -158,39 +158,48 @@ def version_tuple(v):
 class IoDefinitions(unittest.TestCase):
     """입출력 정의(design.md 6.6.7.1~6.6.7.2). io.json이 있는 워커만 본다(없는 워커는 미준수 목록에 알림)"""
 
-    def check_schema(self, s, where):
+    def check_schema(self, s, where, defs=None):
         self.assertIsInstance(s, dict, "%s: JSON Schema(객체)여야 함" % where)
+        if "$ref" in s:  # 정의 파일 안의 공용 모양만: {"$ref": "#/definitions/<이름>"}
+            ref = s["$ref"]
+            self.assertTrue(isinstance(ref, str) and ref.startswith("#/definitions/") and
+                            ref[len("#/definitions/"):] in (defs or {}), "%s: $ref %s가 definitions에 없음" % (where, ref))
+            return
         t = s.get("type")
         types = t if isinstance(t, list) else [t]
         self.assertTrue(t is not None and all(x in SCHEMA_TYPES for x in types), "%s: type이 %s 중 하나" % (where, sorted(SCHEMA_TYPES)))
         props = s.get("properties", {})
         self.assertIsInstance(props, dict, "%s: properties는 객체" % where)
         for k, sub in props.items():
-            self.check_schema(sub, "%s.%s" % (where, k))
+            self.check_schema(sub, "%s.%s" % (where, k), defs)
         for k in s.get("required", []):
             self.assertIn(k, props, "%s: required의 %s가 properties에 없음" % (where, k))
         if "items" in s:
-            self.check_schema(s["items"], where + "[]")
+            self.check_schema(s["items"], where + "[]", defs)
 
     def check_definition(self, path):
         d = load_json(path)
         stem = os.path.splitext(os.path.basename(path))[0]
         rel = os.path.relpath(path, ROOT)
-        self.assertEqual(sorted(set(d) - {"name", "version", "description", "commands", "topics", "data"}), [], rel + ": 모르는 항목")
+        self.assertEqual(sorted(set(d) - {"name", "version", "description", "commands", "topics", "data", "definitions"}), [], rel + ": 모르는 항목")
+        defs = d.get("definitions", {})
+        self.assertIsInstance(defs, dict, rel + ": definitions는 객체")
+        for k, sub in defs.items():
+            self.check_schema(sub, "%s: definitions.%s" % (rel, k), defs)
         self.assertEqual(d.get("name"), stem, rel + ": name은 파일 이름과 같아야 함")
         self.assertRegex(stem, IO_NAME, rel + ": 정의 이름 형식")
         self.assertIsNotNone(version_tuple(d.get("version")), rel + ": version은 '큰.작은'")
         for name, c in d.get("commands", {}).items():
             where = "%s: commands.%s" % (rel, name)
             self.assertEqual(sorted(set(c) - {"description", "args", "reply", "errors"}), [], where + ": 모르는 항목")
-            self.check_schema(c.get("args"), where + ".args")
-            self.check_schema(c.get("reply"), where + ".reply")
+            self.check_schema(c.get("args"), where + ".args", defs)
+            self.check_schema(c.get("reply"), where + ".reply", defs)
             self.assertEqual(sorted(set(c.get("errors", [])) - IO_ERRORS), [], where + ".errors는 9.6 code만")
         for name, t in d.get("topics", {}).items():
             where = "%s: topics.%s" % (rel, name)
             self.assertEqual(sorted(set(t) - {"description", "every_ms", "schema"}), [], where + ": 모르는 항목")
             self.assertTrue(isinstance(t.get("every_ms"), (int, float)) and t["every_ms"] > 0, where + ".every_ms > 0")
-            self.check_schema(t.get("schema"), where + ".schema")
+            self.check_schema(t.get("schema"), where + ".schema", defs)
         for name, b in d.get("data", {}).items():
             where = "%s: data.%s" % (rel, name)
             self.assertEqual(sorted(set(b) - {"description", "format"}), [], where + ": 모르는 항목")

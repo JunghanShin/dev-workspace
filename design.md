@@ -618,6 +618,7 @@ workers/<이름>/
 |---|---|
 | 정의 `name`, `version` | 정의 이름(역할, `[a-z][a-z0-9_]*`)과 버전(`큰.작은`). 파일 이름과 `name`이 같다 |
 | 정의 `commands` | 받는 명령(9.6): `args`(인자, JSON Schema), `reply`(응답 `data`, JSON Schema), `errors`(9.6 code 중 쓰는 것), `description` |
+| 정의 `definitions` | 여러 곳에서 쓰는 모양(예: 명령 결과). `{"$ref": "#/definitions/<이름>"}`로 가리킨다(JSON Schema 표준, 같은 파일 안만) |
 | 정의 `topics` | 발행 주제(9.7): `every_ms`(최소 간격), `schema`(주제 값, JSON Schema), `description` |
 | 정의 `data` | 데이터 버스(6.7): 이름(= 기본 소켓 이름 `default_socket(id, "<이름>")`), `format`, `description` |
 | 목록 `provides` | 이 워커가 내보내는 정의 이름들. 원본은 `io/<정의>.json`, 다른 워커가 원본인 정의를 함께 내보내면 `io/uses/<정의>.json` 사본을 가리킨다(같은 계약을 따름) |
@@ -1093,7 +1094,7 @@ WATCHDOG=1 id=example progress=1834 config_version=4 source_seq=1834 peer_link=1
 {"ok": false, "error": {"code": "unavailable", "message": "device link down"}}
 ```
 
-에러 `code`: `bad_request`, `unavailable`, `timeout`, `internal`. 응답은 정확히 한 번(나중에라도). `get_status`는 호스트가 모든 모듈 상태를 모아 답한다.
+에러 `code`: `bad_request`(인자 틀림), `unavailable`(장치·상대 연결 없음), `timeout`(장치 응답 없음), `busy`(같은 동작이 진행 중), `forbidden`(설정상 금지된 동작), `internal`. 응답은 정확히 한 번(나중에라도). `get_status`는 호스트가 모든 모듈 상태를 모아 답한다.
 
 ### 9.7 스트림 소켓 (워커 → REST·다른 워커, 텔레메트리 발행)
 
