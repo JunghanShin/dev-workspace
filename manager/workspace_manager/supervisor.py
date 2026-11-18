@@ -198,6 +198,9 @@ class Supervisor:
         self.listeners = []
         self._wait_tasks = set()
         self.sampler = ResourceSampler()
+        # 아직 어느 워커의 것인지 모르는 heartbeat(pid → [(받은 시각, 칸)]). spawn을 기다리는(await) 동안 빨리 뜬
+        # 워커의 READY가 먼저 처리되면 w.proc이 아직 없어 버려졌다(10 s 뒤 "no READY"). spawn 직후 그 pid 것을 처리한다
+        self._early = {}
 
     # ---- 영속화·이벤트 -------------------------------------------------
 
@@ -492,6 +495,23 @@ class Supervisor:
         log.info("%s live update v%d (%s), SIGHUP", w.id, w.live_version, ", ".join(sorted(changed)))
         self._signal(w, signal.SIGHUP)
 
+    def _keep_early(self, pid, fields):
+        """pid가 아직 어느 워커에도 없음: spawn이 끝나기 전에 온 것일 수 있어 잠시 보관(오래된 것은 버림)"""
+        now = time.monotonic()
+        for p in [p for p, items in self._early.items() if now - items[-1][0] > self.EARLY_KEEP_S]:
+            del self._early[p]
+        if pid not in self._early and len(self._early) >= self.EARLY_MAX:
+            return
+        self._early.setdefault(pid, []).append((now, fields))
+
+    def _drain_early(self, w):
+        """spawn 직후: 그 pid로 먼저 온 heartbeat(READY 등)를 순서대로 처리"""
+        items = self._early.pop(w.proc.pid, [])
+        if items:
+            log.info("%s: %d heartbeat(s) arrived before spawn finished", w.id, len(items))
+        for _t, fields in items:
+            self.on_notify(w.proc.pid, fields)
+
     def start(self, worker_id):
         w = self._get_valid(worker_id)
         if w.actual == "disabled":
@@ -533,10 +553,16 @@ class Supervisor:
 
     # ---- heartbeat (design.md 9.5) -------------------------------------
 
+    EARLY_KEEP_S = 10.0   # 짝 없는 heartbeat를 보관하는 시간
+    EARLY_MAX = 64        # 보관 pid 수 상한
+
     def on_notify(self, pid, fields):
         w = next((x for x in self.workers.values()
                   if x.proc is not None and x.proc.pid == pid), None)
-        if w is None or w.stop_reason is not None:
+        if w is None:
+            self._keep_early(pid, fields)
+            return
+        if w.stop_reason is not None:
             return
         now = time.monotonic()
         if "READY" in fields and w.actual == "starting":
@@ -703,6 +729,7 @@ class Supervisor:
         w.stop_reason = None
         w.killed = False
         log.info("%s spawned pid %d (config v%d)", w.id, proc.pid, w.applied_version)
+        self._drain_early(w)
         self._emit_worker(w)
         task = asyncio.ensure_future(self._wait(w, proc))
         self._wait_tasks.add(task)

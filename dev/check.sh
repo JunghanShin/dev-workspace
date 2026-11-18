@@ -4,7 +4,7 @@
 #   dev/check.sh            Python 시험 전부 + 템플릿과 모든 워커 PC 빌드·시험(WORKER_WORKSPACE=ON, OFF)
 #   dev/check.sh --quick    Python 시험만(빌드 생략)
 #
-# Python: manager/test_schema.py(스키마·프리셋), dev/test_workers.py(워커 폴더 구성·사본 라이브러리·패널 id·Python 도우미),
+# Python: manager/test_schema.py(스키마·프리셋), manager/test_notify_race.py(spawn보다 먼저 온 heartbeat), dev/test_workers.py(워커 폴더 구성·사본 라이브러리·패널 id·Python 도우미),
 #         rest/test_stream.py(텔레메트리 중계)
 # Python 도구: workers/_template/python/test_comm.py(Python ↔ C++ 워커 통신, 틀 빌드 뒤)
 # 빌드: workers/_template + workers/*/ 마다 cmake → ctest, 결과는 /tmp/workspace-check/<저장소 폴더>/<워커>-<ON|OFF>
@@ -31,6 +31,7 @@ run_py() {  # run_py <이름> <폴더> <unittest 인자>
 step "Python 시험"
 run_py test_schema "$ROOT/manager" test_schema
 run_py test_manager_api "$ROOT/manager" test_manager_api
+run_py test_notify_race "$ROOT/manager" test_notify_race
 run_py test_workers "$ROOT" dev/test_workers.py
 run_py test_stream "$ROOT/rest" test_stream
 
