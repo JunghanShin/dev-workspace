@@ -40,7 +40,7 @@ jetson-build --native --test
 jetson-build --test
 ```
 
-확정(Jetson 실행 파일을 저장소에): 소스를 커밋한 뒤 워크스페이스 폴더에서
+확정(Jetson 실행 파일을 저장소에): 소스를 커밋한 뒤 워크스페이스 폴더에서. Jetson 빌드·시험(`jetson-build --test`)도 이 스크립트가 직접 한다
 
 ```bash
 dev/release-worker.sh @NAME@

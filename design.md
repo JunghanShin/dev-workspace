@@ -2,12 +2,12 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.36 |
+| 문서 버전 | 0.37 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
 | 현장 값 | 주소·장비 구성 등은 프로필(`install/profiles/<이름>/`)에. 이 문서는 `<보드 주소>`처럼 자리만 쓴다 |
-| 상태 | 구현 반영(0.36 기준 코드와 일치). 미결은 15장 |
+| 상태 | 구현 반영(0.37 기준 코드와 일치). 미결은 15장 |
 
 절 번호는 코드 주석이 참조하므로(예: "design.md 9.5") 바꾸지 않는다. 변경 이력은 부록 B.
 
@@ -496,7 +496,7 @@ dev/new-worker.sh [--video] <폴더> [type]    틀 복사·워커 이름 바꾸�
   → design.md 3장(ICD)부터 → 모듈마다 core(유닛)·module(설정·명령·상태·지표·스레드)·test, 안 쓰는 모듈은 뗌, workspace/
   → dev/workspace-dev.sh (PC) 또는 보드 workspace-start.sh   워크스페이스에서 보기(시스템 모니터·설정·패널)
   → dev/deploy-worker.sh <폴더>   개발 중 보드 반영: Jetson 빌드 → 보드 build/ → 그 워커만 다시 시작(반복)
-  → dev/check.sh(커밋 전 검사) → 커밋 → jetson-build --test → dev/release-worker.sh <폴더> → workspace/bin 커밋   확정
+  → dev/check.sh(커밋 전 검사) → 커밋 → dev/release-worker.sh <폴더>(jetson-build --test 포함) → workspace/bin 커밋   확정
   → 보드: git pull → (시스템 설치가 있는 새 워커면 install_workspace.sh) → workspace-start.sh   (등록 단계 없음)
 ```
 
@@ -1102,7 +1102,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | 도구 | 하는 일 |
 |---|---|
 | `jetson-build` (외부 저장소 `jetson-dev-env`, Docker) | `--native --test`: PC 빌드·시험. `--test`: Jetson 크로스 빌드 + QEMU 시험. 필요한 환경 버전은 루트 `.jetson-dev-env` |
-| `dev/release-worker.sh <워커>` | 커밋한 소스로 만든 Jetson 실행 파일을 `workspace/bin/`에. `BUILD`에 소스 커밋·환경 버전·sha256. 커밋 안 한 소스 변경이 있으면 멈춤 |
+| `dev/release-worker.sh <워커>` | 지금 소스로 `jetson-build --test`(빌드 + QEMU 시험)를 직접 돌려, 그 결과를 `workspace/bin/`에. 빌드·시험이 실패하면 아무것도 바꾸지 않음(예전 빌드 결과가 복사되는 일 없음). `BUILD`에 소스 커밋·환경 버전·sha256. 커밋 안 한 소스 변경이 있으면 멈춤 |
 | `dev/deploy-worker.sh [--test\|--no-build\|--revert] <워커>` | 개발 중 빠른 반영: Jetson 빌드 → 보드 `workers/<워커>/build/`에 복사 → 보드 REST로 그 워커만 다시 시작하고 실행 파일·버전 표시. 워크스페이스 재시작·sudo·보드 깃 변경 없음. `--revert`는 개발 빌드를 지우고 확정으로. 보드 접속은 `dev/board.env`(깃 제외, `board.env.example`) |
 | `dev/new-worker.sh` | 템플릿으로 새 워커(6.6.5) |
 | `dev/workspace-dev.sh [--profile]` | PC(WSL)에서 워크스페이스 전체(Manager·REST·logger·워커) 실행. root·고정 IP·tegrastats 없이. 데이터 폴더 `WORKSPACE_DATA` |
@@ -1162,7 +1162,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 
 **플랫폼 조건(워크스페이스 밖):** 제품 묶음은 애플리케이션 층이다. 올라갈 장비에는 JetPack 6.2.x(L4T R36), systemd, `/opt/<이름>`과 쓰기 가능한 데이터 폴더만 있으면 된다(장치 접근 udev·그룹은 묶음의 `install.sh`가 처리). 디스크 암호화·보안 부팅·읽기 전용 루트·A/B 갱신 같은 OS·보드 층 보호는 이 저장소가 아니라 보드 이미지 저장소(이미지 빌드·플래시 스크립트)에서, 고객 요구나 양산 단계에 따로 한다.
 
-## 12. 현재 상태 (0.36)
+## 12. 현재 상태 (0.37)
 
 | 영역 | 상태 |
 |---|---|
@@ -1285,6 +1285,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.37 | `dev/release-worker.sh`가 `jetson-build --test`를 직접 돌린다(따로 빌드하게 두면 빌드가 안 돌았을 때 예전 결과가 복사돼 `BUILD`의 소스 커밋과 실행 파일이 어긋났음). 빌드·시험 실패면 아무것도 바꾸지 않음. libframebus `Consumer::skipped()` 경합 수정 |
 | 0.36 | 연결 지표 이름: `_link`와 함께 `_up`도(모듈 이름이 `link`일 때 `link_up`). `dev/system-check.sh`가 둘 다 본다 |
 | 0.35 | **안전망과 제공 도구(6.6.9), 시스템 모니터 보기(6.11).** libworker 0.9.0: 기본 안전망(모든 진입점 예외 잡기, 연달아 3번·`worker::Fatal`이면 exit 4, 루프 시간 `host_loop_ms`, 멈춤이면 워치독보다 먼저 `safe_state()` 뒤 exit 4, `get_status` `runtime`), 제공 도구(입력·출력 단계 `host.input`/`host.output`과 설정 `stages`·`loop_budget_ms`, `ThreadOptions` 실시간·nice·CPU, `worker::Mutex` 우선순위 상속, `Overflow::DropNewest`, 장애 주입 `__fault`), 실행 중 스레드 등록 경합 수정. Manager: 재시작 간격 늘림(최대 30 s), 연속 실패 `crash_loop`, worker type `process`(nice·CPU). REST: 스레드 정책·rt·nice·CPU 고정. 화면: 시스템 모니터 보기 드롭다운(보드 전체 / 워커: 스레드·우선순위, 단계·큐, 안전망, 추이, 자식 프로세스), 공통 부품 `select`. 점검: 모든 워커 시험을 ThreadSanitizer로도. 서비스 `LimitRTPRIO`·`LimitNICE`. 템플릿 `source.gen`을 입력 단계로 |
 | 0.34 | **공개 플랫폼 정리.** 분야 전용 부품을 플랫폼에서 뺌: MAVLink 라우터(설치·서비스·설정·문서·FC 시험)는 그것을 쓰는 장치 워커가 맡는다(워커 `install.sh`). 프로필은 정해진 파일 목록 대신 폴더 맨 위의 설정 파일을 모두 넣는다(워커가 쓰는 설정도 함께, 6.12). 운용 인터페이스 예시를 일반 용어로. README를 워크스페이스 → 워커 순서로, 제품 빌드·프로젝트 저장소로 쓰기 절 |

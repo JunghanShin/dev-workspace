@@ -362,7 +362,7 @@ jetson-build --test
 | `jetson-build --native --debug --test` | PC용 디버그 빌드와 시험 |
 | `dev/new-worker.sh [--video] <폴더> [type]` | 워커 틀로 새 워커 만들기(예제 워커를 이름만 바꿔 복사) |
 | `dev/deploy-worker.sh <워커>` | 개발 중 빠른 반영: Jetson 빌드 → 보드 `build/` → 그 워커만 다시 시작(워크스페이스 재시작·sudo 없음). 보드 접속은 `dev/board.env`(`board.env.example` 복사) |
-| `dev/release-worker.sh <워커>` | 빌드 결과를 `workspace/bin/`에 넣고 `BUILD` 작성(소스에 커밋 안 된 변경이 있으면 멈춤) |
+| `dev/release-worker.sh <워커>` | `jetson-build --test`를 직접 돌리고 그 결과를 `workspace/bin/`에 넣어 `BUILD` 작성(빌드·시험 실패면 멈춤, 소스에 커밋 안 된 변경이 있으면 멈춤) |
 | `dev/system-check.sh [주소]` | 보드에서 워크스페이스 전체 점검(워커 상태·heartbeat·링크·상대 워커·스트림·버전). FAIL이면 종료 코드 1 |
 | `dev/build-product.sh <프로필>` | 제품 묶음([제품 빌드](#제품-빌드)) |
 

@@ -100,7 +100,7 @@ python/workspace_worker.py   Python 워커 도우미 원본(new-worker.sh는 복
 5. 워크스페이스에서 보기: PC는 `dev/workspace-dev.sh`, 보드는 `workspace-start.sh`로 다시 시작하면 시스템 모니터·설정 화면·패널에 나온다. 워커 폴더가 있으면 붙는다(등록 단계 없음, 처음엔 자동 시작 안 함). 시스템 설치(`workspace/install.sh`)가 있으면 보드에서 `install_workspace.sh`를 먼저
 6. 보드에서 돌려 보기(반복): `dev/deploy-worker.sh thermal`(Jetson 빌드 → 보드 `build/` → 그 워커만 다시 시작). 끝나면 `--revert`로 확정 실행 파일로 돌림
 7. 검사: `dev/check.sh`(Python 시험 + 템플릿·모든 워커 PC 빌드·시험), 보드에서 `dev/system-check.sh`
-8. 확정: 소스를 커밋한 뒤 `jetson-build --test` → `dev/release-worker.sh thermal` → `workspace/bin/` 커밋
+8. 확정: 소스를 커밋한 뒤 `dev/release-worker.sh thermal`(Jetson 빌드·시험 포함) → `workspace/bin/` 커밋
 
 ## 워커 = 호스트 + 모듈
 
@@ -191,7 +191,7 @@ public:
 1. 유닛·모듈(PC): `test/test_motion.cpp`에서 코어는 직접(유닛), 모듈은 `configure()`·`worker::call_module(m, "move_to", {...})`·`on_timer(가짜 시각)`·가짜 포트
 2. 워커 전체(PC): `test/test_worker.cpp`에 명령·상태 확인을 더한다. `jetson-build --native --test`, 워크스페이스에서 `dev/check.sh`(스키마·프리셋·모듈 schema.json, 폴더 구성·사본 라이브러리·패널 id 검사 + 모든 워커 빌드·시험)
 3. 워크스페이스 없이: `cmake -S . -B build/standalone -DWORKER_WORKSPACE=OFF && cmake --build build/standalone && (cd build/standalone && ctest)`
-4. Jetson: `jetson-build --test` → `dev/release-worker.sh <워커>` → `workspace/bin/` 커밋
+4. Jetson: `dev/release-worker.sh <워커>`(`jetson-build --test`를 직접 돌림) → `workspace/bin/` 커밋
 5. 보드: 시스템 모니터 워커 줄을 펼쳐 스레드 표에 `motion.*` 스레드, 지표 그래프에 `motion_*`가 보이는지
 
 ### 5. 모듈 떼기
