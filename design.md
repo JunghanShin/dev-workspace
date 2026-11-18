@@ -2,12 +2,12 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.37 |
+| 문서 버전 | 0.38 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
 | 현장 값 | 주소·장비 구성 등은 프로필(`install/profiles/<이름>/`)에. 이 문서는 `<보드 주소>`처럼 자리만 쓴다 |
-| 상태 | 구현 반영(0.37 기준 코드와 일치). 미결은 15장 |
+| 상태 | 구현 반영(0.37 기준 코드와 일치). 0.38 워커 간 통신 정의(6.6.7)는 형식·템플릿·점검만 구현, 나머지는 12장. 미결은 15장 |
 
 절 번호는 코드 주석이 참조하므로(예: "design.md 9.5") 바꾸지 않는다. 변경 이력은 부록 B.
 
@@ -347,7 +347,7 @@ Manager API(워커 시작·정지·설정·상태)를 쓰는 워커. 외부 운�
 - 처리 루프 안에 자체 워치독(아래). 모든 블로킹 호출에 timeout
 - 외부 대상 무응답 시 살아서 보고·재연결. SIGTERM 또는 복구 불가 오류면 정리 후 스스로 종료(exit code 9.2)
 - 명령을 받으면 명령 소켓(9.6), 텔레메트리를 내면 스트림 소켓(9.7)
-- 다른 워커와는 명령·스트림·데이터 버스로만(6.6.7). 상대는 설정 칸(`worker_id`)으로
+- 다른 워커와는 명령·스트림·데이터 버스로만(6.6.7). 주고받는 것은 입출력 정의(`io.json`, `io/`)로, 상대 주소는 설정 `inputs`로(구현 전까지 설정 칸 `worker_id`)
 - 하지 않는 일: 다른 워커 spawn·시작·정지(Manager API를 쓰는 워커만, 6.5), 외부 인터페이스(HTTP 등) 직접 열기
 
 이 계약은 템플릿의 호스트(libworker)가 전부 구현한다. 워커를 템플릿으로 만들면 계약을 따로 신경 쓰지 않는다.
@@ -451,7 +451,7 @@ main.cpp:  worker::Host host("<이름>-worker");
 
 #### 6.6.5 워커 템플릿 (`workers/_template`)
 
-워커를 만드는 틀이자 그대로 빌드·실행되는 예제 워커다(`example-worker`). 실제 기능은 없고(값 생성·평균), 워커가 갖출 것을 모두 보여 준다: 모듈 셋과 그 사이 포트, 스레드, 자식 프로세스, 워커 간 통신 세 통로, 단계별 시험, ICD 틀.
+워커를 만드는 틀이자 그대로 빌드·실행되는 예제 워커다(`example-worker`). 실제 기능은 없고(값 생성·평균), 워커가 갖출 것을 모두 보여 준다: 모듈 셋과 그 사이 포트, 스레드, 자식 프로세스, 워커 간 통신 세 통로와 입출력 정의(`io.json`·`io/`, 6.6.7.1), 단계별 시험, ICD 틀.
 
 | 모듈 | 보여 주는 것 | 유닛(코어) |
 |---|---|---|
@@ -464,6 +464,7 @@ workers/_template/
 ├─ CMakeLists.txt            이 폴더만으로 빌드(BUILD_TESTING, WORKER_WORKSPACE)
 ├─ README.md                 틀 사용법: 새 워커 만들기, 모듈 만들기·붙이기·떼기, 시험
 ├─ new/README.md, design.md  새 워커 문서 틀(@NAME@ @TYPE@). design.md 3장이 ICD 틀(명령·상태·지표·스트림·데이터 버스·연결·설정)
+├─ io.json, io/              입출력 정의: 내보내는 정의 example(io/example.json), peer가 쓰는 사본(io/uses/example.json) 6.6.7.1
 ├─ src/main.cpp              Host + source·processor(src.port())·peer 조립                  ②
 ├─ test/test_worker.cpp      워커 통합 시험: 실행 파일 둘(a, b peer=a) — 명령·포트·데이터 버스·구독·명령 전달·다시 붙음, 가짜 장치 모드
 ├─ tools/example-sim.cpp     가짜 장치 프로그램 틀(가짜 장치 모드 6.6.8, 프리셋 sim)
@@ -537,6 +538,15 @@ dev/new-worker.sh [--video] <폴더> [type]    틀 복사·워커 이름 바꾸�
 
 #### 6.6.7 워커 간 통신
 
+> **0.38:** 입출력 정의(`io/`)·입력 주소(`inputs`)·연결 선언(`connections.json`)을 정한다(6.6.7.1~6.6.7.6). **0.38에 들어간 것:** 정의 형식, 템플릿 예시, 점검(`dev/test_workers.py`). **아직(구현 순서 12장):** libworker의 `inputs`·칸 검사, Manager의 수집·연결·주입, 화면 연결 그림. 그때까지 상대 지정은 지금 방식(설정 칸 `worker_id`)이 쓰인다.
+
+**원칙(단독 실행을 기준으로 한 정석):**
+
+- **워커는 스스로 완결된다.** 무엇을 받고 무엇을 내보내는지 자기 정의(`io.json`, `io/`)로 알고, 자기 출력 통로(명령 소켓·스트림·데이터 버스)를 스스로 연다
+- **계약은 정의 파일이다.** 내보내는 쪽이 정의를 갖고, 쓰는 쪽은 그 사본을 가져다 쓴다(protobuf `.proto`·ROS 메시지 패키지·OpenAPI 명세와 같은 방식). 칸은 JSON Schema 문법, 정의마다 버전
+- **연결은 밖에서 주입한다.** 입력의 상대 주소는 코드가 아니라 설정(`inputs`)으로 받는다. 워커는 상대 워커가 누구인지 모른다
+- **워크스페이스는 모아서 관리할 뿐이다.** 모든 워커의 정의를 모으고, 연결을 한 곳(`connections.json`)에서 선언받아 검사하고, 워커를 띄울 때 `inputs`를 채워 준다. 데이터는 Manager를 거치지 않고 워커끼리 직접 오간다. 워크스페이스가 없으면 사람이 `inputs`를 직접 적는다(같은 코드·같은 설정 형식)
+
 워커끼리는 플랫폼이 주는 세 통로로만 주고받는다. 상대는 설정 칸으로 정하고(스키마 `"format": "worker_id"`), 코드에 워커 id를 박지 않는다.
 
 | 통로 | 쓰는 곳 | 보내는 쪽 | 받는 쪽(libworker·libframebus) | 성질 |
@@ -552,6 +562,139 @@ dev/new-worker.sh [--video] <폴더> [type]    틀 복사·워커 이름 바꾸�
 - 상대 워커 id가 든 설정 칸은 Manager가 읽어 워커 상태 `peers`(`{설정 경로: 워커 id}`)로 내놓는다. 화면은 "→ 상대"로 보이고, `dev/system-check.sh`는 상대가 있고 도는지 본다. 화면 설정 폼은 그 칸에 워커 id 목록을 준다
 - 무엇을 주고받는지는 양쪽 워커 design.md 3장(ICD)에 적는다. 템플릿 `peer` 모듈이 세 통로를 모두 쓰는 예다
 - 같은 워커 안 모듈끼리는 이 통로가 아니라 포트(6.6.3)
+
+지금 방식의 빈칸: 통로와 상대 지정은 있지만 **주고받는 내용(주제의 칸, 명령의 인자)이 설계서 글로만 있다.** 쓰는 쪽은 상대 설계서를 읽고 칸 이름을 손으로 코드에 적고, 상대가 이름을 바꾸면 실행해 봐야 안다. 상대 지정도 워커마다 설정 칸에 흩어져 있고, 워커 id → 소켓 경로 변환이 워크스페이스 관례(데이터 폴더)에 기댄다. 아래가 이 빈칸을 채운다.
+
+##### 6.6.7.1 입출력 정의 (`io.json` + `io/`, 워커가 가짐)
+
+**정의는 역할 단위다.** 정의 이름은 워커 이름·type이 아니라 그 워커가 맡는 역할(예: 기체 정보, 짐벌, 카메라, 예제의 `example`)이다. 워커 하나가 정의를 여러 개 내보낼 수 있고, 같은 정의를 내보내는 워커끼리는 서로 바꿔 쓸 수 있다(쓰는 쪽은 사본도 연결도 그대로).
+
+```text
+workers/<이름>/
+├─ io.json                 이 워커가 내보내는 정의(provides)와 쓰는 정의(uses)의 목록
+└─ io/
+   ├─ <정의>.json          내보내는 정의의 원본(이 워커가 처음 내보낸 정의)
+   └─ uses/<정의>.json     쓰는 정의의 사본(다른 워커가 내보내는 것)
+```
+
+정의 파일(`io/<정의>.json`): 받는 명령, 발행 주제, 데이터 버스와 그 칸. 칸은 **JSON Schema 문법**(`type`·`properties`·`required`·`items`·`enum`·`minimum`/`maximum`)으로 쓰고, 단위는 덧붙임 칸 `unit`(표준 검사기는 모르는 칸을 무시한다).
+
+```json
+{
+  "name": "example", "version": "1.0",
+  "commands": {
+    "source.set_rate": {
+      "args":  {"type": "object", "required": ["hz"],
+                "properties": {"hz": {"type": "number", "exclusiveMinimum": 0, "unit": "Hz"}}},
+      "reply": {"type": "object", "properties": {"rate_hz": {"type": "number", "unit": "Hz"}}},
+      "errors": ["bad_request"]}
+  },
+  "topics": {
+    "source": {"every_ms": 200,
+               "schema": {"type": "object", "required": ["seq", "mean", "rate_hz"],
+                          "properties": {"seq": {"type": "integer"}, "mean": {"type": "number"},
+                                         "rate_hz": {"type": "number", "unit": "Hz"}}}}
+  },
+  "data": {
+    "frames": {"format": "f32x<size>"}
+  }
+}
+```
+
+목록(`io.json`):
+
+```json
+{
+  "provides": ["example"],
+  "uses": {
+    "upstream": {"from": "example", "version": "1.0",
+                 "topics": ["source"], "commands": ["source.set_rate"], "data": ["frames"],
+                 "required": false}
+  }
+}
+```
+
+| 항목 | 뜻 |
+|---|---|
+| 정의 `name`, `version` | 정의 이름(역할, `[a-z][a-z0-9_]*`)과 버전(`큰.작은`). 파일 이름과 `name`이 같다 |
+| 정의 `commands` | 받는 명령(9.6): `args`(인자, JSON Schema), `reply`(응답 `data`, JSON Schema), `errors`(9.6 code 중 쓰는 것), `description` |
+| 정의 `topics` | 발행 주제(9.7): `every_ms`(최소 간격), `schema`(주제 값, JSON Schema), `description` |
+| 정의 `data` | 데이터 버스(6.7): 이름(= 기본 소켓 이름 `default_socket(id, "<이름>")`), `format`, `description` |
+| 목록 `provides` | 이 워커가 내보내는 정의 이름들. 원본은 `io/<정의>.json`, 다른 워커가 원본인 정의를 함께 내보내면 `io/uses/<정의>.json` 사본을 가리킨다(같은 계약을 따름) |
+| 목록 `uses.<입력 이름>` | 이 워커의 입력 하나 = 한 상대 워커. `from`(정의 이름), `version`(가져온 사본의 버전), 그중 쓰는 `topics`·`commands`·`data`, `required`(false면 상대 없이도 동작, 그때의 동작은 워커 설계서), `description` |
+
+- **원본 위치:** 정의를 처음 내보낸 워커 폴더(`io/<정의>.json`). 여러 워커가 같은 정의를 내보내거나 쓰게 되면 템플릿 공용(`workers/_template/io/`)으로 올리는 것도 같은 규칙(원본 하나, 나머지는 사본)
+- **버전과 호환:** 칸·명령·주제를 **더하면** 작은 버전(1.0 → 1.1), **빼거나 이름·형식을 바꾸면** 큰 버전(1.x → 2.0). 사본 1.0은 원본 1.0~1.x와 이어지고 2.0과는 안 이어진다(6.6.7.4 검사)
+- **설계서와의 관계:** 운용에서 쓰이는 것은 정의 파일과 설정뿐이다. 워커 design.md 3장(ICD)은 칸 목록을 다시 적지 않고 `io/`를 가리키며, 사람이 알아야 할 것(칸의 뜻, 주기를 그렇게 정한 이유, 상대가 없을 때 동작)만 둔다
+- **정의에 넣는 것:** 워커끼리 주고받는 것(받는 명령, 발행 주제, 데이터 버스)만. `get_status`·heartbeat 지표는 화면·관측용이라 넣지 않는다(다른 워커가 필요한 값은 주제로 내보낸다)
+- **실행 파일에 넣는다(구현 예정):** 빌드가 정의를 실행 파일에 넣는다(실행 때 파일을 찾지 않음, 단독 실행 그대로). `<exec> --io`가 정의를 출력한다
+- **칸 검사(구현 예정):** 받는 쪽은 운용 중에도 받은 주제·응답의 칸을 사본으로 검사한다(필수 칸 없음, 형식 틀림 → 그 줄 버림 + 지표 `inputs_<입력>_bad`). 보내는 쪽은 시험 빌드에서 정의대로 내보내는지 확인한다
+
+##### 6.6.7.2 가져온 정의 (사본)
+
+다른 워커의 정의를 쓰려면 그 정의 파일을 `workers/<이름>/io/uses/<정의>.json`에 사본으로 둔다(libworker·libframebus 사본과 같은 방식, 워커 폴더 하나로 빌드). 코드는 사본에 있는 칸만 쓴다. `dev/test_workers.py`가 본다:
+
+- 형식: 정의 파일의 필수 항목, 이름·버전 표기, 칸이 JSON Schema 모양인지(`type` 등), `io.json`이 가리키는 파일이 있는지, `uses`가 쓰는 주제·명령·데이터가 사본에 있는지
+- 사본: 같은 저장소에 원본이 있으면 같은지. 다르면 큰 버전이 같고 원본이 더 새것이면 알림(사본을 새로 가져오라), 큰 버전이 다르거나 사본이 더 새것이면 실패
+
+##### 6.6.7.3 입력 주소 (`inputs`, 워커 설정)
+
+맨 위 호스트 키 `inputs`. `uses`의 입력 이름마다 상대 주소를 받는다.
+
+```json
+"inputs": {
+  "upstream": {"worker": "example-a"}
+}
+"inputs": {
+  "upstream": {"command": "/run/user/1000/worker/cmd/example-a.sock",
+               "stream":  "/run/user/1000/worker/stream/example-a.sock",
+               "data":    {"frames": "/run/user/1000/worker/frames/example-a.sock"}}
+}
+```
+
+- `worker`: 워커 id로 주면 기본 소켓 경로(9.6·9.7·6.7 규칙)로 바꾼다. 경로를 직접 주면 그대로 쓴다(단독 실행, 다른 폴더의 워커). 주소를 받는 것이 정석이고, `worker`는 같은 데이터 폴더 안에서 쓰는 줄임
+- 비어 있으면 그 입력은 이어지지 않은 것: `required: true`면 시작은 하되 `failed`·경고, `false`면 설계서에 적은 대로 동작
+- 워크스페이스에서는 Manager가 채운다(6.6.7.4). 프리셋에 적은 `inputs`는 연결 선언이 없을 때만 쓰인다
+
+##### 6.6.7.4 연결 선언과 통합 관리 (워크스페이스, Manager)
+
+연결은 한 곳에서 선언한다: `<데이터>/config/connections.json`(보드마다, 프로필에 넣을 수 있음 6.12).
+
+```json
+{"connections": [
+  {"to": "example-b.upstream", "from": "example-a"}
+]}
+```
+
+| Manager가 하는 일 | 내용 |
+|---|---|
+| 수집 | 워커 폴더의 `io.json`·`io/`를 모은다(`list` 응답에 내보내는 정의 이름·버전, `get_io` op로 전체) |
+| 자동 연결 | 선언이 없는 입력에 그 정의(`from`)를 내보내는 워커가 **하나뿐이면** 자동으로 잇는다(상태에 `auto`). 여럿이면 선언이 필요(경고) |
+| 검사 | 띄우기 전에: 상대 워커가 있는지, 상대 정의 이름·버전이 맞는지, 쓰는 주제·명령·데이터가 상대 정의에 있는지, 같은 입력에 둘이 이어졌는지. 틀리면 그 입력을 오류로 표시(워커 기동은 막지 않음, 6.10 설정 검사와 같은 태도) |
+| 주입 | spawn 설정 파일(9.1)의 `config.inputs`를 연결 결과로 채운다(프리셋은 바꾸지 않음) |
+| 상태 | 워커 상태 `inputs`: `{"upstream": {"from": "example-a", "how": "declared"\|"auto"\|"config", "ok": true, "error": null}}`. 지금의 `peers`를 대신한다 |
+| 감시 | 지표 `inputs_<입력>_link`(0/1, 호스트가 냄). `dev/system-check.sh`: 이어지지 않은 필수 입력, 상대가 안 돎, 링크 끊김 |
+| 화면 | 연결 그림(워커 = 상자, 입력·출력 = 단자, 선 = 연결, 끊긴 선 표시), 연결 선언 편집(REST `GET/PUT /connections`) |
+
+- **Manager는 통로를 만들지도, 데이터를 나르지도 않는다.** 이름을 풀고 검사하고 설정을 채울 뿐이다
+- **띄우는 순서는 상관없다.** 출력 통로는 내보내는 워커가 열고, 쓰는 쪽은 상대가 뜰 때까지 다시 붙는다(아래 공통 규칙). 상대가 다시 시작해도 같다
+- 연결 선언을 바꾸면 그 입력을 가진 워커만 다시 시작한다(설정 바뀜과 같음)
+
+##### 6.6.7.5 libworker 도구
+
+| 도구 | 내용 |
+|---|---|
+| `host.uses("<입력>")` | 그 입력의 주소(`inputs`)와 가져온 정의. 모듈이 `Subscriber`·`CommandClient`·`framebus::Consumer`를 만들 때 쓴다(주소를 직접 계산하지 않음) |
+| `Subscriber`·`CommandClient` | 정의를 받으면 받은 칸 검사(6.6.7.1), 정의에 없는 명령은 보내기 전에 거절 |
+| 호스트 | `--io` 출력, `inputs` 읽기, 입력마다 링크 지표, `get_status`에 `inputs` |
+
+##### 6.6.7.6 지금 방식에서 옮기기
+
+- 설정 칸 `format: worker_id`(예: 템플릿 `peer.peer`)는 `uses` + `inputs`로 옮긴다. 옮기는 동안 Manager는 둘 다 읽고(`worker_id` 칸 → `how: "config"`), `peers`도 한동안 함께 낸다
+- 워커 design.md 3장(ICD) 틀(`workers/_template/new/design.md`): 칸 목록은 `io/`, 설계서에는 뜻·이유·상대 없을 때 동작
+- 템플릿: 예제 워커가 정의 `example`을 내보내고(`io/example.json`), `peer` 모듈이 다른 예제 워커의 `example`을 쓴다(`uses.upstream`, 사본 `io/uses/example.json`). `dev/new-worker.sh`는 정의 이름을 새 워커 이름으로 바꿔 복사한다
+- 기존 워커는 고도화할 때 정의를 붙인다(`io.json`이 없는 워커는 점검의 미준수 목록에 알림)
+- 나중에 필요해지면(상대가 다시 시작해도 끊기지 않기) Manager가 소켓을 미리 만들어 넘기는 방식(systemd 소켓 활성화와 같은 방식)을 더할 수 있다. 워커는 받은 소켓이 없으면 지금처럼 스스로 연다
 
 #### 6.6.8 가짜 장치 모드 (장비 없이 개발)
 
@@ -741,7 +884,7 @@ Manager /proc 측정 ───────┘                                   
 | 칸 속성 | 뜻 |
 |---|---|
 | `key`, `type` | `string` `int` `number` `bool` `enum` `list`(`item_key`, `fields`) `map`(`key_pattern`, `value_type`) |
-| 검사 | `required`, `min`/`max`, `options`, `format`(`ipv4` `host_port` `stream_url` `worker_id`), `pattern`. `worker_id`는 워커 id 형식만 검사하고(없는 워커여도 저장됨, 상대는 나중에 붙을 수 있음), 상태 `peers`로 나간다(6.6.7) |
+| 검사 | `required`, `min`/`max`, `options`, `format`(`ipv4` `host_port` `stream_url` `worker_id`), `pattern`. `worker_id`는 워커 id 형식만 검사하고(없는 워커여도 저장됨, 상대는 나중에 붙을 수 있음), 상태 `peers`로 나간다(6.6.7). 0.38부터 상대 지정은 `inputs`·연결 선언으로 옮겨 가는 중(6.6.7.6) |
 | 꾸밈 | `label`, `unit`, `hint`, `placeholder`, `empty_label`, `default`, `advanced` |
 | 묶음 `section` | 그 묶음의 칸이 `config["<모듈>"]` 안에 있다. 오류 경로 `<모듈>.<키>` |
 
@@ -864,7 +1007,7 @@ workers/<워커>/workspace/panel/       워커 패널(id = panel.json "id")
 - `progress`: 처리 카운터(처리량 지표만, 멈춤 판단에 안 씀)
 - `config_version` ≠ `applied_version`이면 새 설정이 아직 적용되지 않음
 - `metrics`: 최근 heartbeat 지표, `resources`: 프로세스 그룹 합계(`cpu_pct`는 코어 1개 = 100). 실행 중이 아니면 `null`
-- `peers`: 설정에서 `format: worker_id`인 칸 `{설정 경로: 워커 id}`(빈 칸은 빠짐, 6.6.7)
+- `peers`: 설정에서 `format: worker_id`인 칸 `{설정 경로: 워커 id}`(빈 칸은 빠짐, 6.6.7). 연결 선언 구현 뒤에는 `inputs`(6.6.7.4)가 대신하고 한동안 함께 낸다
 - `crash_loop`: `restart.crash_window_s` 안에 `restart.crash_count`번 넘게 죽음(6.6.9). `restart_in_s`: 재시작 대기 중이면 남은 초. `process`: worker type `process`로 적용을 요청한 nice·CPU
 
 ### 8.3 System status
@@ -891,7 +1034,7 @@ workers/<워커>/workspace/panel/       워커 패널(id = panel.json "id")
 | `WORKSPACE_NOTIFY_SOCKET` | heartbeat 소켓(9.5). 없으면 heartbeat 없이 동작(단독 실행) |
 | `WORKSPACE_DATA` | 데이터 폴더(소켓 기본 경로) |
 
-설정 파일: `{"id": "<id>", "config_version": N, "config": {...}}`. 워커는 자기 세션의 그룹 리더, 소유자 계정으로 실행되고 Manager의 환경을 물려받는다. `prepare.sh`가 `<데이터>/run/payload.env`에 남긴 `LD_LIBRARY_PATH`·`PYTHONPATH`(SDK 경로)만 시작 셸이 환경에 더한다.
+설정 파일: `{"id": "<id>", "config_version": N, "config": {...}}`(연결 선언 구현 뒤 `config.inputs`는 Manager가 연결 결과로 채움, 6.6.7.4). 워커는 자기 세션의 그룹 리더, 소유자 계정으로 실행되고 Manager의 환경을 물려받는다. `prepare.sh`가 `<데이터>/run/payload.env`에 남긴 `LD_LIBRARY_PATH`·`PYTHONPATH`(SDK 경로)만 시작 셸이 환경에 더한다.
 
 ### 9.2 Exit code
 
@@ -1162,7 +1305,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 
 **플랫폼 조건(워크스페이스 밖):** 제품 묶음은 애플리케이션 층이다. 올라갈 장비에는 JetPack 6.2.x(L4T R36), systemd, `/opt/<이름>`과 쓰기 가능한 데이터 폴더만 있으면 된다(장치 접근 udev·그룹은 묶음의 `install.sh`가 처리). 디스크 암호화·보안 부팅·읽기 전용 루트·A/B 갱신 같은 OS·보드 층 보호는 이 저장소가 아니라 보드 이미지 저장소(이미지 빌드·플래시 스크립트)에서, 고객 요구나 양산 단계에 따로 한다.
 
-## 12. 현재 상태 (0.37)
+## 12. 현재 상태 (0.38)
 
 | 영역 | 상태 |
 |---|---|
@@ -1170,6 +1313,8 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | 화면(시스템 모니터, 워커 목록·내부, 설정 폼, 로그, 명령 이력, 워크스페이스 보기) | 구현 |
 | 워커 템플릿(호스트 + 모듈 셋 source·processor·peer, 포트, 스레드, 자식 프로세스, 워커 간 통신, 단계별 시험, ICD 틀, 패널, Python 도우미), new/release/check/system-check 도구, 구조 검사 | 구현 |
 | 워커 간 통신(명령·스트림 구독·데이터 버스, worker_id·peers) | 구현(템플릿 시험). 기존 워커는 아직 안 씀 |
+| 입출력 정의(6.6.7.1~6.6.7.2: `io.json`·`io/`·사본) | 0.38 형식·템플릿 예시·점검(`dev/test_workers.py`) 구현. 기존 워커는 고도화할 때 붙임 |
+| 입력 주소·연결 선언(6.6.7.3~6.6.7.5: `inputs`, `connections.json`, libworker `host.uses`·칸 검사·`--io`, Manager 수집·자동 연결·검사·주입, 화면 연결 그림) | 설계 확정(0.38), 구현 예정. 순서: libworker → Manager → 화면 → 템플릿 `peer`를 `inputs`로 |
 | Manager API를 쓰는 워커 | 구현(`test_manager_api.py`) |
 | 워커 설정 = 워커 폴더 프리셋(임시 적용·저장·전환, 커밋은 사용자) | 구현 |
 | 프레임 버스(데이터 버스) | CPU 공유 메모리, 영상·원시 레코드, Latest·InOrder. NvBufSurface는 미결 |
@@ -1250,7 +1395,9 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 ## 15. 미결
 
-없음(0.33). 워크스페이스(개발 작업대와 제품 빌드)에서 정할 것은 남아 있지 않다.
+0.38 6.6.7 입출력 정의에서 정한 것(2026-11-18): 정의 이름 = 역할(워커 하나가 여러 개를 내보낼 수 있음), 원본은 처음 내보낸 워커(여럿이 쓰면 템플릿 공용으로), 받는 칸은 운용 중에도 검사, 연결 선언은 `<데이터>/config/connections.json`(프로필로 배포), 내보내는 워커가 하나뿐이면 자동 연결, 칸은 JSON Schema 문법.
+
+워크스페이스(개발 작업대와 제품 빌드)에서 정할 것은 없다(0.33).
 
 예전 미결이 간 곳: 송출 인코더·프레임 버스 GPU 메모리(NvBufSurface) 전환은 영상 워커 설계서의 미결, 외부 운용 인터페이스 워커는 그 워커를 만들 때 그 설계서, 기존 워커 고도화 순서는 워커 작업에서 정한다. OS·보드 층 보호(디스크 암호화, 보안 부팅, 읽기 전용 루트, A/B 갱신)는 워크스페이스와 별개(보드 이미지 저장소). 전원 모드는 설치가 맞춘다(11.1 개발 보드 MAXN_SUPER, 11.4 제품은 빌드에서 고름). 워커 설정을 깃에 올리는 일은 사용자가 한다(6.3.1)
 
@@ -1285,6 +1432,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.38 | **워커 간 통신의 입출력 정의(6.6.7).** 워커가 자기 입출력을 정의 파일로 갖는다: `io.json`(내보내는 정의·쓰는 정의 목록), `io/<정의>.json`(역할 단위 정의, 받는 명령·발행 주제·데이터 버스, 칸은 JSON Schema, 버전), `io/uses/<정의>.json`(가져온 사본). 입력 주소는 설정 `inputs`, 연결은 `<데이터>/config/connections.json` 한 곳에서 선언하고 Manager가 수집·자동 연결·검사·주입(데이터는 거치지 않음). 이번에 구현: 형식, 템플릿 예시(`example` 정의, `peer`의 `uses`), `dev/test_workers.py` 점검, `dev/new-worker.sh` 정의 이름 바꾸기, 새 워커 설계서 3장 틀. libworker·Manager·화면은 12장 순서로 |
 | 0.37 | `dev/release-worker.sh`가 `jetson-build --test`를 직접 돌린다(따로 빌드하게 두면 빌드가 안 돌았을 때 예전 결과가 복사돼 `BUILD`의 소스 커밋과 실행 파일이 어긋났음). 빌드·시험 실패면 아무것도 바꾸지 않음. libframebus `Consumer::skipped()` 경합 수정 |
 | 0.36 | 연결 지표 이름: `_link`와 함께 `_up`도(모듈 이름이 `link`일 때 `link_up`). `dev/system-check.sh`가 둘 다 본다 |
 | 0.35 | **안전망과 제공 도구(6.6.9), 시스템 모니터 보기(6.11).** libworker 0.9.0: 기본 안전망(모든 진입점 예외 잡기, 연달아 3번·`worker::Fatal`이면 exit 4, 루프 시간 `host_loop_ms`, 멈춤이면 워치독보다 먼저 `safe_state()` 뒤 exit 4, `get_status` `runtime`), 제공 도구(입력·출력 단계 `host.input`/`host.output`과 설정 `stages`·`loop_budget_ms`, `ThreadOptions` 실시간·nice·CPU, `worker::Mutex` 우선순위 상속, `Overflow::DropNewest`, 장애 주입 `__fault`), 실행 중 스레드 등록 경합 수정. Manager: 재시작 간격 늘림(최대 30 s), 연속 실패 `crash_loop`, worker type `process`(nice·CPU). REST: 스레드 정책·rt·nice·CPU 고정. 화면: 시스템 모니터 보기 드롭다운(보드 전체 / 워커: 스레드·우선순위, 단계·큐, 안전망, 추이, 자식 프로세스), 공통 부품 `select`. 점검: 모든 워커 시험을 ThreadSanitizer로도. 서비스 `LimitRTPRIO`·`LimitNICE`. 템플릿 `source.gen`을 입력 단계로 |

@@ -6,7 +6,7 @@
 #     <폴더>  workers/<폴더>, 워커 id, 실행 파일 <폴더>-worker, 패널 id  (예: thermal)
 #     [type]  워커 type (기본 <폴더의 -를 _로>_worker)
 #
-# 틀의 예제 워커를 이름만 바꿔 복사한다. 모듈(source·processor·peer)은 이름 그대로 온다:
+# 틀의 예제 워커를 이름만 바꿔 복사한다(입출력 정의 io/의 정의 이름도 새 이름으로). 모듈(source·processor·peer)은 이름 그대로 온다:
 #   그 자리에 워커의 일을 쓰고, 필요 없는 모듈은 뗀다(틀 README "모듈 만들기·붙이기·떼기").
 # 만든 뒤: cd workers/<폴더> && jetson-build --native --test  →  워크스페이스를 다시 시작하면 워커 폴더를 보고 붙는다
 set -euo pipefail
@@ -44,6 +44,12 @@ for f in "${files[@]}"; do
 done
 chmod +x "$W/workspace/prepare.sh" "$W/workspace/install.sh"
 sed -i "s/\"title\": \"예제 워커\"/\"title\": \"$NAME\"/" "$W/workspace/panel/panel.json"
+# 입출력 정의(워크스페이스 design.md 6.6.7.1): 틀의 정의 "example"을 새 워커 이름의 정의로(역할 이름은 나중에 바꿔도 됨).
+# peer 모듈은 같은 종류의 다른 워커를 받으므로 사본도 같은 이름으로
+DEF="${NAME//-/_}"
+mv "$W/io/example.json" "$W/io/$DEF.json"
+mv "$W/io/uses/example.json" "$W/io/uses/$DEF.json"
+sed -i -e "s/\"example\"/\"$DEF\"/g" "$W/io.json" "$W/io/$DEF.json" "$W/io/uses/$DEF.json"
 
 echo "created $W (type $TYPE, executable $NAME-worker, modules: source processor peer)"
 echo "next:"

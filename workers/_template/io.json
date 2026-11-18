@@ -1,0 +1,14 @@
+{
+  "provides": ["example"],
+  "uses": {
+    "upstream": {
+      "description": "peer 모듈: 다른 예제 워커의 데이터 버스를 순서대로 받고, 스트림을 구독하고, 생성 주기 명령을 넘긴다. 없으면 기다리며 다시 붙음",
+      "from": "example",
+      "version": "1.0",
+      "topics": ["source"],
+      "commands": ["source.set_rate"],
+      "data": ["frames"],
+      "required": false
+    }
+  }
+}

@@ -44,6 +44,9 @@
 workers/<이름>/
 ├─ CMakeLists.txt            이 폴더만으로 빌드
 ├─ README.md, design.md      사용법, 설계 (dev/new-worker.sh가 틀에서 만들어 줌)
+├─ io.json                   입출력 정의 목록: 내보내는 정의(provides), 쓰는 정의(uses). 아래 "입출력 정의 쓰기"
+├─ io/<정의>.json            내보내는 정의 원본(받는 명령·발행 주제·데이터 버스, 칸은 JSON Schema)
+├─ io/uses/<정의>.json       쓰는 정의 사본(다른 워커의 것)
 ├─ src/main.cpp              호스트 + 모듈 조립(얇음)                                   ②
 ├─ test/test_worker.cpp      워커 통합 시험(실행 파일, 워커 둘)
 ├─ lib/
@@ -221,6 +224,24 @@ public:
 - 상대가 없거나 다시 시작해도 살아서 기다리며 다시 붙는다. 연결은 `<모듈>_link`(모듈 이름이 link면 `link_up`) 지표로
 - 두 도구의 `wake_fd()`를 `add_pollfds`에 넣고 `on_poll`에서 `next()`로 꺼낸다(워커 루프는 기다리지 않음)
 - 시험: `test/test_worker.cpp`처럼 실행 파일 둘(a, b의 `peer.peer = "a"`)을 띄우고, 소켓 위치는 `WORKSPACE_DATA`·`XDG_RUNTIME_DIR`을 임시 폴더로
+
+### 입출력 정의 쓰기·가져오기 (design.md 6.6.7.1~6.6.7.2)
+
+워커끼리 주고받는 것(받는 명령, 발행 주제, 데이터 버스)은 **정의 파일이 계약**이다. 쓰는 쪽은 상대 설계서를 읽고 칸 이름을 손으로 옮기지 않고 정의 사본을 가져다 쓴다.
+
+```text
+io.json                  {"provides": ["example"], "uses": {"upstream": {"from": "example", "version": "1.0", ...}}}
+io/example.json          내보내는 정의(원본): commands·topics·data, 칸은 JSON Schema(+ unit)
+io/uses/example.json     쓰는 정의(사본). 여기서는 peer가 같은 종류의 다른 워커를 받아서 자기 정의의 사본
+```
+
+1. **내보내기:** 다른 워커가 쓸 명령·주제·데이터 버스를 `io/<정의>.json`에 적는다. 정의 이름은 워커 이름이 아니라 역할(같은 역할의 다른 워커가 같은 정의를 내보내면 서로 바꿔 쓸 수 있음). `io.json`의 `provides`에 이름을 넣는다
+2. **가져오기:** 다른 워커의 정의 파일을 `io/uses/<정의>.json`에 복사하고, `io.json`의 `uses.<입력 이름>`에 `from`·`version`·쓰는 `topics`·`commands`·`data`·`required`를 적는다. 코드는 사본에 있는 칸만 쓴다
+3. **바꿀 때:** 칸·명령·주제를 더하면 작은 버전(1.0 → 1.1), 빼거나 이름·형식을 바꾸면 큰 버전(2.0). 정의를 바꾸면 쓰는 워커의 사본도 새로 가져온다
+4. **설계서:** 3장은 칸 목록을 다시 적지 않고 정의 파일을 가리킨다(뜻·시점·이유·상대 없을 때 동작만)
+5. **점검:** `dev/check.sh`(`dev/test_workers.py`)가 형식, `io.json`이 가리키는 파일, `uses`가 쓰는 항목, 사본이 원본과 같은지·호환되는지 본다
+
+상대 주소를 설정 `inputs`로 받고 Manager가 연결 선언으로 채우는 부분(design.md 6.6.7.3~6.6.7.5)은 구현 예정이다. 그때까지 상대는 지금처럼 설정 칸(`worker_id`)으로 정한다.
 
 ## 설정·프리셋 (워커 폴더, design.md 6.3.1)
 

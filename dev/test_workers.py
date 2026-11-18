@@ -3,7 +3,8 @@
   - 폴더 구성: 워커(CMake·README·design·main·workspace/), 모듈(core/include·include·src·test·README·schema)
   - 층 규칙: 모듈 코어(① 유닛)가 libworker를 쓰지 않는지(쓰면 실패)
   - 패널 id 겹침, Python 도우미 사본
-  - 미준수 목록(실패가 아니라 알림): 유닛 시험이 없는 모듈, ICD(설계서 3장)가 없는 워커 → 워커 고도화 때 하나씩 없앤다
+  - 입출력 정의(design.md 6.6.7.1~6.6.7.2): io.json·io/<정의>.json 형식, 가리키는 파일, uses가 쓰는 항목, 사본(io/uses/)이 원본과 같은지·호환되는지
+  - 미준수 목록(실패가 아니라 알림): 유닛 시험이 없는 모듈, ICD(설계서 3장)가 없는 워커, 입출력 정의가 없는 워커 → 워커 고도화 때 하나씩 없앤다
 
     python3 -m unittest dev/test_workers.py -v      (워크스페이스 폴더에서)
 
@@ -13,6 +14,7 @@ import filecmp
 import glob
 import json
 import os
+import re
 import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -121,8 +123,142 @@ class Compliance(unittest.TestCase):
             doc = os.path.join(w, "new" if os.path.basename(w) == "_template" else "", "design.md")
             if os.path.exists(doc) and "## 3. 인터페이스 명세 (ICD)" not in read(doc):
                 issues.append("%s/design.md: 3장 인터페이스 명세(ICD) 없음(틀 new/design.md 형식)" % os.path.basename(w))
+            if not os.path.exists(os.path.join(w, "io.json")):
+                issues.append("%s: 입출력 정의(io.json, io/) 없음(design.md 6.6.7.1)" % os.path.basename(w))
+        issues += IoDefinitions.notices()
         if issues:
             print("\n미준수(워커 고도화 대상):\n  " + "\n  ".join(issues))
+
+
+IO_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+IO_VERSION = re.compile(r"^(\d+)\.(\d+)$")
+IO_ERRORS = {"bad_request", "unavailable", "timeout", "internal"}
+SCHEMA_TYPES = {"object", "array", "string", "number", "integer", "boolean", "null"}
+
+
+def load_json(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def io_originals():
+    """정의 이름 → 원본 파일들(workers/*/io/<정의>.json, 사본 io/uses/는 빼고)"""
+    out = {}
+    for w in workers(with_template=True):
+        for p in sorted(glob.glob(os.path.join(w, "io", "*.json"))):
+            out.setdefault(os.path.splitext(os.path.basename(p))[0], []).append(p)
+    return out
+
+
+def version_tuple(v):
+    m = IO_VERSION.match(v or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+class IoDefinitions(unittest.TestCase):
+    """입출력 정의(design.md 6.6.7.1~6.6.7.2). io.json이 있는 워커만 본다(없는 워커는 미준수 목록에 알림)"""
+
+    def check_schema(self, s, where):
+        self.assertIsInstance(s, dict, "%s: JSON Schema(객체)여야 함" % where)
+        t = s.get("type")
+        types = t if isinstance(t, list) else [t]
+        self.assertTrue(t is not None and all(x in SCHEMA_TYPES for x in types), "%s: type이 %s 중 하나" % (where, sorted(SCHEMA_TYPES)))
+        props = s.get("properties", {})
+        self.assertIsInstance(props, dict, "%s: properties는 객체" % where)
+        for k, sub in props.items():
+            self.check_schema(sub, "%s.%s" % (where, k))
+        for k in s.get("required", []):
+            self.assertIn(k, props, "%s: required의 %s가 properties에 없음" % (where, k))
+        if "items" in s:
+            self.check_schema(s["items"], where + "[]")
+
+    def check_definition(self, path):
+        d = load_json(path)
+        stem = os.path.splitext(os.path.basename(path))[0]
+        rel = os.path.relpath(path, ROOT)
+        self.assertEqual(sorted(set(d) - {"name", "version", "description", "commands", "topics", "data"}), [], rel + ": 모르는 항목")
+        self.assertEqual(d.get("name"), stem, rel + ": name은 파일 이름과 같아야 함")
+        self.assertRegex(stem, IO_NAME, rel + ": 정의 이름 형식")
+        self.assertIsNotNone(version_tuple(d.get("version")), rel + ": version은 '큰.작은'")
+        for name, c in d.get("commands", {}).items():
+            where = "%s: commands.%s" % (rel, name)
+            self.assertEqual(sorted(set(c) - {"description", "args", "reply", "errors"}), [], where + ": 모르는 항목")
+            self.check_schema(c.get("args"), where + ".args")
+            self.check_schema(c.get("reply"), where + ".reply")
+            self.assertEqual(sorted(set(c.get("errors", [])) - IO_ERRORS), [], where + ".errors는 9.6 code만")
+        for name, t in d.get("topics", {}).items():
+            where = "%s: topics.%s" % (rel, name)
+            self.assertEqual(sorted(set(t) - {"description", "every_ms", "schema"}), [], where + ": 모르는 항목")
+            self.assertTrue(isinstance(t.get("every_ms"), (int, float)) and t["every_ms"] > 0, where + ".every_ms > 0")
+            self.check_schema(t.get("schema"), where + ".schema")
+        for name, b in d.get("data", {}).items():
+            where = "%s: data.%s" % (rel, name)
+            self.assertEqual(sorted(set(b) - {"description", "format"}), [], where + ": 모르는 항목")
+            self.assertIsInstance(b.get("format"), str, where + ".format")
+        return d
+
+    def test_io_files(self):
+        for w in workers(with_template=True):
+            index = os.path.join(w, "io.json")
+            if not os.path.exists(index):
+                continue
+            name = os.path.basename(w)
+            with self.subTest(worker=name):
+                io = load_json(index)
+                self.assertEqual(sorted(set(io) - {"provides", "uses"}), [], "io.json: 모르는 항목")
+                for p in sorted(glob.glob(os.path.join(w, "io", "*.json")) + glob.glob(os.path.join(w, "io", "uses", "*.json"))):
+                    self.check_definition(p)
+                for d in io.get("provides", []):
+                    self.assertTrue(os.path.exists(os.path.join(w, "io", d + ".json")) or
+                                    os.path.exists(os.path.join(w, "io", "uses", d + ".json")),
+                                    "provides %s: io/%s.json(원본) 또는 io/uses/%s.json(사본)이 없음" % (d, d, d))
+                for inp, u in io.get("uses", {}).items():
+                    where = "uses.%s" % inp
+                    self.assertEqual(sorted(set(u) - {"description", "from", "version", "topics", "commands", "data", "required"}), [],
+                                     where + ": 모르는 항목")
+                    self.assertIsInstance(u.get("required"), bool, where + ".required(true/false)")
+                    copy = os.path.join(w, "io", "uses", "%s.json" % u.get("from"))
+                    self.assertTrue(os.path.exists(copy), "%s: 사본 io/uses/%s.json이 없음" % (where, u.get("from")))
+                    if not os.path.exists(copy):
+                        continue
+                    d = load_json(copy)
+                    self.assertEqual(u.get("version"), d.get("version"), where + ".version은 가져온 사본의 버전")
+                    for kind in ("topics", "commands", "data"):
+                        for item in u.get(kind, []):
+                            self.assertIn(item, d.get(kind, {}), "%s: %s %s가 정의 %s에 없음" % (where, kind, item, u.get("from")))
+
+    def test_one_original_per_definition(self):
+        for d, paths in io_originals().items():
+            with self.subTest(definition=d):
+                self.assertEqual(len(paths), 1, "정의 원본은 하나(나머지 워커는 io/uses/ 사본): %s" % [os.path.relpath(p, ROOT) for p in paths])
+
+    def test_copies_match_original(self):
+        """사본이 원본과 다르면: 큰 버전이 같고 원본이 더 새것이면 알림(notices), 그 밖에는 실패"""
+        originals = io_originals()
+        for w in workers(with_template=True):
+            for copy in sorted(glob.glob(os.path.join(w, "io", "uses", "*.json"))):
+                d = os.path.splitext(os.path.basename(copy))[0]
+                if len(originals.get(d, [])) != 1:
+                    continue  # 원본이 다른 저장소에 있음
+                orig = originals[d][0]
+                if filecmp.cmp(orig, copy, shallow=False):
+                    continue
+                vo, vc = version_tuple(load_json(orig).get("version")), version_tuple(load_json(copy).get("version"))
+                with self.subTest(copy=os.path.relpath(copy, ROOT)):
+                    self.assertTrue(vo and vc and vo[0] == vc[0] and vo > vc,
+                                    "원본 %s(%s)과 다름: 같은 버전이면 내용이 같아야 하고, 큰 버전이 다르면 이어지지 않음" %
+                                    (os.path.relpath(orig, ROOT), load_json(orig).get("version")))
+
+    @staticmethod
+    def notices():
+        out = []
+        originals = io_originals()
+        for w in workers(with_template=True):
+            for copy in sorted(glob.glob(os.path.join(w, "io", "uses", "*.json"))):
+                d = os.path.splitext(os.path.basename(copy))[0]
+                if len(originals.get(d, [])) == 1 and not filecmp.cmp(originals[d][0], copy, shallow=False):
+                    out.append("%s: 원본(%s)이 더 새것, 사본을 새로 가져오기" % (os.path.relpath(copy, ROOT), os.path.relpath(originals[d][0], ROOT)))
+        return out
 
 
 class Panels(unittest.TestCase):
