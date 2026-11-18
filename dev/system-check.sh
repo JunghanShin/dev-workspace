@@ -8,7 +8,7 @@
 # 보는 것(REST로만, 보드를 바꾸지 않음):
 #   - REST·Manager 응답, Manager 클라이언트 접속
 #   - 워커마다: 실행 상태(목표대로인지), heartbeat 나이, 재시작 수, 마지막 오류, 계약 버전(libworker), 가짜 장치·개발 빌드 표시
-#   - 장치·상대 연결: 지표 *_link가 1인지
+#   - 장치·상대 연결: 지표 *_link 또는 *_up이 1인지
 #   - 워커 간 연결: 설정이 가리키는 상대 워커(peers)가 있고 돌고 있는지
 #   - 텔레메트리 스트림: 발행하는 워커의 스트림에서 첫 메시지를 받는지
 # 결과는 표로, 하나라도 FAIL이면 종료 코드 1. WARN은 알림
@@ -75,7 +75,7 @@ for w in workers:
     if w.get("libworker") and not str(w["libworker"]).startswith("py-"):  # Python 도우미(py-)는 다른 구현
         versions.setdefault(w["libworker"], []).append(wid)
     for k, v in sorted((w.get("metrics") or {}).items()):
-        if k.endswith("_link"):
+        if k.endswith("_link") or k.endswith("_up"):  # 연결 지표(0/1). 모듈 이름이 link면 link_up
             add("OK" if v and float(v) >= 1 else "WARN", "  %s %s" % (wid, k), "연결" if v and float(v) >= 1 else "끊김(장치·상대 확인)")
     for path, peer in sorted((w.get("peers") or {}).items()):
         p = ids.get(peer)

@@ -2,12 +2,12 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.35 |
+| 문서 버전 | 0.36 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
 | 현장 값 | 주소·장비 구성 등은 프로필(`install/profiles/<이름>/`)에. 이 문서는 `<보드 주소>`처럼 자리만 쓴다 |
-| 상태 | 구현 반영(0.35 기준 코드와 일치). 미결은 15장 |
+| 상태 | 구현 반영(0.36 기준 코드와 일치). 미결은 15장 |
 
 절 번호는 코드 주석이 참조하므로(예: "design.md 9.5") 바꾸지 않는다. 변경 이력은 부록 B.
 
@@ -419,7 +419,7 @@ main.cpp:  worker::Host host("<이름>-worker");
 | 설정 | `config["<모듈>"]`. 맨 위에는 호스트 키(`watchdog_sec`, `stop_timeout_sec`, `thread_stall_sec`, `command_socket`, `stream_socket`)만. 모르는 키는 설정 오류(exit 1) |
 | 명령 | `"<모듈>.<명령>"`. 호스트가 앞부분으로 배달. 모듈이 하나면 앞부분 없이도 됨. 옛 이름은 `host.alias()` |
 | 상태 | `get_status` → `{"<모듈>": {...}, "threads": {...}}` |
-| 지표 | `"<모듈>_<이름>"`(호스트가 접두어). 공통 이름: `_link`(0/1), `_fps`, `_errors`, `_drops`, `_latency_ms` |
+| 지표 | `"<모듈>_<이름>"`(호스트가 접두어). 공통 이름: `_link` 또는 `_up`(연결 0/1, 모듈 이름이 `link`면 `link_up`), `_fps`, `_errors`, `_drops`, `_latency_ms` |
 | 스레드 | `"<모듈>.<역할>"`. 시스템 모니터 스레드 표에 그대로 보인다 |
 | 막지 않기 | `on_*`·`handle`은 짧게(호스트 루프 하나를 같이 씀). 기다리는 일은 모듈 스레드 + 큐(6.6.1) |
 | 모듈끼리 | 포트(작은 C++ 인터페이스)로만. 같은 포트를 구현한 모듈로 바꿔 끼울 수 있다 |
@@ -1112,7 +1112,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | `manager/test_manager_api.py` | Manager API를 쓰는 워커: 임시 워크스페이스로 진짜 Manager를 띄워 다른 워커 시작·자기 제어 금지·읽기 전용 소켓, 제품 모드(설정 잠금·sim 거부) |
 | `workers/_template/python/test_comm.py` | Python 통신 도구 ↔ C++ 템플릿 워커 양방향(구독·명령·데이터 버스 InOrder, C++이 Python을 구독·명령) |
 | `dev/build-product.sh <프로필>` | 제품 묶음(11.4) |
-| `dev/system-check.sh [주소]` | 시스템 시험(보드, REST로 읽기만): 워커 상태·heartbeat·재시작, `*_link` 지표, 상대 워커(`peers`), 스트림 첫 메시지, libworker 버전 섞임. FAIL이 있으면 종료 코드 1 |
+| `dev/system-check.sh [주소]` | 시스템 시험(보드, REST로 읽기만): 워커 상태·heartbeat·재시작, 연결 지표(`*_link`, `*_up`), 상대 워커(`peers`), 스트림 첫 메시지, libworker 버전 섞임. FAIL이 있으면 종료 코드 1 |
 
 시험 단계(3장 "단계"): 유닛·모듈 = 모듈 `test/`, 워커 = `test/test_worker.cpp`(실행 파일, 워커 둘 통신 포함), 서브시스템 = 보드 `dev/system-check.sh`. 앞의 셋은 `dev/check.sh`가 PC에서 돌린다.
 
@@ -1162,7 +1162,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 
 **플랫폼 조건(워크스페이스 밖):** 제품 묶음은 애플리케이션 층이다. 올라갈 장비에는 JetPack 6.2.x(L4T R36), systemd, `/opt/<이름>`과 쓰기 가능한 데이터 폴더만 있으면 된다(장치 접근 udev·그룹은 묶음의 `install.sh`가 처리). 디스크 암호화·보안 부팅·읽기 전용 루트·A/B 갱신 같은 OS·보드 층 보호는 이 저장소가 아니라 보드 이미지 저장소(이미지 빌드·플래시 스크립트)에서, 고객 요구나 양산 단계에 따로 한다.
 
-## 12. 현재 상태 (0.35)
+## 12. 현재 상태 (0.36)
 
 | 영역 | 상태 |
 |---|---|
@@ -1285,6 +1285,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.36 | 연결 지표 이름: `_link`와 함께 `_up`도(모듈 이름이 `link`일 때 `link_up`). `dev/system-check.sh`가 둘 다 본다 |
 | 0.35 | **안전망과 제공 도구(6.6.9), 시스템 모니터 보기(6.11).** libworker 0.9.0: 기본 안전망(모든 진입점 예외 잡기, 연달아 3번·`worker::Fatal`이면 exit 4, 루프 시간 `host_loop_ms`, 멈춤이면 워치독보다 먼저 `safe_state()` 뒤 exit 4, `get_status` `runtime`), 제공 도구(입력·출력 단계 `host.input`/`host.output`과 설정 `stages`·`loop_budget_ms`, `ThreadOptions` 실시간·nice·CPU, `worker::Mutex` 우선순위 상속, `Overflow::DropNewest`, 장애 주입 `__fault`), 실행 중 스레드 등록 경합 수정. Manager: 재시작 간격 늘림(최대 30 s), 연속 실패 `crash_loop`, worker type `process`(nice·CPU). REST: 스레드 정책·rt·nice·CPU 고정. 화면: 시스템 모니터 보기 드롭다운(보드 전체 / 워커: 스레드·우선순위, 단계·큐, 안전망, 추이, 자식 프로세스), 공통 부품 `select`. 점검: 모든 워커 시험을 ThreadSanitizer로도. 서비스 `LimitRTPRIO`·`LimitNICE`. 템플릿 `source.gen`을 입력 단계로 |
 | 0.34 | **공개 플랫폼 정리.** 분야 전용 부품을 플랫폼에서 뺌: MAVLink 라우터(설치·서비스·설정·문서·FC 시험)는 그것을 쓰는 장치 워커가 맡는다(워커 `install.sh`). 프로필은 정해진 파일 목록 대신 폴더 맨 위의 설정 파일을 모두 넣는다(워커가 쓰는 설정도 함께, 6.12). 운용 인터페이스 예시를 일반 용어로. README를 워크스페이스 → 워커 순서로, 제품 빌드·프로젝트 저장소로 쓰기 절 |
 | 0.33 | **미결 없음(15장), 깃 기능 없앰, 전원 모드.** 워크스페이스는 깃에 쓰지 않는다(깃에 올리기·`/system/git` 없앰, 커밋은 사용자, 6.3.1). 설치가 전원 모드를 맞춤: 개발 보드 MAXN_SUPER(`install_workspace.sh --power-mode`), 제품은 빌드에서 고른 모드(`product.json` `power_mode`, 모달, `--power-mode`)를 `install.sh`가 맞춤(`install/bin/workspace-power-mode`). 예전 미결은 워커 쪽으로 넘기거나 지움 |

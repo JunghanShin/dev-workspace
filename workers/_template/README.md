@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
 |---|---|---|
 | 설정 칸 | `config["<모듈>"]` | `{"link": {"listen": "127.0.0.1:9000"}}` |
 | 명령 | `<모듈>.<명령>` | `link.set_mode`, 상태는 `get_status` → `data.link` |
-| 지표 | `<모듈>_<이름>`(호스트가 붙임) | `link_link`, `link_loss_pct` |
+| 지표 | `<모듈>_<이름>`(호스트가 붙임) | `link_up`, `link_loss_pct` |
 | 스레드 | `<모듈>.<역할>` | `link.rx`, `link.tx`, `link.pub` |
 
 ## 모듈 만들기·붙이기
@@ -218,7 +218,7 @@ public:
 | 큰 데이터 | `framebus::Consumer(path, Mode::InOrder 또는 Latest)` | 스레드 `peer.data`가 순서대로 전부 받고 번호 빠짐을 셈(`SeqTracker`) |
 
 - 상대는 설정 칸으로: 스키마 칸에 `"format": "worker_id"`. 화면이 워커 id 목록을 주고, Manager가 상태 `peers`로 내놓는다. 코드에 워커 id를 박지 않는다
-- 상대가 없거나 다시 시작해도 살아서 기다리며 다시 붙는다. 연결은 `<모듈>_link` 지표로
+- 상대가 없거나 다시 시작해도 살아서 기다리며 다시 붙는다. 연결은 `<모듈>_link`(모듈 이름이 link면 `link_up`) 지표로
 - 두 도구의 `wake_fd()`를 `add_pollfds`에 넣고 `on_poll`에서 `next()`로 꺼낸다(워커 루프는 기다리지 않음)
 - 시험: `test/test_worker.cpp`처럼 실행 파일 둘(a, b의 `peer.peer = "a"`)을 띄우고, 소켓 위치는 `WORKSPACE_DATA`·`XDG_RUNTIME_DIR`을 임시 폴더로
 
