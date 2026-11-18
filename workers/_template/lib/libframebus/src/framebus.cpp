@@ -381,7 +381,7 @@ Consumer::Result Consumer::next(int timeout_ms, Frame* out) {
         if (mode_ == Mode::Latest && !pending_.empty()) {
             send_release(pending_.front().slot);  // 최신 우선: 앞의 것은 바로 반납
             pending_.clear();
-            ++skipped_;
+            skipped_.fetch_add(1, std::memory_order_relaxed);
         }
         pending_.push_back(Note{m.slot, m.frame_id, m.ts_mono_ns, m.bytes});
     }

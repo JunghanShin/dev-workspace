@@ -1,4 +1,6 @@
-// libframebus 단위 시험: 전달, 최신 우선, 빈 슬롯 없을 때 버림, 소비자 끊김 시 참조 해제, 생산자 종료 알림
+// libframebus 단위 시험: 전달, 최신 우선, 빈 슬롯 없을 때 버림, 소비자 끊김 시 참조 해제, 생산자 종료 알림,
+// 받는 스레드가 도는 동안 다른 스레드에서 skipped() 읽기(ThreadSanitizer로 돌릴 때 경합이 없어야 한다)
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -111,6 +113,40 @@ int main() {
         }
         CHECK(dc.skipped() == 0);
         dp.stop();
+    }
+
+    // 받는 스레드가 next()를 도는 동안 다른 스레드(상태 보고)가 skipped()를 읽는다
+    {
+        const std::string tpath = path + ".thr";
+        Producer tp(tpath, fmt, 3);
+        CHECK(tp.start(&err));
+        Consumer tc(tpath);
+        CHECK(tc.connect(&err));
+        settle();
+        std::atomic<bool> stop{false};
+        std::atomic<uint64_t> got{0};
+        std::thread reader([&] {
+            Frame tf;
+            while (!stop.load()) {
+                if (tc.next(50, &tf) != Consumer::Result::Frame) continue;
+                ++got;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));  // 일부러 늦게 읽어 건너뛰게 한다
+                tc.release(tf);
+            }
+        });
+        uint64_t seen = 0;
+        for (uint64_t id = 1; id <= 300; ++id) {
+            put(tp, id);
+            seen = tc.skipped();
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        }
+        settle();
+        stop = true;
+        reader.join();
+        CHECK(got.load() > 0);
+        CHECK(tc.skipped() >= seen);
+        CHECK(seen > 0);  // 실제로 건너뛰기가 일어나야 이 시험이 뜻이 있다
+        tp.stop();
     }
 
     if (failures) {

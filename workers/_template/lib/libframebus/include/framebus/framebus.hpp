@@ -12,6 +12,7 @@
 // - 버퍼는 지금은 CPU 공유 메모리(memfd). 나중에 GPU 버퍼(NvBufSurface)로 바꿔도 이 인터페이스는 같다
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -138,7 +139,8 @@ public:
     Result next(int timeout_ms, Frame* out);
     size_t pending() const { return pending_.size(); }  // InOrder에서 아직 꺼내지 않은 알림
     void release(const Frame& f);
-    uint64_t skipped() const { return skipped_; }  // 최신 우선으로 건너뛴 프레임
+    // 최신 우선으로 건너뛴 프레임. next()를 도는 스레드가 아닌 곳(상태 보고 등)에서 읽어도 된다
+    uint64_t skipped() const { return skipped_.load(std::memory_order_relaxed); }
 
 private:
     bool send_release(int slot);
@@ -158,7 +160,7 @@ private:
     size_t slot_bytes_ = 0;
     int slots_ = 0;
     Format format_;
-    uint64_t skipped_ = 0;
+    std::atomic<uint64_t> skipped_{0};
 };
 
 }  // namespace framebus
