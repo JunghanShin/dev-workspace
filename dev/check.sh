@@ -45,8 +45,10 @@ if (( ! QUICK )); then
       b="$OUT/$name-$mode"
       if cmake -S "$w" -B "$b" -DWORKER_WORKSPACE=$mode -DCMAKE_BUILD_TYPE=Release >"$b.cfg.log" 2>&1 \
          && cmake --build "$b" -j"$(nproc)" >"$b.build.log" 2>&1; then
-        (cd "$b" && ctest --output-on-failure 2>&1 | grep -E "tests passed|tests failed|FAIL" | head -5)
-        (cd "$b" && ctest >/dev/null 2>&1) || fail+=("$name-$mode test")
+        # 한 번만 돌리고 그 결과로 판정(예전에는 보여 주기·판정을 따로 두 번 돌려 불안정한 시험의 실패가 묻혔다)
+        if out="$(cd "$b" && ctest --output-on-failure 2>&1)"; then rc=0; else rc=$?; fi
+        echo "$out" | grep -E "tests passed|tests failed|FAIL" | head -5
+        (( rc == 0 )) || fail+=("$name-$mode test")
       else
         echo "build failed: $b.build.log"
         grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null
