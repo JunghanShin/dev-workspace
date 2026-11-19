@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.38 |
+| 문서 버전 | 0.39 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -507,6 +507,7 @@ dev/new-worker.sh [--video] <폴더> [type]    틀 복사·워커 이름 바꾸�
 
 | 모듈 | 원본 | 하는 일 |
 |---|---|---|
+| 프레임 탭 `tap` | `lib/libvideo` | `video::TapModule`(libvideo 0.3). 설정 `{"tap": {"enabled", "width", "height", "pixel", ...}}`: 카메라 RTSP를 자식 gst-launch로 풀어(NVDEC) 원본 프레임을 프레임 버스(6.7)로 낸다. 소켓 기본값 `default_socket(워커 id, "frames")`. 송출과 따로라 서로 영향 없음. 인식 같은 영상 처리 워커가 받아 감 |
 | 영상 송출 `stream` | `lib/libvideo` | `video::StreamsModule`. 설정 `{"stream": {"streams": [...]}}`의 송출마다 자식 프로세스(gst-launch·ffmpeg)로 띄우고 감시·재시작. 명령 `stream.start|stop`, 지표 `stream_<이름>_link·_fps·_restarts`. 입력 기본값은 장치 모듈이 준다(`host.add<video::StreamsModule>([&dev]{ return dev.stream_defaults(); })`). 송출 항목 칸은 `stream-schema.json`이 원본 |
 | 데이터 버스 | `lib/libframebus` | 캡처 → 같은 워커 안 송출, 또는 다른 워커(AI 등)로 프레임·원시 레코드 공유(6.7) |
 | 워커 간 통신 | `lib/libworker` `peer.hpp` | 상대 워커 구독(`Subscriber`)·명령(`CommandClient`)(6.6.7) |
@@ -1434,6 +1435,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.39 | **libvideo 0.3: 프레임 탭**(`video::TapModule`, 6.6.6 표): 장치 워커가 카메라 RTSP를 풀어 원본 프레임을 프레임 버스로 냄(영상 처리 워커용). 송출과 따로 띄우는 자식 프로세스, 받기 스레드가 슬롯에 바로 읽어 넣음, 끝나거나 멈추면 다시 띄우고 프레임 버스는 그대로 |
 | 0.38 | **Manager: spawn보다 먼저 온 heartbeat**(9.5): 빨리 뜨는 워커의 READY가 spawn 기록 전에 처리되면 버려져 10 s 뒤 다시 시작되던 것을 고침(pid별로 잠시 보관 후 처리, `manager/test_notify_race.py`). **libworker 0.9.1:** 명령 소켓이 요청을 받은 연결을 2 s에 끊던 것을 고침(받은 요청은 응답까지 연결을 둠, 안전 상한 60 s 뒤 internal, 9.6). 2 s 넘게 걸리는 명령(장치 응답 대기)은 응답 대신 빈 연결 끊김을 받았다. **워커 간 통신의 입출력 정의(6.6.7).** 워커가 자기 입출력을 정의 파일로 갖는다: `io.json`(내보내는 정의·쓰는 정의 목록), `io/<정의>.json`(역할 단위 정의, 받는 명령·발행 주제·데이터 버스, 칸은 JSON Schema, 버전), `io/uses/<정의>.json`(가져온 사본). 입력 주소는 설정 `inputs`, 연결은 `<데이터>/config/connections.json` 한 곳에서 선언하고 Manager가 수집·자동 연결·검사·주입(데이터는 거치지 않음). 이번에 구현: 형식, 템플릿 예시(`example` 정의, `peer`의 `uses`), `dev/test_workers.py` 점검, `dev/new-worker.sh` 정의 이름 바꾸기, 새 워커 설계서 3장 틀. libworker·Manager·화면은 12장 순서로. **워커 설계 가이드**(`workers/_template/new/GUIDE.md`): 설계서 먼저·확정 뒤 구현, 작성 순서(품질 목표 → 맥락 → 구성 → 실행 구조 한눈 그림 → 인터페이스 → 끊겼을 때 → 시험 → 미결·구현 순서, arc42·C4·4+1·MIL-STD-498 기준), 안정성 패턴, 확정 전 체크리스트, AI에게 맡길 때. 예제 실행 구조 그림 `new/structure.svg`(new-worker가 시작점으로 복사), 설계서 틀에 품질 목표·맥락·끊겼을 때·목표 확인 표 |
 | 0.37 | `dev/release-worker.sh`가 `jetson-build --test`를 직접 돌린다(따로 빌드하게 두면 빌드가 안 돌았을 때 예전 결과가 복사돼 `BUILD`의 소스 커밋과 실행 파일이 어긋났음). 빌드·시험 실패면 아무것도 바꾸지 않음. libframebus `Consumer::skipped()` 경합 수정 |
 | 0.36 | 연결 지표 이름: `_link`와 함께 `_up`도(모듈 이름이 `link`일 때 `link_up`). `dev/system-check.sh`가 둘 다 본다 |

@@ -22,6 +22,7 @@
 #include "framebus/framebus.hpp"
 #include "video/pipeline.hpp"
 #include "video/stream.hpp"
+#include "video/tap.hpp"
 #include "worker/config.hpp"
 
 using Json = nlohmann::json;
@@ -229,6 +230,86 @@ int main() {
         s.stop();
         run.store(false);
         pt.join();
+    }
+
+    // 4. 탭(RTSP → 원본 → 프레임 버스): 가짜 gst-launch가 64x32 GRAY8 프레임(2048바이트)을 계속 낸다.
+    //    소비자가 받음, 자식이 끝나면 다시 띄움(프레임 버스는 그대로라 소비자는 붙은 채), 설정 읽기
+    {
+        const std::string tdir = dir + "/tap";
+        (void)!std::system(("mkdir -p " + tdir).c_str());
+        const std::string gst = tdir + "/gst";
+        // 인자를 남기고, stop 파일이 있으면 10프레임 뒤 끝난다
+        std::ofstream(gst) << "#!/bin/sh\necho \"$@\" > " << tdir << "/gst.args\nn=0\n"
+                           << "while :; do head -c 2048 /dev/zero || exit 0; n=$((n+1)); "
+                           << "if [ -f " << tdir << "/stop ] && [ $n -ge 10 ]; then exit 0; fi; sleep 0.02; done\n";
+        chmod(gst.c_str(), 0755);
+        video::TapConfig tc;
+        tc.enabled = true;
+        tc.source = "rtsp://cam/main.264";
+        tc.width = 64;
+        tc.height = 32;
+        tc.pixel = "GRAY8";
+        tc.socket = tdir + "/run/frames/cam.sock";  // 폴더가 없어도 만든다
+        tc.gst_launch = gst;
+        tc.retry_sec = 0.3;
+        tc.stall_sec = 1;
+        video::Tap tap(tc);
+        std::string err;
+        CHECK(tap.open(&err));
+        auto spin = [&](double sec, const std::function<bool()>& done) {
+            const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(sec * 1000));
+            while (std::chrono::steady_clock::now() < end) {
+                tap.on_timer(std::chrono::steady_clock::now());
+                if (done()) return true;
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            return done();
+        };
+        CHECK(spin(5, [&] { return tap.linked() && tap.frames() >= 5; }));
+        CHECK(has(slurp(tdir + "/gst.args"), "rtspsrc location=rtsp://cam/main.264"));
+        CHECK(has(slurp(tdir + "/gst.args"), "nvv4l2decoder ! nvvidconv ! video/x-raw,format=GRAY8,width=64,height=32 ! fdsink fd=1"));
+        framebus::Consumer c(tc.socket);
+        CHECK(c.connect(&err));
+        CHECK(c.format().width == 64 && c.format().height == 32 && c.format().pixel == "GRAY8");
+        framebus::Frame fr;
+        bool got = false;
+        for (int i = 0; i < 50 && !got; ++i) {
+            tap.on_timer(std::chrono::steady_clock::now());
+            if (c.next(100, &fr) == framebus::Consumer::Result::Frame) {
+                got = fr.bytes == 2048 && fr.ts_mono_ns > 0;
+                c.release(fr);
+            }
+        }
+        CHECK(got);
+        // 자식이 끝나면 다시 띄운다. 소비자는 끊기지 않는다
+        std::ofstream(tdir + "/stop") << "";
+        CHECK(spin(5, [&] { return tap.restarts() >= 1; }));
+        unlink((tdir + "/stop").c_str());
+        CHECK(spin(5, [&] { return tap.linked(); }));
+        got = false;
+        for (int i = 0; i < 50 && !got; ++i) {
+            tap.on_timer(std::chrono::steady_clock::now());
+            if (c.next(100, &fr) == framebus::Consumer::Result::Frame) {
+                got = true;
+                c.release(fr);
+            }
+        }
+        CHECK(got && c.connected());
+        CHECK(tap.status()["bus"].value("consumers", 0) == 1);
+        c.close();
+        tap.stop();
+        // 설정
+        video::TapConfig dflt;
+        dflt.source = "rtsp://cam/main.264";
+        CHECK(!video::parse_tap(nullptr, dflt).enabled);
+        CHECK(video::parse_tap({{"enabled", true}, {"width", 640}, {"height", 360}}, dflt).width == 640);
+        bool bad = false;
+        try {
+            video::parse_tap({{"pixel", "YUY2"}}, dflt);
+        } catch (const worker::ConfigError&) {
+            bad = true;
+        }
+        CHECK(bad);
     }
 
     (void)!std::system(("rm -rf " + dir).c_str());
