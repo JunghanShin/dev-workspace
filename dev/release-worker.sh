@@ -44,20 +44,15 @@ command -v jetson-build >/dev/null 2>&1 || {
   echo "jetson-build not found in PATH (WSL: run from a login shell, e.g. 'bash -l', or install jetson-dev-env)" >&2
   exit 1
 }
+# 설치 결과 폴더를 비우고 빌드한다: 빌드 폴더는 증분이라, 이름을 바꾸거나 지운 실행 파일의 예전 결과가
+# install/bin에 남아 함께 확정되던 일이 있었다. 비워 두면 지금 CMake 설치 규칙에 있는 실행 파일만 다시 설치된다
+rm -rf "$SRC_BIN"
 echo "== jetson-build --test ($name)"
 (cd "$W" && jetson-build --test) || { echo "jetson-build failed; nothing released" >&2; exit 1; }
 
 ls "$SRC_BIN"/* >/dev/null 2>&1 || { echo "no build output in $SRC_BIN (CMake install rules?)" >&2; exit 1; }
 for f in "$SRC_BIN"/*; do
   file -b "$f" | grep -q 'ARM aarch64' || { echo "$f is not an aarch64 executable" >&2; exit 1; }
-done
-# install/bin에 지금 빌드에 없는 실행 파일(예전에 지운 실행 파일의 남은 결과)이 있으면 알린다:
-# build/jetson 아래에 같은 이름의 링크 결과가 없으면 지금 CMake가 만드는 실행 파일이 아니다
-for f in "$SRC_BIN"/*; do
-  b="$W/build/jetson/$(basename "$f")"
-  if [[ ! -e "$b" ]]; then
-    echo "warning: $(basename "$f") has no build output in build/jetson (left over from an old build?). jetson-build --clean to be sure" >&2
-  fi
 done
 
 mkdir -p "$DST"
