@@ -32,6 +32,8 @@ EXCL=(--exclude='./build' --exclude='*/build' --exclude='./README.md' --exclude=
 for f in README.md design.md; do
   sed -e "s/@NAME@/$NAME/g" -e "s/@TYPE@/$TYPE/g" "$T/new/$f" > "$W/$f"
 done
+# 실행 구조 한눈 그림의 시작점(예제 워커 그림). 설계하면서 이 워커의 그림으로 바꾼다(설계 가이드 new/GUIDE.md 2장 ④)
+cp "$T/new/structure.svg" "$W/structure.svg"
 
 # 워커 이름만 바꾼다(실행 파일, 가짜 장치 프로그램, type, 패널 id). 모듈 이름은 그대로
 mv "$W/tools/example-sim.cpp" "$W/tools/$NAME-sim.cpp"
@@ -53,6 +55,7 @@ sed -i -e "s/\"example\"/\"$DEF\"/g" "$W/io.json" "$W/io/$DEF.json" "$W/io/uses/
 
 echo "created $W (type $TYPE, executable $NAME-worker, modules: source processor peer)"
 echo "next:"
+echo "  설계서부터: $W/design.md (가이드 workers/_template/new/GUIDE.md: 품질 목표 → 맥락 → 구성 → 실행 구조 그림 structure.svg → io/ → 끊겼을 때 → 시험). 확정 뒤 구현"
 echo "  cd $W && jetson-build --native --test"
 echo "  모듈 자리에 워커의 일: lib/<모듈>/core(유닛), lib/<모듈>/src/module.cpp(설정·명령·상태·지표·스레드), workspace/(스키마·프리셋·패널)"
 echo "  필요 없는 모듈은 CMakeLists.txt·src/main.cpp·workspace/worker-types.json·presets에서 지운다"
