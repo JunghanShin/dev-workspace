@@ -60,13 +60,28 @@ async function remote(name, params = {}) {
 }
 
 // 보드는 설정 전체를 바꾼다(PUT). 지금 설정을 읽어 바꾼 값만 합쳐 보낸다. null이면 그 키를 지움(기본값)
+// 키는 맨 위 키("watchdog_sec") 또는 모듈 칸 경로("gimbal.center_yaw" → config.gimbal.center_yaw). 모듈 칸 설정은
+// 경로로 써야 한다: 맨 위에 쓰면 워커가 읽지 않는다(design.md 6.10 묶음 section)
+function mergeChanges(config, changes) {
+  const cfg = { ...config };
+  for (const [key, v] of Object.entries(changes)) {
+    const dot = key.indexOf(".");
+    const del = v === null || v === undefined || v === "";
+    if (dot < 0) {
+      if (del) delete cfg[key]; else cfg[key] = v;
+      continue;
+    }
+    const sec = key.slice(0, dot), sub = key.slice(dot + 1);
+    const part = { ...(cfg[sec] && typeof cfg[sec] === "object" ? cfg[sec] : {}) };
+    if (del) delete part[sub]; else part[sub] = v;
+    if (Object.keys(part).length) cfg[sec] = part; else delete cfg[sec];
+  }
+  return cfg;
+}
+
 async function mergeConfig(id, changes) {
   const cur = await api("GET", `/workers/${id}/config`);
-  const cfg = { ...cur.config };
-  for (const [k, v] of Object.entries(changes)) {
-    if (v === null || v === undefined || v === "") delete cfg[k]; else cfg[k] = v;
-  }
-  return api("PUT", `/workers/${id}/config`, cfg);
+  return api("PUT", `/workers/${id}/config`, mergeChanges(cur.config, changes));
 }
 
 function toast(msg, kind = "") {

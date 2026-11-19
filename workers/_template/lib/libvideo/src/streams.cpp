@@ -114,8 +114,10 @@ std::string Streams::metrics() const {
         char fps[32];
         std::snprintf(fps, sizeof fps, "%.1f", s->fps());
         const std::string n = s->config().name;
-        m += (m.empty() ? "" : " ") + std::string("stream_") + n + "_link=" + (s->linked() ? "1" : "0") + " stream_" +
-             n + "_fps=" + fps + " stream_" + n + "_restarts=" + std::to_string(s->restarts());
+        // 꺼 둔 송출은 _link를 내지 않는다(연결 지표는 "붙어 있어야 하는데 끊김"만 뜻하게: system-check가 끊김으로 경고하지 않음)
+        if (s->enabled()) m += (m.empty() ? "" : " ") + std::string("stream_") + n + "_link=" + (s->linked() ? "1" : "0");
+        m += (m.empty() ? "" : " ") + std::string("stream_") + n + "_fps=" + fps + " stream_" + n + "_restarts=" +
+             std::to_string(s->restarts());
     }
     return m;
 }

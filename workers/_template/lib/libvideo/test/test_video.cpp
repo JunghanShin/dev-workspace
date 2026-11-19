@@ -158,7 +158,8 @@ int main() {
         CHECK(has(slurp(dir + "/b/gst.args"), "rtspsrc location=rtsp://cam/main.264"));
         CHECK(has(slurp(dir + "/b/gst.args"), "clockoverlay"));
         CHECK(st("spare").value("link", "") == "down" && !st("spare").value("enabled", true));
-        CHECK(has(s.metrics(), "stream_main_link=1") && has(s.metrics(), "stream_spare_link=0"));
+        CHECK(has(s.metrics(), "stream_main_link=1"));
+        CHECK(!has(s.metrics(), "stream_spare_link") && has(s.metrics(), "stream_spare_fps="));  // 꺼 둔 송출: 연결 지표 없음
         // 한쪽(main ffmpeg)이 끝나도 다른 쪽은 그대로, main은 다시 시작
         std::ofstream(dir + "/a/exit") << "";
         CHECK(run_until(s, 4, [&] { return st("main").value("restarts", 0) >= 1; }));
@@ -171,6 +172,7 @@ int main() {
         CHECK(run_until(s, 2, [&] { return st("proc").value("link", "") == "down" && !st("proc").value("enabled", true); }));
         CHECK(s.handle("stream_start", {{"name", "spare"}}, &reply) && reply.value("ok", false));
         CHECK(run_until(s, 6, [&] { return st("spare").value("link", "") == "up"; }));
+        CHECK(has(s.metrics(), "stream_spare_link=1") && !has(s.metrics(), "stream_proc_link"));  // 켜면 생기고 끄면 빠짐
         CHECK(s.handle("stream_start", {{"name", "nope"}}, &reply) && !reply.value("ok", true));
         CHECK(!s.handle("get_status", Json::object(), &reply));
         s.stop();
