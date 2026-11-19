@@ -122,7 +122,7 @@ private:
 
 class Host {
 public:
-    explicit Host(std::string program);  // 로그·사용법에 쓰는 실행 파일 이름(예: "mavlink-worker")
+    explicit Host(std::string program);  // 로그·사용법에 쓰는 실행 파일 이름(예: "example-worker")
     ~Host();
     Host(const Host&) = delete;
     Host& operator=(const Host&) = delete;
