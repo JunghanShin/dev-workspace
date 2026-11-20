@@ -4,6 +4,8 @@
 //   - pm.res: 자기 프로세스 그룹을 재면 프로세스 1개 이상
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -184,6 +186,33 @@ void test_resources() {
     }
 }
 
+// 전체 훑기는 처음·kFullScanS마다·새 그룹·사라진 pid일 때만, 그 사이는 기억한 pid만 읽어도 같은 값
+void test_sampler_cache() {
+    pm::ResourceSampler s;
+    const int g = static_cast<int>(::getpgrp());
+    auto a = s.sample({g}, 100.0);
+    CHECK(s.full_scans() == 1);
+    auto b = s.sample({g}, 101.0);  // 기억한 pid만
+    CHECK(s.full_scans() == 1);
+    CHECK(a[g]["procs"] == b[g]["procs"] && b[g]["threads"].get<long long>() >= 1 && b[g]["cpu_pct"].is_number());
+    s.sample({g}, 100.0 + pm::ResourceSampler::kFullScanS + 0.1);  // 주기가 됨
+    CHECK(s.full_scans() == 2);
+    s.sample({g, 999999}, 106.0);  // 새 그룹(없는 그룹이라도 처음엔 훑음)
+    CHECK(s.full_scans() == 3);
+    // 자식을 하나 만들어 끝내면(기억한 pid가 사라짐) 다음 표본이 전체 훑기로 바뀜
+    const pid_t child = ::fork();
+    if (child == 0) {
+        ::pause();
+        ::_exit(0);
+    }
+    s.sample({g}, 112.0);  // 주기: 자식까지 기억
+    const int before = s.full_scans();
+    ::kill(child, SIGKILL);
+    ::waitpid(child, nullptr, 0);
+    s.sample({g}, 113.0);
+    CHECK(s.full_scans() == before + 1);
+}
+
 }  // namespace
 
 int main() {
@@ -192,6 +221,7 @@ int main() {
     test_publisher();
     std::cout << "publisher done\n";
     test_resources();
+    test_sampler_cache();
     std::cout << "resources done\n";
     std::cout << (g_fail ? "FAILED" : "OK") << " (" << g_fail << " failures)\n";
     return g_fail ? 1 : 0;

@@ -130,7 +130,7 @@ core는 워커의 모듈 코어처럼 시스템 호출을 모른다(시계·spaw
 | 단위 시험 | `test_core`(상태 규칙·설정 검사·일찍 온 heartbeat, 가짜 시계·spawn·store), `test_threads`(pm.store·pm.pub·pm.res). TSan 경고 0 |
 | 자원(PC WSL, 워커 5·구독자 2) | 메모리 22.4 MB → 5.0 MB, CPU 0.30% → 0.20%, 실행 파일 1.1 MB |
 | 보드 실측(워커 5, 60 s 평균) | 메모리 25.6 → 6.7 MB, CPU 3.48 → 1.92%, 스레드 6 → 4. 스레드별: 루프 0.70%, pm.res 1.03%, pm.pub 0.07%, pm.store 0.03%. 워커 기동·REST·`/io`·스트림·패널 정상 |
-| 실행 | `dev/release-worker.sh manager` → `manager/bin/process-manager`. 시작 셸: `WORKSPACE_MANAGER_IMPL=cpp` 또는 `<데이터>/config/manager_impl`에 `cpp`(실행 파일이 없으면 Python 판). 점검: `dev/check.sh`가 빌드·단위·수락·TSan |
+| 실행 | `dev/release-worker.sh manager` → `manager/bin/process-manager`. 시작 셸 기본은 C++(0.48). 되돌리기: `WORKSPACE_MANAGER_IMPL=python` 또는 `<데이터>/config/manager_impl`에 `python`(C++ 실행 파일이 없어도 Python). 점검: `dev/check.sh`가 빌드·단위·수락·TSan |
 
 Python 판과 다른 점(일부러):
 
@@ -143,7 +143,7 @@ Python 판과 다른 점(일부러):
 
 남은 위험: 설정 스키마 `pattern`은 std::regex(ECMAScript). 스레드가 있는 프로세스의 fork는 보드에서 워커 정상 기동으로 확인.
 
-**CPU 목표(0.5%)는 아직:** 보드에서 1.92%, 대부분 pm.res(1초마다 /proc 전체를 훑어 프로세스 그룹을 찾음). 줄일 방법: 그룹의 pid를 기억하고 전체 훑기는 5초마다만
+**CPU(0.48):** 처음 보드에서 1.92%, 대부분 pm.res(1초마다 /proc 전체를 훑음). 그룹의 pid를 기억해 매번은 그 pid만 읽고, 전체 훑기는 5초마다·새 그룹·사라진 pid일 때만으로 바꿈(시험 `test_sampler_cache`)
 
 ## 7. 미결
 

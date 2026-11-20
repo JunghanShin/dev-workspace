@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.47 |
+| 문서 버전 | 0.48 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1411,7 +1411,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | 프레임 버스(데이터 버스) | CPU 공유 메모리, 영상·원시 레코드, Latest·InOrder. NvBufSurface는 미결 |
 | 데이터 버스 녹화·재생 | 구현(`workers/replay`, 녹화 → 재생 왕복 시험) |
 | 계약 규칙(6.6.7.1~6.6.7.2: 세 정의, 정의 밖 칸 금지, 출력 대조, REST `/io`) | **구현 완료(0.45).** 템플릿(0.43), REST `/io`·libvideo 조각(0.44), 모든 워커에 역할·워커 정의와 출력 대조: replay(역할 `recorder`, 이 저장소), 장치 워커(프로젝트 저장소). 공통 이벤트에 `seq`·`detail`. 미준수 목록 없음 |
-| process-manager C++ 판(6.3, `docs/process-manager.md`) | 구현(0.47), 보드 확인: 메모리 25.6 → 6.7 MB, CPU 3.48 → 1.92%. 시작 셸에서 고름(기본 아직 Python). 남은 것: pm.res CPU 줄이기 → 기본을 C++로 → Python 판 삭제 → 연결 선언·명령 소유·권한 표 |
+| process-manager C++ 판(6.3, `docs/process-manager.md`) | 구현(0.47), 보드 확인: 메모리 25.6 → 6.7 MB, CPU 3.48 → 1.92%. 시작 셸 기본 C++(0.48, 되돌리기 `manager_impl` = `python`), pm.res는 기억한 pid만 읽고 전체 훑기 5초마다. 남은 것: 보드 재측정 → Python 판 삭제 → 연결 선언·명령 소유·권한 표 |
 | 계층과 매니저(4.1, `docs/layers.md`) | 설계 확정(0.40), 구현 전. 언어(원칙 10, 0.42): 매니저는 C++(libworker 위), 지금 Python인 REST·Manager·logger는 게이트웨이·process-manager·record-manager로 재구성하면서 C++로 다시 짬. 순서: 계약 규칙(상태·화면용 주제도 정의에, 실제 출력 대조) → 게이트웨이 → record → status → fault → mission·payload → config → 명령 경로 강제 |
 | 워커 | 세 워커 모두 템플릿 규칙 충족(유닛·모듈·워커 시험, 설계서 3장 ICD, 미준수 목록 없음). 워커별 구조 설계(모듈 나누기, 워커 간 통신 적용)는 다음 단계 |
 
@@ -1528,6 +1528,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.48 | process-manager: 시작 셸 기본을 C++로(되돌리기 `WORKSPACE_MANAGER_IMPL=python`·`config/manager_impl`), pm.res가 그룹 pid를 기억해 /proc 전체 훑기를 5초마다로(보드 CPU 대부분이 여기서 나왔음) |
 | 0.47 | **process-manager C++ 판 구현**(`manager/` CMake: core·src·lib 사본·단위 시험). 수락 시험 `manager/test_manager_accept.py`(15) 새로, `test_manager_api.py`는 `MANAGER_BIN`으로 판을 고름. 시작 셸 `WORKSPACE_MANAGER_IMPL=cpp`·`config/manager_impl`(기본 Python), `dev/release-worker.sh manager`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/process-manager.md` 6.1 |
 | 0.46 | **process-manager 설계 확정**(`docs/process-manager.md`, 그림 `docs/process-manager.svg`): 지금 Manager를 C++로(하는 일·API·파일 그대로, 수락 시험 = 지금 Python 시험), 제어 루프 + `pm.pub`·`pm.store`·`pm.res`, 연결 선언·명령 소유·권한 표, 워커는 process-manager에 기대지 않음(설정 값이 없으면 단독 실행 기본값), 막기 단계 `command_guard` off → warn → enforce(6단계) |
 | 0.45 | **계약 규칙 1단계 끝.** replay 정의(역할 `recorder`, `io/self.json`, `check`), replay 오류 code를 9.6에 맞춤(`conflict` → `busy`·`bad_request`). 공통 이벤트에 `seq`(순서 번호)·`detail`(낸 쪽이 덧붙이는 칸). 출력 대조: 주제를 정의하지 않은 워커는 스트림 없어도 됨 |

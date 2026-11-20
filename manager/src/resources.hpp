@@ -15,13 +15,20 @@
 
 namespace pm {
 
-// /proc 한 번 읽어 {pgid: {"cpu_pct", "rss_mb", "procs", "threads"}}. cpu_pct는 두 번째 표본부터
+// {pgid: {"cpu_pct", "rss_mb", "procs", "threads"}}. cpu_pct는 두 번째 표본부터.
+// /proc 전체 훑기는 비싸다(보드 실측: 1초마다 훑으면 CPU 1%): 그룹에 속한 pid를 기억해 두고 매번은 그 pid만 읽는다.
+// 전체 훑기는 kFullScanS마다, 새 그룹이 생겼을 때, 기억한 pid가 사라졌을 때만(새로 생긴 자식은 늦어도 kFullScanS 안에 잡힘)
 class ResourceSampler {
 public:
+    static constexpr double kFullScanS = 5.0;
     std::map<int, Json> sample(const std::vector<int>& pgids, double now);
+    int full_scans() const { return full_scans_; }  // 시험용
 
 private:
     std::map<int, std::pair<long long, double>> prev_;  // pgid → (ticks, 시각)
+    std::map<int, std::vector<int>> members_;          // pgid → 그 그룹의 pid(지난 전체 훑기 기준)
+    double last_full_ = -1e18;
+    int full_scans_ = 0;
 };
 
 class Resources {
