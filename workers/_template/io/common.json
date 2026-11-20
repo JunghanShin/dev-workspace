@@ -44,12 +44,14 @@
       "description": "이벤트 하나(모든 워커·매니저 공통 형식)",
       "type": "object", "required": ["t_mono_ns", "source", "severity", "code", "text"],
       "properties": {
+        "seq": {"type": "integer", "description": "낸 쪽 안의 순서 번호(있으면)"},
         "t_mono_ns": {"type": "integer", "unit": "ns", "description": "일어난 시각, 보드 CLOCK_MONOTONIC"},
         "t_unix": {"type": "number", "unit": "s"},
         "source": {"type": "string", "description": "<워커 id>.<모듈>"},
         "severity": {"type": "string", "enum": ["info", "notice", "warning", "error", "critical"]},
         "code": {"type": "string", "description": "기계가 읽는 이름(예: link_down)"},
-        "text": {"type": "string", "description": "사람이 읽는 문장"}
+        "text": {"type": "string", "description": "사람이 읽는 문장"},
+        "detail": {"type": "object", "additionalProperties": true, "description": "낸 쪽이 덧붙이는 칸(뜻은 낸 쪽 설계서)"}
       }
     }
   },
