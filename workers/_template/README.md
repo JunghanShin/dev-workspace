@@ -44,9 +44,11 @@
 workers/<이름>/
 ├─ CMakeLists.txt            이 폴더만으로 빌드
 ├─ README.md, design.md      사용법, 설계 (dev/new-worker.sh가 틀에서 만들어 줌)
-├─ io.json                   입출력 정의 목록: 내보내는 정의(provides), 쓰는 정의(uses). 아래 "입출력 정의 쓰기"
-├─ io/<정의>.json            내보내는 정의 원본(받는 명령·발행 주제·데이터 버스, 칸은 JSON Schema)
-├─ io/uses/<정의>.json       쓰는 정의 사본(다른 워커의 것)
+├─ io.json                   입출력 정의 목록: 내보내는 정의(provides), 쓰는 정의(uses), 출력 대조 방법(check). 아래 "입출력 정의 쓰기"
+├─ io/<역할>.json            역할 정의 원본(받는 명령·발행 주제·데이터 버스, 칸은 JSON Schema)
+├─ io/self.json              워커 정의(모듈별 get_status 칸·지표·진단 주제·정비 명령, 라이브러리 조각 include)
+├─ io/common.json            공통 정의(틀에만 하나, 모든 워커가 따름. 새 워커로 복사하지 않음)
+├─ io/uses/<역할>.json       쓰는 정의 사본(다른 워커의 것)
 ├─ src/main.cpp              호스트 + 모듈 조립(얇음)                                   ②
 ├─ test/test_worker.cpp      워커 통합 시험(실행 파일, 워커 둘)
 ├─ lib/
@@ -227,19 +229,26 @@ public:
 
 ### 입출력 정의 쓰기·가져오기 (design.md 6.6.7.1~6.6.7.2)
 
-워커끼리 주고받는 것(받는 명령, 발행 주제, 데이터 버스)은 **정의 파일이 계약**이다. 쓰는 쪽은 상대 설계서를 읽고 칸 이름을 손으로 옮기지 않고 정의 사본을 가져다 쓴다.
+**바깥으로 나가는 것은 모두 정의 파일이 계약이다**(명령 응답·주제·`get_status`·지표·이벤트·데이터 버스, 예외는 `runtime`). 정의에 없는 칸은 내보내지 않는다. 쓰는 쪽은 상대 설계서를 읽고 칸 이름을 손으로 옮기지 않고 정의를 가져다 쓴다.
 
 ```text
-io.json                  {"provides": ["example"], "uses": {"upstream": {"from": "example", "version": "1.0", ...}}}
-io/example.json          내보내는 정의(원본): commands·topics·data, 칸은 JSON Schema(+ unit)
+io.json                  {"provides": ["example"], "uses": {"upstream": {"from": "example", "version": "1.1", ...}}, "check": {...}}
+io/example.json          역할 정의(원본): commands·topics·data. 같은 역할이면 다른 워커로 바꿔도 같음
+io/self.json             워커 정의: status(모듈 칸)·metrics·진단 topics·정비 commands, include(라이브러리 조각)
+io/common.json           공통 정의(틀): get_status 겉모양·공통 명령·호스트·단계 지표·스트림 겉모양·이벤트·시각
 io/uses/example.json     쓰는 정의(사본). 여기서는 peer가 같은 종류의 다른 워커를 받아서 자기 정의의 사본
 ```
+
+- 역할에 넣을지 워커 정의에 넣을지: "다른 회사 장비로 바꿔도 같은 값이 나와야 하나"(기체 자세는 역할, 장비별 링크 통계는 워커)
+- 정의의 `object`는 적힌 칸만 허용(정의 밖 칸은 실패). 이름이 바뀌는 칸은 `"additionalProperties": {<값 모양>}`, 지표·주제 이름의 바뀌는 부분은 `<이름>` 자리
+- 주제 값마다 `t_mono_ns`(그 값을 재거나 만든 시각, CLOCK_MONOTONIC)
+- 라이브러리 모듈(libvideo 등)은 자기 조각 `lib/<라이브러리>/io/<모듈>.json`을 갖고, `self.json`의 `include`로 가져온다
 
 1. **내보내기:** 다른 워커가 쓸 명령·주제·데이터 버스를 `io/<정의>.json`에 적는다. 정의 이름은 워커 이름이 아니라 역할(같은 역할의 다른 워커가 같은 정의를 내보내면 서로 바꿔 쓸 수 있음). `io.json`의 `provides`에 이름을 넣는다
 2. **가져오기:** 다른 워커의 정의 파일을 `io/uses/<정의>.json`에 복사하고, `io.json`의 `uses.<입력 이름>`에 `from`·`version`·쓰는 `topics`·`commands`·`data`·`required`를 적는다. 코드는 사본에 있는 칸만 쓴다
 3. **바꿀 때:** 칸·명령·주제를 더하면 작은 버전(1.0 → 1.1), 빼거나 이름·형식을 바꾸면 큰 버전(2.0). 정의를 바꾸면 쓰는 워커의 사본도 새로 가져온다
 4. **설계서:** 3장은 칸 목록을 다시 적지 않고 정의 파일을 가리킨다(뜻·시점·이유·상대 없을 때 동작만)
-5. **점검:** `dev/check.sh`(`dev/test_workers.py`)가 형식, `io.json`이 가리키는 파일, `uses`가 쓰는 항목, 사본이 원본과 같은지·호환되는지 본다
+5. **점검:** `dev/check.sh`가 두 가지를 본다. `dev/test_workers.py`: 형식, `io.json`이 가리키는 파일, `uses`가 쓰는 항목, 사본이 원본과 같은지·호환되는지, 워커 정의·조각, 지표 이름 규칙. `dev/test_io_output.py`(출력 대조): `io.json` `check`의 프리셋(가짜 장치)으로 워커를 띄워 실제 `get_status`·주제·명령 응답·지표를 정의와 대조(정의 밖 칸·빠진 필수 칸·형식 틀림은 실패)
 
 상대 주소를 설정 `inputs`로 받고 Manager가 연결 선언으로 채우는 부분(design.md 6.6.7.3~6.6.7.5)은 구현 예정이다. 그때까지 상대는 지금처럼 설정 칸(`worker_id`)으로 정한다.
 

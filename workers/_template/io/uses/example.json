@@ -1,6 +1,6 @@
 {
   "name": "example",
-  "version": "1.0",
+  "version": "1.1",
   "description": "워커 템플릿 예제: 값 배열 생성(source), 이동 평균(processor), 다른 예제 워커 받기(peer). 칸은 JSON Schema, 단위는 unit(워크스페이스 design.md 6.6.7.1)",
   "commands": {
     "source.set_rate": {
@@ -42,8 +42,9 @@
     "source": {
       "description": "생성 상태. 바뀌었을 때만(값을 만들 때마다), 기준 상태는 새 구독자와 5초마다",
       "every_ms": 200,
-      "schema": {"type": "object", "required": ["seq", "mean", "rate_hz"],
+      "schema": {"type": "object", "required": ["t_mono_ns", "seq", "mean", "rate_hz"],
                  "properties": {
+                   "t_mono_ns": {"type": "integer", "unit": "ns", "description": "값 배열을 만든 시각(1.1)"},
                    "seq": {"type": "integer", "description": "생성 번호"},
                    "mean": {"type": "number", "description": "마지막 값 배열의 평균"},
                    "rate_hz": {"type": "number", "unit": "Hz", "description": "생성 주기"}}}

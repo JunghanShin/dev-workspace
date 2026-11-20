@@ -4,11 +4,17 @@
     "upstream": {
       "description": "peer 모듈: 다른 예제 워커의 데이터 버스를 순서대로 받고, 스트림을 구독하고, 생성 주기 명령을 넘긴다. 없으면 기다리며 다시 붙음",
       "from": "example",
-      "version": "1.0",
+      "version": "1.1",
       "topics": ["source"],
       "commands": ["source.set_rate"],
       "data": ["frames"],
       "required": false
     }
+  },
+  "check": {
+    "description": "출력 대조(워크스페이스 design.md 6.6.7.2): 가짜 장치 프리셋으로 띄워 실제 출력을 정의와 대조",
+    "preset": "sim",
+    "calls": [{"cmd": "source.set_rate", "args": {"hz": 20}}, {"cmd": "source.reset"}, {"cmd": "processor.reset"}],
+    "listen_s": 3
   }
 }

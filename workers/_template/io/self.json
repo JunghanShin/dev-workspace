@@ -1,0 +1,73 @@
+{
+  "name": "self",
+  "version": "1.0",
+  "description": "워커 정의: 이 워커 구현의 상태(get_status 모듈 칸)·지표·진단 주제·정비 명령(워크스페이스 design.md 6.6.7.1). 다른 워커는 쓰지 않는다(사본 없음). 라이브러리 모듈을 쓰면 include로 조각을 가져온다",
+  "include": [],
+  "status": {
+    "source": {
+      "type": "object",
+      "required": ["seq", "rate_hz", "size", "amplitude", "mean", "bus", "helper"],
+      "properties": {
+        "seq": {"type": "integer", "description": "생성 번호"},
+        "rate_hz": {"type": "number", "unit": "Hz"},
+        "size": {"type": "integer", "description": "값 배열 길이"},
+        "amplitude": {"type": "number"},
+        "mean": {"type": "number", "description": "마지막 값 배열의 평균"},
+        "bus": {"type": "object", "required": ["socket", "consumers", "published", "dropped"],
+                "properties": {"socket": {"type": "string"}, "consumers": {"type": "integer"},
+                               "published": {"type": "integer"}, "dropped": {"type": "integer"}}},
+        "helper": {"type": "object", "required": ["cmd", "running", "restarts"],
+                   "properties": {"cmd": {"type": "string"}, "running": {"type": "boolean"},
+                                  "restarts": {"type": "integer"}}}
+      }
+    },
+    "processor": {
+      "type": "object",
+      "required": ["window", "count", "total", "last_seq", "avg", "min", "max"],
+      "properties": {
+        "window": {"type": "integer", "description": "이동 평균 창 크기"},
+        "count": {"type": "integer", "description": "창 안의 수"},
+        "total": {"type": "integer", "description": "받은 전체 수"},
+        "last_seq": {"type": "integer"},
+        "avg": {"type": "number"}, "min": {"type": "number"}, "max": {"type": "number"}
+      }
+    },
+    "peer": {
+      "type": "object",
+      "required": ["peer", "data_link", "stream_link", "received", "lost", "last_seq", "peer_restarts",
+                   "last_bytes", "stream_updates", "peer_topics"],
+      "properties": {
+        "peer": {"type": "string", "description": "상대 워커 id(비면 꺼짐)"},
+        "data_link": {"type": "boolean"},
+        "stream_link": {"type": "boolean"},
+        "received": {"type": "integer"},
+        "lost": {"type": "integer"},
+        "last_seq": {"type": "integer"},
+        "peer_restarts": {"type": "integer"},
+        "last_bytes": {"type": "integer", "unit": "B"},
+        "stream_updates": {"type": "integer"},
+        "peer_topics": {"type": "object", "additionalProperties": true,
+                        "description": "상대가 보낸 주제 그대로(정의 example의 topics, 사본으로 검사)"}
+      }
+    }
+  },
+  "metrics": {
+    "source_seq": {"type": "integer"},
+    "source_rate_hz": {"type": "number", "unit": "Hz"},
+    "source_mean": {"type": "number"},
+    "source_bus_consumers": {"type": "integer"},
+    "source_drops": {"type": "integer", "description": "데이터 버스에서 버린 수"},
+    "source_link": {"type": "integer", "enum": [0, 1], "description": "장치 연결(예제는 늘 1)"},
+    "source_helper_up": {"type": "integer", "enum": [0, 1], "optional": true, "description": "helper_cmd가 있을 때만"},
+    "processor_avg": {"type": "number"},
+    "processor_min": {"type": "number"},
+    "processor_max": {"type": "number"},
+    "processor_total": {"type": "integer"},
+    "peer_link": {"type": "integer", "enum": [0, 1], "optional": true, "description": "peer가 있을 때만"},
+    "peer_received": {"type": "integer", "optional": true},
+    "peer_lost": {"type": "integer", "optional": true}
+  },
+  "commands": {},
+  "topics": {},
+  "lease_safe_state": "예제는 장치가 없어 할 일 없음"
+}

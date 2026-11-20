@@ -26,7 +26,8 @@ W="$ROOT/workers/$NAME"
 
 mkdir -p "$W"
 # 틀 안내(README.md), new/(문서 틀), python/(Python 워커 도우미 원본), build/는 가져오지 않는다
-EXCL=(--exclude='./build' --exclude='*/build' --exclude='./README.md' --exclude='./new' --exclude='./python')
+# io/common.json(공통 정의)은 틀에만 하나(워커는 가져오지 않고 틀의 것을 따름). io/self.json(워커 정의)은 가져와 이 워커 것으로 고쳐 씀
+EXCL=(--exclude='./build' --exclude='*/build' --exclude='./README.md' --exclude='./new' --exclude='./python' --exclude='./io/common.json')
 (( VIDEO )) || EXCL+=(--exclude='./lib/libvideo')
 (cd "$T" && tar "${EXCL[@]}" -cf - .) | (cd "$W" && tar xf -)
 for f in README.md design.md; do

@@ -130,6 +130,7 @@ void Module::take(Made& m) {
     double sum = 0;
     for (float v : m.values) sum += v;
     last_mean_ = m.values.empty() ? 0.0f : static_cast<float>(sum / m.values.size());
+    last_ts_ns_ = m.ts_ms * 1000000;
     const Sample s{m.seq, m.ts_ms, &m.values};
     for (const auto& fn : listeners_) fn(s);  // 워커 안 연결(포트)
     stream_dirty_ = true;
@@ -156,7 +157,7 @@ void Module::publish_stream(worker::TimePoint now) {
     }
     const double t = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
     pub_->publish(Json{{"seq", ++stream_seq_}, {"kf", kf}, {"t", t},
-                       {"topics", {{"source", {{"seq", seq_}, {"mean", last_mean_}, {"rate_hz", rate}}}}},
+                       {"topics", {{"source", {{"t_mono_ns", last_ts_ns_}, {"seq", seq_}, {"mean", last_mean_}, {"rate_hz", rate}}}}},
                        {"events", Json::array()}, {"events_next", 0}}.dump());
 }
 

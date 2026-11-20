@@ -76,6 +76,7 @@ private:
     std::vector<Listener> listeners_;
     uint64_t seq_ = 0;
     float last_mean_ = 0;
+    int64_t last_ts_ns_ = 0;  // 마지막 값 배열을 만든 시각(CLOCK_MONOTONIC, 주제 source의 t_mono_ns)
     uint64_t stream_seq_ = 0;
     bool stream_dirty_ = false;
     worker::TimePoint next_kf_{};

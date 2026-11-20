@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.42 |
+| 문서 버전 | 0.43 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -664,6 +664,12 @@ workers/<이름>/
   "topics": {}
 }
 ```
+
+**라이브러리 조각:** 여러 워커가 같이 쓰는 라이브러리 모듈(예: libvideo의 송출·프레임 탭)은 자기 모듈의 `status`·`metrics`·`topics`·`commands`를 조각 정의 `lib/<라이브러리>/io/<모듈>.json`(워커 정의와 같은 문법)으로 갖는다. 워커 정의는 `"include": ["lib/libvideo/io/stream.json"]`(워커 폴더 기준 경로)로 가져와 합친다. 같은 이름이 둘이면 실패. 라이브러리 사본(`lib/`)을 새로 가져오면 조각도 함께 바뀐다(워커마다 다시 적지 않음).
+
+**이름에 바뀌는 부분:** 지표·주제·칸 이름에 설정으로 정해지는 부분이 있으면 `<이름>`을 자리로 쓴다(`stream_<송출>_fps`, 단계 지표 `<단계>_q`). 검사기는 `<…>`를 `[a-z0-9_]+`로 본다.
+
+**시각:** 주제 값마다 `t_mono_ns`(그 값을 재거나 만든 시각, 보드 CLOCK_MONOTONIC)를 넣는다(공통 정의). 스트림 겉모양의 `t`(보낸 시각, unix)와는 다르다.
 
 목록(`io.json`):
 
@@ -1401,7 +1407,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | 워커 설정 = 워커 폴더 프리셋(임시 적용·저장·전환, 커밋은 사용자) | 구현 |
 | 프레임 버스(데이터 버스) | CPU 공유 메모리, 영상·원시 레코드, Latest·InOrder. NvBufSurface는 미결 |
 | 데이터 버스 녹화·재생 | 구현(`workers/replay`, 녹화 → 재생 왕복 시험) |
-| 계약 규칙(6.6.7.1~6.6.7.2: 세 정의, 정의 밖 칸 금지, 출력 대조, REST `/io`) | 설계 확정(0.41), 구현 전. 순서: 템플릿(`common.json`, 예제 `self.json`, 대조 도구) → REST `/io` → flight-control·siyi `self.json` → ximea·replay 정의 처음 |
+| 계약 규칙(6.6.7.1~6.6.7.2: 세 정의, 정의 밖 칸 금지, 출력 대조, REST `/io`) | 템플릿 구현(0.43): `io/common.json`, 예제 `io/self.json`, `io.json` `check`, 정의 파일 점검, 출력 대조(`dev/test_io_output.py`, `check.sh`), 예제 주제에 `t_mono_ns`(정의 `example` 1.1). 남은 순서: REST `/io` → 라이브러리 조각(libvideo) → flight-control·siyi `self.json` → ximea·replay 정의 처음 |
 | 계층과 매니저(4.1, `docs/layers.md`) | 설계 확정(0.40), 구현 전. 언어(원칙 10, 0.42): 매니저는 C++(libworker 위), 지금 Python인 REST·Manager·logger는 게이트웨이·process-manager·record-manager로 재구성하면서 C++로 다시 짬. 순서: 계약 규칙(상태·화면용 주제도 정의에, 실제 출력 대조) → 게이트웨이 → record → status → fault → mission·payload → config → 명령 경로 강제 |
 | 워커 | 세 워커 모두 템플릿 규칙 충족(유닛·모듈·워커 시험, 설계서 3장 ICD, 미준수 목록 없음). 워커별 구조 설계(모듈 나누기, 워커 간 통신 적용)는 다음 단계 |
 
@@ -1518,6 +1524,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.43 | **계약 규칙 템플릿 구현(6.6.7.1~6.6.7.2).** 공통 정의 `workers/_template/io/common.json`(get_status 겉모양·공통 명령·오류·호스트·단계 지표·스트림 겉모양·이벤트), 예제 워커 정의 `io/self.json`(모듈별 status·지표), `io.json` `check`(가짜 장치 프리셋·부를 명령·듣는 시간). 정의 파일 점검(`dev/test_workers.py`: 공통·워커 정의·include 조각, 지표 이름 `<모듈>_`, check), 출력 대조(`dev/test_io_output.py`, `dev/io_contract.py`: 워커를 띄워 실제 출력을 정의와 대조, 정의 밖 칸 실패. `check.sh`가 부름). 예제 주제 `source`에 `t_mono_ns`(정의 `example` 1.1). 6.6.7.1에 라이브러리 조각(`lib/<라이브러리>/io/<모듈>.json`, `include`), 이름 자리 `<이름>`, 주제 값의 시각. `new-worker.sh`는 `common.json`을 복사하지 않음 |
 | 0.42 | **언어 원칙(원칙 10):** 보드에 상주하는 플랫폼(process-manager·게이트웨이·기록)과 매니저는 C++(한 번 만들고 늘 도는 것이라 실행 비용 우선, 보드 실측 Python 12~25 MB vs C++ 2~5 MB), 워커는 성능에 따라 C/C++ 또는 Python. 4장 프로세스 표 언어를 C++로. **원칙 18:** 매니저는 엔진(코드)과 규칙(데이터, config-manager가 관리)을 나눔. 12장: REST·Manager·logger는 재구성하면서 C++로 |
 | 0.41 | **계약 규칙(6.6.7.1~6.6.7.2).** 바깥으로 나가는 것은 모두 정의에(명령 응답·주제·`get_status`·지표·이벤트·데이터 버스, 예외 `runtime`). 정의 세 가지: 역할 정의 `io/<역할>.json`(매니저·다른 워커, 갈아 끼워도 같음), 워커 정의 `io/self.json`(모듈별 status·지표·진단 주제·정비 명령·임대 끊김 안전 상태, 사본 없음), 공통 정의 `_template/io/common.json`(get_status 겉모양·오류·heartbeat·스트림·이벤트·시각·임대). `object`는 적힌 칸만(정의 밖 칸 실패). 출력 대조 `dev/test_io_output.py`: 가짜 장치 프리셋(`io.json` `check`)으로 띄워 실제 출력을 정의와 대조. REST `GET /workers/{id}/io`. **계층 보강(4.1, 원칙 13~17):** 기능 평면(매니저·워커)과 플랫폼 평면(게이트웨이·추상화 층·process-manager), 블록별 입출력 표, 명령 소유(역할마다 매니저 하나, 소켓 접근 허용), 매니저 간 방향(fault → mission, mission ↔ payload, 상태는 status), 명령 임대(끊기면 안전 상태), 비행 컨트롤러와의 경계, 그림 `docs/layers-io.svg`. 설계 문서에서 현재 구현 서술을 뺌(옮기는 계획은 12장) |
 | 0.40 | **계층과 매니저(4.1, 설계 확정·구현 전, `docs/layers.md`).** 프로세스 나누기 위에 판단과 일을 층으로 나눔: 화면·외부 운용 → 게이트웨이(지금 REST를 키움: 신분 확인·전달·기록) → 매니저 층(config·status·fault·record·mission·payload, 각각 프로세스) → 추상화 층(계약·연결 선언) → 장치·처리 워커(일하고 결과만). 원칙 11~14: 명령은 위에서 아래로·판단은 매니저 한 곳, 층 사이는 계약으로만(상태·화면용 주제도 정의에, 정의 밖은 `runtime`만), 빠른 제어 고리 예외, 운용 모드 기본·정비 모드 토글(재시작하면 운용). 지금 Manager는 process-manager. 바탕: PX4, ROS 2, STANAG 4586, MIL-STD-498 ICD, FDIR |

@@ -3,7 +3,9 @@
   - 폴더 구성: 워커(CMake·README·design·main·workspace/), 모듈(core/include·include·src·test·README·schema)
   - 층 규칙: 모듈 코어(① 유닛)가 libworker를 쓰지 않는지(쓰면 실패)
   - 패널 id 겹침, Python 도우미 사본
-  - 입출력 정의(design.md 6.6.7.1~6.6.7.2): io.json·io/<정의>.json 형식, 가리키는 파일, uses가 쓰는 항목, 사본(io/uses/)이 원본과 같은지·호환되는지
+  - 입출력 정의(design.md 6.6.7.1~6.6.7.2): io.json·io/<역할>.json 형식, 가리키는 파일, uses가 쓰는 항목, 사본(io/uses/)이 원본과 같은지·호환되는지,
+    공통 정의(틀 io/common.json)·워커 정의(io/self.json + include 조각) 형식, 지표 이름 규칙, check(출력 대조 방법)
+    (실제 출력 대조는 dev/test_io_output.py)
   - 미준수 목록(실패가 아니라 알림): 유닛 시험이 없는 모듈, ICD(설계서 3장)가 없는 워커, 입출력 정의가 없는 워커 → 워커 고도화 때 하나씩 없앤다
 
     python3 -m unittest dev/test_workers.py -v      (워크스페이스 폴더에서)
@@ -15,7 +17,11 @@ import glob
 import json
 import os
 import re
+import sys
 import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import io_contract as ic  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TEMPLATE = os.path.join(ROOT, "workers", "_template")
@@ -125,6 +131,11 @@ class Compliance(unittest.TestCase):
                 issues.append("%s/design.md: 3장 인터페이스 명세(ICD) 없음(틀 new/design.md 형식)" % os.path.basename(w))
             if not os.path.exists(os.path.join(w, "io.json")):
                 issues.append("%s: 입출력 정의(io.json, io/) 없음(design.md 6.6.7.1)" % os.path.basename(w))
+            else:
+                if not os.path.exists(os.path.join(w, "io", "self.json")):
+                    issues.append("%s: 워커 정의(io/self.json) 없음(design.md 6.6.7.1)" % os.path.basename(w))
+                if "check" not in load_json(os.path.join(w, "io.json")):
+                    issues.append("%s: 출력 대조 방법(io.json check) 없음(design.md 6.6.7.2)" % os.path.basename(w))
         issues += IoDefinitions.notices()
         if issues:
             print("\n미준수(워커 고도화 대상):\n  " + "\n  ".join(issues))
@@ -141,11 +152,17 @@ def load_json(path):
         return json.load(f)
 
 
+def role_files(w):
+    """워커의 역할 정의 원본(io/<역할>.json, 워커 정의 self·공통 정의 common은 빼고)"""
+    return sorted(p for p in glob.glob(os.path.join(w, "io", "*.json"))
+                  if os.path.splitext(os.path.basename(p))[0] not in ic.NOT_ROLES)
+
+
 def io_originals():
-    """정의 이름 → 원본 파일들(workers/*/io/<정의>.json, 사본 io/uses/는 빼고)"""
+    """정의 이름 → 원본 파일들(workers/*/io/<역할>.json, 사본 io/uses/는 빼고)"""
     out = {}
     for w in workers(with_template=True):
-        for p in sorted(glob.glob(os.path.join(w, "io", "*.json"))):
+        for p in role_files(w):
             out.setdefault(os.path.splitext(os.path.basename(p))[0], []).append(p)
     return out
 
@@ -214,8 +231,8 @@ class IoDefinitions(unittest.TestCase):
             name = os.path.basename(w)
             with self.subTest(worker=name):
                 io = load_json(index)
-                self.assertEqual(sorted(set(io) - {"provides", "uses"}), [], "io.json: 모르는 항목")
-                for p in sorted(glob.glob(os.path.join(w, "io", "*.json")) + glob.glob(os.path.join(w, "io", "uses", "*.json"))):
+                self.assertEqual(sorted(set(io) - {"provides", "uses", "check"}), [], "io.json: 모르는 항목")
+                for p in sorted(role_files(w) + glob.glob(os.path.join(w, "io", "uses", "*.json"))):
                     self.check_definition(p)
                 for d in io.get("provides", []):
                     self.assertTrue(os.path.exists(os.path.join(w, "io", d + ".json")) or
@@ -235,6 +252,71 @@ class IoDefinitions(unittest.TestCase):
                     for kind in ("topics", "commands", "data"):
                         for item in u.get(kind, []):
                             self.assertIn(item, d.get(kind, {}), "%s: %s %s가 정의 %s에 없음" % (where, kind, item, u.get("from")))
+
+    def check_parts(self, d, where, defs, allowed):
+        """워커 정의·조각·공통 정의의 status·metrics·commands·topics 형식"""
+        self.assertEqual(sorted(set(d) - allowed), [], where + ": 모르는 항목")
+        for k, sub in d.get("status", {}).items():
+            self.check_schema(sub, "%s: status.%s" % (where, k), defs)
+        for k, m in d.get("metrics", {}).items():
+            self.assertTrue(m.get("type") in ("integer", "number", "string"), "%s: metrics.%s.type은 integer·number·string" % (where, k))
+        for name, c in d.get("commands", {}).items():
+            self.check_schema(c.get("args"), "%s: commands.%s.args" % (where, name), defs)
+            self.check_schema(c.get("reply"), "%s: commands.%s.reply" % (where, name), defs)
+            self.assertEqual(sorted(set(c.get("errors", [])) - IO_ERRORS), [], "%s: commands.%s.errors는 9.6 code만" % (where, name))
+        for name, t in d.get("topics", {}).items():
+            self.check_schema(t.get("schema"), "%s: topics.%s.schema" % (where, name), defs)
+
+    def test_common_definition(self):
+        d = load_json(os.path.join(TEMPLATE, "io", "common.json"))
+        self.assertEqual(d.get("name"), "common")
+        self.assertEqual(sorted(set(d.get("errors", [])) ^ IO_ERRORS), [], "common.json errors = 9.6 code")
+        self.check_parts(d, "common.json", d.get("definitions", {}),
+                         {"name", "version", "description", "errors", "status", "metrics", "commands", "definitions", "stream"})
+        self.check_schema(d.get("stream"), "common.json: stream", d.get("definitions", {}))
+        for k in ("id", "config_version", "runtime"):
+            self.assertIn(k, d.get("status", {}), "common.json status." + k)
+
+    def test_self_definitions(self):
+        """워커 정의(io/self.json)와 include 조각. 없는 워커는 미준수 목록(알림)"""
+        allowed = {"name", "version", "description", "include", "status", "metrics", "commands", "topics", "definitions",
+                   "lease_safe_state"}
+        for w in workers(with_template=True):
+            path = os.path.join(w, "io", "self.json")
+            if not os.path.exists(os.path.join(w, "io.json")) or not os.path.exists(path):
+                continue
+            name = os.path.basename(w)
+            with self.subTest(worker=name):
+                d = load_json(path)
+                self.assertEqual(d.get("name"), "self", name + "/io/self.json: name은 self")
+                self.assertIsNotNone(version_tuple(d.get("version")), name + "/io/self.json: version은 '큰.작은'")
+                self.check_parts(d, name + "/io/self.json", d.get("definitions", {}), allowed)
+                parts = [d]
+                for inc in d.get("include", []):
+                    p = os.path.join(w, inc)
+                    self.assertTrue(os.path.exists(p), "%s/io/self.json include %s: 파일 없음" % (name, inc))
+                    if os.path.exists(p):
+                        f = load_json(p)
+                        self.check_parts(f, "%s/%s" % (name, inc), f.get("definitions", {}), allowed - {"include"})
+                        parts.append(f)
+                try:
+                    c = ic.Contract(w)
+                except ic.ContractError as e:
+                    self.fail("%s: %s" % (name, e))
+                modules_in_status = set(k for f in parts for k in f.get("status", {}))
+                for f in parts:
+                    for m in f.get("metrics", {}):
+                        self.assertTrue(any(m.startswith(mod + "_") for mod in modules_in_status),
+                                        "%s: 지표 %s는 <모듈>_<이름>(모듈은 status에 있는 것)" % (name, m))
+                check = c.io.get("check")
+                if check:
+                    self.assertTrue(os.path.exists(os.path.join(w, "workspace", "presets", "%s.json" % check.get("preset"))),
+                                    "%s: io.json check.preset %s 프리셋 없음" % (name, check.get("preset")))
+                    self.assertTrue(isinstance(check.get("listen_s"), (int, float)) and check["listen_s"] > 0,
+                                    name + ": check.listen_s > 0")
+                    for call in check.get("calls", []):
+                        self.assertIsNotNone(c.commands.find(call.get("cmd"))[1],
+                                             "%s: check.calls %s가 정의에 없음" % (name, call.get("cmd")))
 
     def test_one_original_per_definition(self):
         for d, paths in io_originals().items():
