@@ -116,7 +116,8 @@
 |---|---|
 | 수락 시험 | `rest/test_rest_accept.py`(HTTP 블랙박스, 가짜 Manager·워커): Python 판 34(+ `test_stream` 3, 게이트웨이 전용 2개 건너뜀), C++ 판 36(`REST_BIN`) |
 | 단위 시험 | `test_core`(경로 표·합치기·지난 지표·비밀값 가림 등), `test_threads`. TSan 경고 0(TSan 판 게이트웨이로 수락 시험도 통과) |
-| 자원(PC WSL) | 메모리 20.8 → 6.8 MB(SSE 2개 7.0 MB), 실행 파일 1.4 MB. 보드 실측은 아직 |
+| 자원(PC WSL) | 메모리 20.8 → 6.8 MB(SSE 2개 7.0 MB), 실행 파일 1.4 MB. 같은 요청 묶음 50개/s(명령 3 : 목록 1 : 시스템 1, 가짜 Manager·워커): 요청 하나 CPU 0.50 → 0.21 ms, 전체 2.50 → 1.05% |
+| 보드 실측 | 메모리 20.4 → 6.1~7.6 MB, 화면 열린 상태(요청 약 5.5개/s) CPU 0.63%. 고친 것: 재시작 직후 bind 실패(SO_REUSEADDR만), 쉬는 요청 스레드 48개가 1초마다 깨던 것(쉴 때 CPU 0.5%) |
 | 실행 | `dev/release-worker.sh gateway` → `gateway/bin/gateway`. 시작 셸: `WORKSPACE_REST_IMPL=cpp` 또는 `<데이터>/config/rest_impl`에 `cpp`(기본 Python). `WORKSPACE_GATEWAY_SOCKET`(Unix 소켓, nginx용), `WORKSPACE_GATEWAY_THREADS`(동시 요청 상한, 기본 48, SSE 포함). 신분 확인은 아직 `off`만 |
 | 라이브러리 | cpp-httplib v0.18.3(MIT, 사본) |
 
