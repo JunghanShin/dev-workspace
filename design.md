@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.45 |
+| 문서 버전 | 0.46 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -247,6 +247,8 @@
 에러 `code`: `bad_request`(설정 오류면 `fields: {경로: 메시지}`), `not_found`, `conflict`, `forbidden`, `internal`. Manager는 요청 처리 중 워커 기동·종료를 기다리지 않는다.
 
 ### 6.3 Manager
+
+**C++ process-manager로 다시 만든다(0.46, 설계 `docs/process-manager.md`):** 하는 일·API·파일은 이 절 그대로 두고, 상태는 제어 루프 하나, 기다릴 수 있는 일(구독 송신 `pm.pub`, 파일 쓰기 `pm.store`, 자원 측정 `pm.res`)은 스레드로 뺀다. 더하는 일: 누구에게 붙을지 알려 주기(6.6.7.4 연결 선언), 명령 소유·권한 표(`run/peers.json`, 워커는 설정에 `peers_file`이 있을 때만 봄, 없으면 막지 않음). 옮기는 동안 시작 셸이 `WORKSPACE_MANAGER_IMPL=python|cpp`로 고른다.
 
 별도 프로세스, 시스템 상태의 단일 소유자. 하나의 non-blocking 이벤트 루프로 API 소켓, 구독자 송신, heartbeat 수신, 워커 exit 감시, 자원 측정을 처리한다.
 
@@ -1525,6 +1527,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.46 | **process-manager 설계 확정**(`docs/process-manager.md`, 그림 `docs/process-manager.svg`): 지금 Manager를 C++로(하는 일·API·파일 그대로, 수락 시험 = 지금 Python 시험), 제어 루프 + `pm.pub`·`pm.store`·`pm.res`, 연결 선언·명령 소유·권한 표, 워커는 process-manager에 기대지 않음(설정 값이 없으면 단독 실행 기본값), 막기 단계 `command_guard` off → warn → enforce(6단계) |
 | 0.45 | **계약 규칙 1단계 끝.** replay 정의(역할 `recorder`, `io/self.json`, `check`), replay 오류 code를 9.6에 맞춤(`conflict` → `busy`·`bad_request`). 공통 이벤트에 `seq`(순서 번호)·`detail`(낸 쪽이 덧붙이는 칸). 출력 대조: 주제를 정의하지 않은 워커는 스트림 없어도 됨 |
 | 0.44 | **보드가 계약을 내줌:** Manager API `get_io`(6.2)·REST `GET /workers/{id}/io`: 공통·워커(+ 조각)·역할·쓰는 정의 사본을 워커 폴더에서 읽어 줌. 제품 빌드가 `io.json`·`io/`·include 조각·공통 정의를 넣음. **libvideo 조각 정의** `lib/libvideo/io/stream.json`(송출 상태·지표 `stream_<송출>_*`·`stream.start`·`stop`), `io/tap.json`(프레임 탭 상태·지표). 조각 점검(`dev/test_workers.py`) |
 | 0.43 | **계약 규칙 템플릿 구현(6.6.7.1~6.6.7.2).** 공통 정의 `workers/_template/io/common.json`(get_status 겉모양·공통 명령·오류·호스트·단계 지표·스트림 겉모양·이벤트), 예제 워커 정의 `io/self.json`(모듈별 status·지표), `io.json` `check`(가짜 장치 프리셋·부를 명령·듣는 시간). 정의 파일 점검(`dev/test_workers.py`: 공통·워커 정의·include 조각, 지표 이름 `<모듈>_`, check), 출력 대조(`dev/test_io_output.py`, `dev/io_contract.py`: 워커를 띄워 실제 출력을 정의와 대조, 정의 밖 칸 실패. `check.sh`가 부름). 예제 주제 `source`에 `t_mono_ns`(정의 `example` 1.1). 6.6.7.1에 라이브러리 조각(`lib/<라이브러리>/io/<모듈>.json`, `include`), 이름 자리 `<이름>`, 주제 값의 시각. `new-worker.sh`는 `common.json`을 복사하지 않음 |

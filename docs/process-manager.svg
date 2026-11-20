@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600" role="img" font-family="'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif">
+<title>process-manager 실행 구조</title>
+<desc>process-manager는 C++ 프로세스 하나다. 제어 루프가 상태를 혼자 가지고 API 요청, heartbeat, 워커 실행·신호·종료 감시, 재실행, 연결 선언, 명령 소유를 처리한다. 막힐 수 있는 일은 세 스레드로 뺀다: 구독 송신(pm.pub), 파일 쓰기(pm.store), 자원 측정(pm.res). 각각 크기 제한 큐로 제어 루프와 잇는다</desc>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="0" y="0" width="900" height="600" fill="#ffffff"/>
+
+<!-- 클라이언트 -->
+<rect x="20" y="60" width="170" height="270" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+<text x="105" y="84" text-anchor="middle" font-size="13.5" font-weight="500" fill="#444441">Manager API 클라이언트</text>
+<text x="105" y="108" text-anchor="middle" font-size="11.5" fill="#5F5E5A">게이트웨이(쓰기)</text>
+<text x="105" y="126" text-anchor="middle" font-size="11.5" fill="#5F5E5A">Manager API 워커(쓰기)</text>
+<text x="105" y="144" text-anchor="middle" font-size="11.5" fill="#5F5E5A">logger(읽기)</text>
+<text x="105" y="162" text-anchor="middle" font-size="11.5" fill="#5F5E5A">로컬 도구(읽기)</text>
+<text x="105" y="190" text-anchor="middle" font-size="10.5" fill="#888780">Unix 소켓 클라이언트마다 하나</text>
+<text x="105" y="206" text-anchor="middle" font-size="10.5" fill="#888780">JSON 한 줄, 64 KiB</text>
+
+<!-- process-manager 프로세스 -->
+<rect x="230" y="40" width="440" height="340" rx="16" fill="none" stroke="#534AB7" stroke-width="1.2" stroke-dasharray="6 4"/>
+<text x="246" y="62" font-size="14" font-weight="500" fill="#3C3489">process-manager (C++, 플랫폼)</text>
+<text x="654" y="62" text-anchor="end" font-size="11" fill="#534AB7">부모: 시작 셸</text>
+
+<rect x="260" y="78" width="380" height="146" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+<text x="450" y="100" text-anchor="middle" font-size="13.5" font-weight="500" fill="#3C3489">제어 루프 (상태 단일 소유, poll 하나)</text>
+<text x="450" y="122" text-anchor="middle" font-size="11.5" fill="#534AB7">API 요청 · 응답, heartbeat 받기(notify.sock)</text>
+<text x="450" y="140" text-anchor="middle" font-size="11.5" fill="#534AB7">워커 실행 · 신호 · 종료 감시(signalfd), 재실행 · 설정 적용</text>
+<text x="450" y="158" text-anchor="middle" font-size="11.5" fill="#534AB7">연결 선언: 검사 · 상대 주소(inputs)를 설정에 넣음</text>
+<text x="450" y="176" text-anchor="middle" font-size="11.5" fill="#534AB7">명령 소유 검사 · 소켓 접근 허용 목록(peers.json)</text>
+<text x="450" y="200" text-anchor="middle" font-size="10.5" fill="#888780">한 바퀴 예산 5 ms · 파일 쓰기 · /proc 읽기 · 구독 송신을 기다리지 않음</text>
+
+<rect x="265" y="270" width="120" height="84" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8"/>
+<text x="325" y="292" text-anchor="middle" font-size="12.5" font-weight="500" fill="#085041">pm.pub</text>
+<text x="325" y="311" text-anchor="middle" font-size="10.5" fill="#0F6E56">구독 송신</text>
+<text x="325" y="327" text-anchor="middle" font-size="10.5" fill="#0F6E56">느린 구독자 끊음</text>
+<rect x="395" y="270" width="120" height="84" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8"/>
+<text x="455" y="292" text-anchor="middle" font-size="12.5" font-weight="500" fill="#085041">pm.store</text>
+<text x="455" y="311" text-anchor="middle" font-size="10.5" fill="#0F6E56">파일 쓰기</text>
+<text x="455" y="327" text-anchor="middle" font-size="10.5" fill="#0F6E56">임시 → fsync → rename</text>
+<rect x="525" y="270" width="120" height="84" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8"/>
+<text x="585" y="292" text-anchor="middle" font-size="12.5" font-weight="500" fill="#085041">pm.res</text>
+<text x="585" y="311" text-anchor="middle" font-size="10.5" fill="#0F6E56">자원 측정</text>
+<text x="585" y="327" text-anchor="middle" font-size="10.5" fill="#0F6E56">1 s, 프로세스 그룹</text>
+
+<!-- 워커 -->
+<rect x="710" y="60" width="170" height="170" rx="10" fill="#FAECE7" stroke="#993C1D" stroke-width="0.8"/>
+<text x="795" y="84" text-anchor="middle" font-size="13.5" font-weight="500" fill="#712B13">워커 · 매니저 프로세스</text>
+<text x="795" y="108" text-anchor="middle" font-size="11.5" fill="#993C1D">자식 = 자기 그룹 리더</text>
+<text x="795" y="126" text-anchor="middle" font-size="11.5" fill="#993C1D">stdout · stderr → 로그 파일</text>
+<text x="795" y="144" text-anchor="middle" font-size="11.5" fill="#993C1D">설정 파일(inputs 포함)</text>
+<text x="795" y="162" text-anchor="middle" font-size="11.5" fill="#993C1D">READY · WATCHDOG + 지표</text>
+
+<rect x="710" y="290" width="170" height="54" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+<text x="795" y="314" text-anchor="middle" font-size="12" fill="#444441">/proc</text>
+<text x="795" y="332" text-anchor="middle" font-size="10.5" fill="#5F5E5A">CPU · 메모리 · 프로세스 · 스레드</text>
+
+<rect x="360" y="420" width="190" height="62" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+<text x="455" y="442" text-anchor="middle" font-size="12" fill="#444441">파일</text>
+<text x="455" y="460" text-anchor="middle" font-size="10.5" fill="#5F5E5A">워커 폴더 프리셋 · config.json</text>
+<text x="455" y="475" text-anchor="middle" font-size="10.5" fill="#5F5E5A">state/ · run/(desired · temp · peers)</text>
+
+<!-- 화살표 -->
+<g fill="none" stroke="#444441" stroke-width="1.2">
+<line x1="190" y1="112" x2="260" y2="112" marker-end="url(#a)"/>
+<line x1="265" y1="312" x2="190" y2="312" marker-end="url(#a)"/>
+<line x1="640" y1="112" x2="710" y2="112" marker-end="url(#a)"/>
+<line x1="710" y1="176" x2="640" y2="176" marker-end="url(#a)"/>
+<line x1="710" y1="317" x2="645" y2="317" marker-end="url(#a)"/>
+<line x1="455" y1="354" x2="455" y2="420" marker-end="url(#a)"/>
+</g>
+<g fill="none" stroke="#0F6E56" stroke-width="1.2">
+<line x1="325" y1="224" x2="325" y2="270" marker-end="url(#a)"/>
+<line x1="455" y1="224" x2="455" y2="270" marker-end="url(#a)"/>
+<line x1="585" y1="270" x2="585" y2="224" marker-end="url(#a)"/>
+</g>
+<g font-size="10.5" fill="#5F5E5A">
+<text x="225" y="102" text-anchor="middle">요청</text>
+<text x="227" y="302" text-anchor="middle">push</text>
+<text x="675" y="106" text-anchor="middle">spawn</text>
+<text x="675" y="124" text-anchor="middle">SIGTERM</text>
+<text x="675" y="170" text-anchor="middle">heartbeat</text>
+<text x="677" y="311" text-anchor="middle">읽기</text>
+<text x="462" y="395">원자적 쓰기</text>
+<text x="331" y="252">큐(최신)</text>
+<text x="461" y="252">큐(순서)</text>
+<text x="591" y="252">최신 값</text>
+</g>
+
+<!-- 범례·표 -->
+<g font-size="11" fill="#444441">
+<text x="20" y="520" font-weight="500">스레드 · 큐 (모든 대기에 상한)</text>
+<text x="20" y="540">제어 루프: poll 상한 = 다음 타이머(최대 200 ms). pm.pub: 구독자별 버퍼 상한 넘으면 끊음.</text>
+<text x="20" y="558">pm.store: 쓰기 큐 64(차면 그 요청 실패), 끝나면 루프에 결과 → 그때 API 응답. pm.res: 최신 값 하나(루프가 늦으면 덮어씀).</text>
+<text x="20" y="576">스레드 감시(libworker ThreadWatch): 루프·스레드가 3 s 멈추면 기록하고 종료 → 시작 셸이 워크스페이스를 내림(6.3과 같음).</text>
+</g>
+</svg>
