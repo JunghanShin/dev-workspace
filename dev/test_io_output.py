@@ -187,7 +187,7 @@ def run_check(w, exe):
 
 def check_stream(c, lines, errs, notes):
     seen = set()
-    if not lines:
+    if not lines and c.topics.items():  # 주제를 정의한 워커만 스트림이 있어야 함
         errs.append("스트림: 받은 줄 없음")
     for i, line in enumerate(lines):
         try:

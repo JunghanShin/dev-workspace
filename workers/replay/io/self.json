@@ -1,0 +1,131 @@
+{
+  "name": "self",
+  "version": "1.0",
+  "description": "replay 워커 정의: 모듈 replay의 get_status 칸과 지표. 역할 정의는 io/recorder.json",
+  "include": [],
+  "status": {
+    "replay": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "녹화 폴더"
+        },
+        "bus_socket": {
+          "type": "string",
+          "description": "재생 프레임 버스 알림 소켓"
+        },
+        "recording": {
+          "type": "object",
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "frames": {
+              "type": "integer"
+            },
+            "mb": {
+              "type": "number",
+              "unit": "MB"
+            },
+            "link": {
+              "type": "boolean"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "active",
+            "name",
+            "source",
+            "frames",
+            "mb",
+            "link",
+            "error"
+          ]
+        },
+        "playing": {
+          "type": "object",
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "frames": {
+              "type": "integer"
+            },
+            "total": {
+              "type": "integer"
+            },
+            "speed": {
+              "type": "number"
+            },
+            "loop": {
+              "type": "boolean"
+            },
+            "loops": {
+              "type": "integer"
+            },
+            "consumers": {
+              "type": "integer"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "active",
+            "name",
+            "frames",
+            "total",
+            "speed",
+            "loop",
+            "loops",
+            "consumers",
+            "error"
+          ]
+        }
+      },
+      "required": [
+        "dir",
+        "bus_socket",
+        "recording",
+        "playing"
+      ]
+    }
+  },
+  "metrics": {
+    "replay_recording": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "replay_rec_frames": {
+      "type": "integer"
+    },
+    "replay_playing": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "replay_play_frames": {
+      "type": "integer"
+    }
+  },
+  "commands": {},
+  "topics": {},
+  "lease_safe_state": "명령 임대가 끊기면 할 일 없음(녹화·재생은 장치를 움직이지 않음)"
+}

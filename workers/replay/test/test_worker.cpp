@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
     // 1) 녹화
     Json r = cmd("replay.record_start", {{"source", "src"}, {"name", "t1"}});
     CHECK(r.value("ok", false));
-    CHECK(cmd("replay.record_start", {{"source", "src"}, {"name", "t2"}})["error"]["code"] == "conflict");  // 하나만
+    CHECK(cmd("replay.record_start", {{"source", "src"}, {"name", "t2"}})["error"]["code"] == "busy");  // 하나만
     CHECK(wait_until([] { return st().value("recording", Json::object()).value("frames", 0) >= 60; }, 8000));
     CHECK(st().value("recording", Json::object()).value("link", false));
     r = cmd("replay.record_stop");
@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
     const Json rec = r["data"]["recordings"][0];
     const uint64_t n = rec.value("frames", 0ull);
     CHECK(rec.value("name", "") == "t1" && rec.value("source", "") == "src" && n >= 60 && rec.value("pixel", "") == "u8x64");
-    CHECK(cmd("replay.record_start", {{"source", "src"}, {"name", "t1"}})["error"]["code"] == "conflict");
+    CHECK(cmd("replay.record_start", {{"source", "src"}, {"name", "t1"}})["error"]["code"] == "bad_request");
 
     // 3) 재생: 받는 쪽이 같은 번호·같은 내용·같은 순서로 전부 받는다
     framebus::Consumer c(worker::default_socket("rp", "frames"), framebus::Consumer::Mode::InOrder);

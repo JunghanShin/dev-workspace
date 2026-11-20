@@ -46,7 +46,7 @@ curl -s -X POST localhost:8080/api/board/workers/replay/command -H 'Content-Type
 | `replay.play_start` | `name`, `speed`=1(0~100], `loop`=false | `{playing, frames, speed, loop, socket}` |
 | `replay.play_stop` | — | `{stopped}` |
 | `replay.list` | — | `{recordings: [{name, source, created, frames, seconds, pixel, width, height, mb}], total_mb, max_total_mb, dir}` |
-| `replay.delete` | `name` | `{deleted}`. 녹화·재생 중이면 `conflict` |
+| `replay.delete` | `name` | `{deleted}`. 녹화·재생 중이면 `busy` |
 
 ## 지표 (`replay_<이름>`)
 

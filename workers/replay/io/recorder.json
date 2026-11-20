@@ -1,0 +1,271 @@
+{
+  "name": "recorder",
+  "version": "1.0",
+  "description": "데이터 버스 녹화·재생: 다른 워커의 프레임 버스를 파일로 녹화하고, 녹화를 자기 프레임 버스로 다시 내보낸다(워크스페이스 design.md 6.7). 칸의 뜻은 workers/replay/design.md",
+  "commands": {
+    "replay.record_start": {
+      "description": "녹화 시작(한 번에 하나)",
+      "args": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "녹화 이름(a-z A-Z 0-9 - _, 1~64)"
+          },
+          "source": {
+            "type": "string",
+            "description": "녹화할 워커 id(그 워커의 frames 버스)"
+          },
+          "socket": {
+            "type": "string",
+            "description": "버스 알림 소켓을 직접(source 대신)"
+          },
+          "seconds": {
+            "type": "number",
+            "unit": "s",
+            "description": "길이(설정 max_record_sec 안)"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "reply": {
+        "type": "object",
+        "properties": {
+          "recording": {
+            "type": "string"
+          },
+          "socket": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number",
+            "unit": "s"
+          }
+        },
+        "required": [
+          "recording",
+          "socket",
+          "seconds"
+        ]
+      },
+      "errors": [
+        "bad_request",
+        "unavailable",
+        "busy"
+      ]
+    },
+    "replay.record_stop": {
+      "description": "녹화 멈춤",
+      "args": {
+        "type": "object"
+      },
+      "reply": {
+        "type": "object",
+        "properties": {
+          "stopped": {
+            "type": "boolean",
+            "description": "녹화 중이었는지"
+          },
+          "frames": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stopped",
+          "frames"
+        ]
+      },
+      "errors": []
+    },
+    "replay.play_start": {
+      "description": "재생 시작: 녹화를 이 워커의 프레임 버스로 내보냄(한 번에 하나)",
+      "args": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "speed": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 100,
+            "description": "배속(기본 1)"
+          },
+          "loop": {
+            "type": "boolean",
+            "description": "끝나면 처음부터"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "reply": {
+        "type": "object",
+        "properties": {
+          "playing": {
+            "type": "string"
+          },
+          "frames": {
+            "type": "integer"
+          },
+          "speed": {
+            "type": "number"
+          },
+          "loop": {
+            "type": "boolean"
+          },
+          "socket": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "playing",
+          "frames",
+          "speed",
+          "loop",
+          "socket"
+        ]
+      },
+      "errors": [
+        "bad_request",
+        "unavailable",
+        "busy"
+      ]
+    },
+    "replay.play_stop": {
+      "description": "재생 멈춤",
+      "args": {
+        "type": "object"
+      },
+      "reply": {
+        "type": "object",
+        "properties": {
+          "stopped": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "stopped"
+        ]
+      },
+      "errors": []
+    },
+    "replay.list": {
+      "description": "녹화 목록",
+      "args": {
+        "type": "object"
+      },
+      "reply": {
+        "type": "object",
+        "properties": {
+          "recordings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "created": {
+                  "type": "string",
+                  "description": "만든 시각"
+                },
+                "frames": {
+                  "type": "integer"
+                },
+                "seconds": {
+                  "type": "number",
+                  "unit": "s"
+                },
+                "pixel": {
+                  "type": "string"
+                },
+                "width": {
+                  "type": "integer"
+                },
+                "height": {
+                  "type": "integer"
+                },
+                "mb": {
+                  "type": "number",
+                  "unit": "MB"
+                }
+              },
+              "required": [
+                "name",
+                "source",
+                "created",
+                "frames",
+                "seconds",
+                "pixel",
+                "width",
+                "height",
+                "mb"
+              ]
+            }
+          },
+          "total_mb": {
+            "type": "number",
+            "unit": "MB"
+          },
+          "max_total_mb": {
+            "type": "number",
+            "unit": "MB"
+          },
+          "dir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "recordings",
+          "total_mb",
+          "max_total_mb",
+          "dir"
+        ]
+      },
+      "errors": []
+    },
+    "replay.delete": {
+      "description": "녹화 지우기(재생·녹화 중인 것은 안 됨)",
+      "args": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "reply": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted"
+        ]
+      },
+      "errors": [
+        "bad_request",
+        "busy"
+      ]
+    }
+  },
+  "topics": {},
+  "data": {
+    "frames": {
+      "description": "재생하는 녹화의 프레임(형식은 녹화한 원본 그대로, frame_id·ts도 녹화 값)",
+      "format": "<녹화한 원본 형식>"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "provides": [
+    "recorder"
+  ],
+  "uses": {},
+  "check": {
+    "description": "출력 대조(워크스페이스 design.md 6.6.7.2): 장치가 없어 기본 프리셋으로 띄우고 목록·멈춤·없는 녹화 재생을 부름",
+    "preset": "default",
+    "calls": [
+      {
+        "cmd": "replay.list"
+      },
+      {
+        "cmd": "replay.play_stop"
+      },
+      {
+        "cmd": "replay.record_stop"
+      },
+      {
+        "cmd": "replay.play_start",
+        "args": {
+          "name": "none"
+        }
+      },
+      {
+        "cmd": "replay.record_start",
+        "args": {
+          "name": "x"
+        }
+      }
+    ],
+    "listen_s": 3
+  }
+}

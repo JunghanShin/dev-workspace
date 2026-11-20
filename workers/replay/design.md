@@ -34,7 +34,7 @@
 
 | 스레드·프로세스 | 하는 일 | 대기 상한 | 사이 큐(크기, 넘칠 때) |
 |---|---|---|---|
-| (호스트 루프) | 명령, 상태. 녹화·재생 일(Job)을 스레드에 넘김 | 멈춤 명령은 스레드가 끝날 때까지 최대 1초 | 일 하나(진행 중이면 `conflict`) |
+| (호스트 루프) | 명령, 상태. 녹화·재생 일(Job)을 스레드에 넘김 | 멈춤 명령은 스레드가 끝날 때까지 최대 1초 | 일 하나(진행 중이면 `busy`) |
 | `replay.rec` | 받기(InOrder) → 파일 쓰기 | 받기 100 ms, 접속 재시도 200 ms | 데이터 버스 슬롯(생산자 쪽). 느리면 생산자가 버림 |
 | `replay.play` | 파일 읽기 → 원래 간격 대기 → 데이터 버스 | 대기 중 50 ms마다 beat, 빈 슬롯 40 ms | 데이터 버스 슬롯. 빈 슬롯이 없으면 그 프레임 버림(생산자 규칙) |
 
@@ -42,17 +42,21 @@
 
 ## 3. 인터페이스 명세 (ICD)
 
+**칸 목록은 정의 파일이 원본이다**(워크스페이스 design.md 6.6.7.1): 역할 정의 `io/recorder.json`, 워커 정의 `io/self.json`(`get_status` 칸·지표), 공통 정의(틀 `io/common.json`). 실제 출력이 정의와 맞는지는 출력 대조(`io.json` `check`)가 본다. 아래 표는 뜻·시점만.
+
+오류 code는 워크스페이스 9.6 목록만 쓴다(예전 `conflict` → 진행 중이면 `busy`, 같은 이름은 `bad_request`).
+
 ### 3.1 명령 (명령 소켓, `replay.<명령>`)
 
 | cmd | args | 응답 data | 오류 code | 바로 적용 / 저장 |
 |---|---|---|---|---|
 | `get_status` | — | 3.2 | — | — |
-| `replay.record_start` | `source`(워커 id) 또는 `socket`, `name`, `seconds`? | `{recording, socket, seconds}` | `bad_request`(이름·인자), `conflict`(녹화 중, 같은 이름), `unavailable`(폴더 가득) | 파일 저장 |
+| `replay.record_start` | `source`(워커 id) 또는 `socket`, `name`, `seconds`? | `{recording, socket, seconds}` | `bad_request`(이름·인자, 같은 이름), `busy`(녹화 중), `unavailable`(폴더 가득) | 파일 저장 |
 | `replay.record_stop` | — | `{stopped, frames}` | — | — |
-| `replay.play_start` | `name`, `speed`=1 (0,100], `loop`=false | `{playing, frames, speed, loop, socket}` | `bad_request`(녹화 없음, 배속), `conflict`(재생 중), `unavailable`(데이터 버스) | — |
+| `replay.play_start` | `name`, `speed`=1 (0,100], `loop`=false | `{playing, frames, speed, loop, socket}` | `bad_request`(녹화 없음, 배속), `busy`(재생 중), `unavailable`(데이터 버스) | — |
 | `replay.play_stop` | — | `{stopped}` | — | — |
 | `replay.list` | — | `{recordings[], total_mb, max_total_mb, dir}` | — | — |
-| `replay.delete` | `name` | `{deleted}` | `conflict`(사용 중), `bad_request`(없음) | 파일 삭제 |
+| `replay.delete` | `name` | `{deleted}` | `busy`(사용 중), `bad_request`(없음) | 파일 삭제 |
 
 ### 3.2 상태 (`get_status`의 `replay` 칸)
 

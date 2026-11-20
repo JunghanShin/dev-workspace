@@ -125,7 +125,7 @@ void Module::run_record(worker::WorkerThread& t, const RecJob& job) {
 }
 
 Json Module::record_start(const Json& args) {
-    if (rec_active_.load()) return worker::error_reply("conflict", "already recording " + rec_name_);
+    if (rec_active_.load()) return worker::error_reply("busy", "already recording " + rec_name_);
     const std::string name = args.value("name", std::string());
     if (!valid_name(name)) return worker::error_reply("bad_request", "name: a-z A-Z 0-9 - _ (1~64)");
     std::string socket = args.value("socket", std::string());
@@ -145,7 +145,7 @@ Json Module::record_start(const Json& args) {
     if (static_cast<double>(already) / 1e6 >= cfg_.max_total_mb)
         return worker::error_reply("unavailable", "recording folder is full (max_total_mb)");
     for (const auto& i : list(cfg_.dir))
-        if (i.name == name) return worker::error_reply("conflict", "recording exists: " + name);
+        if (i.name == name) return worker::error_reply("bad_request", "recording exists: " + name);
 
     auto job = std::make_unique<RecJob>();
     job->name = name;
@@ -246,7 +246,7 @@ void Module::run_play(worker::WorkerThread& t, PlayJob& job) {
 }
 
 Json Module::play_start(const Json& args) {
-    if (play_active_.load()) return worker::error_reply("conflict", "already playing " + play_name_);
+    if (play_active_.load()) return worker::error_reply("busy", "already playing " + play_name_);
     const std::string name = args.value("name", std::string());
     const double speed = args.contains("speed") && args["speed"].is_number() ? args["speed"].get<double>() : 1.0;
     const bool loop = args.value("loop", false);
@@ -320,7 +320,7 @@ bool Module::handle(const std::string& cmd, const Json& args, worker::Reply repl
             busy = (rec_active_.load() && name == rec_name_) || (play_active_.load() && name == play_name_);
         }
         if (busy) {
-            reply(worker::error_reply("conflict", "in use: " + name));
+            reply(worker::error_reply("busy", "in use: " + name));
         } else {
             std::string err;
             if (remove(cfg_.dir, name, &err)) reply(worker::ok_reply({{"deleted", name}}));
