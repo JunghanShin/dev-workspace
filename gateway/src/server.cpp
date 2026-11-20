@@ -120,7 +120,9 @@ void Pool::run() {
         std::function<void()> fn;
         {
             std::unique_lock<std::mutex> lock(mu_);
-            cv_.wait_for(lock, std::chrono::seconds(1), [&] { return stop_ || !q_.empty(); });
+            // 시간 없이 기다린다: 일이 오거나(enqueue가 깨움) 멈출 때(shutdown이 모두 깨움)만 깬다.
+            // 예전에는 1초마다 깼는데, 스레드 48개가 그러니 쉬는 동안에도 CPU 0.5%(보드 실측)
+            cv_.wait(lock, [&] { return stop_ || !q_.empty(); });
             if (q_.empty()) {
                 if (stop_) break;
                 continue;
