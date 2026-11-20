@@ -4,6 +4,7 @@
 #
 #   dev/release-worker.sh <워커>     지금 소스로 jetson-build --test(빌드 + QEMU 시험) → build/jetson/install/bin/*
 #                                    → workers/<워커>/workspace/bin/ + BUILD, git에 올려 둠(exec 비트)
+#   dev/release-worker.sh manager    플랫폼 process-manager(C++) → manager/bin/ (같은 방식)
 #   git commit
 #
 # 빌드를 이 스크립트가 직접 한다: 따로 빌드하게 두면 빌드가 실패하거나 안 돌았을 때(예: jetson-build를 못 찾음)
@@ -24,16 +25,21 @@ for a in "$@"; do
     *) name="$a" ;;
   esac
 done
-[[ -n "$name" && -d "$ROOT/workers/$name" ]] || { echo "usage: $0 <worker folder> [--dirty]  (e.g. replay)" >&2; exit 1; }
-
-W="$ROOT/workers/$name"
+if [[ "$name" == manager ]]; then  # 플랫폼 process-manager(워커가 아님)
+  W="$ROOT/manager"
+  SRCDIR="manager"
+else
+  [[ -n "$name" && -d "$ROOT/workers/$name" ]] || { echo "usage: $0 <worker folder>|manager [--dirty]  (e.g. replay)" >&2; exit 1; }
+  W="$ROOT/workers/$name"
+  SRCDIR="workers/$name"
+fi
 SRC_BIN="$W/build/jetson/install/bin"
 DST="$W/bin"
 [[ -d "$W/workspace" ]] && DST="$W/workspace/bin"  # 워크스페이스 연동 파일 폴더가 있으면 그 안에(템플릿 구성)
 REL="${DST#$ROOT/}"
 
-# 워커 소스(bin/ 제외, lib/ 포함)에 커밋 안 된 변경이 있는지(빌드 전에: 오래 기다린 뒤 멈추지 않게)
-changes="$(git -C "$ROOT" status --porcelain -- "workers/$name" ":!$REL" 2>/dev/null || true)"
+# 소스(bin/ 제외, lib/ 포함)에 커밋 안 된 변경이 있는지(빌드 전에: 오래 기다린 뒤 멈추지 않게)
+changes="$(git -C "$ROOT" status --porcelain -- "$SRCDIR" ":!$REL" 2>/dev/null || true)"
 if [[ -n "$changes" && "$dirty_ok" == no ]]; then
   echo "uncommitted source changes; commit first (or --dirty):" >&2
   echo "$changes" >&2

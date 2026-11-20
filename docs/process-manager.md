@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | 확정(2026-11-20, design.md 0.46 6.3). 구현 중(6장 순서) |
+| 상태 | 확정(2026-11-20, design.md 0.46 6.3). 6장 1~3 구현(0.47): C++ 판이 수락 시험 21개·단위 시험·TSan 통과, 시작 셸에서 고름(기본 Python). 보드 확인·4~5 남음 |
 | 대상 | 플랫폼 블록 process-manager(design.md 4.1): 매니저·워커 프로세스를 띄우고 감시하고, 누구에게 붙을지 알려 준다 |
 | 바꾸는 것 | Python `manager/workspace_manager`(약 2,000줄)를 C++로 다시 만든다(원칙 10: 상주 블록은 C++). 하는 일·API·파일은 그대로 두고, 4.1의 새 역할을 더한다 |
 | 바탕 | design.md 6.1~6.3(지금 Manager), 6.6.7.3~6.6.7.5(연결 선언, 지금까지 설계만), 9장(프로세스 계약), 원칙 13(명령 소유) |
@@ -121,6 +121,26 @@ core는 워커의 모듈 코어처럼 시스템 호출을 모른다(시계·spaw
 3. 시작 셸에 고르기(`WORKSPACE_MANAGER_IMPL=python|cpp`, 기본 python) → 보드에서 cpp로 실측·확인
 4. 기본을 cpp로, 한 번 더 확인한 뒤 Python 판 삭제
 5. 연결 선언·명령 소유·허용 목록(`command_guard: off`) → libworker가 `peers.json`을 읽게(`warn`까지)
+
+### 6.1 구현 결과 (0.47)
+
+| 항목 | 결과 |
+|---|---|
+| 수락 시험 | `manager/test_manager_accept.py`(15, 새로)·`test_manager_api.py`(6): Python 판·C++ 판(`MANAGER_BIN`) 모두 통과. Python 판은 `test_schema`·`test_notify_race` 포함 37 |
+| 단위 시험 | `test_core`(상태 규칙·설정 검사·일찍 온 heartbeat, 가짜 시계·spawn·store), `test_threads`(pm.store·pm.pub·pm.res). TSan 경고 0 |
+| 자원(PC WSL, 워커 5·구독자 2) | 메모리 22.4 MB → 5.0 MB, CPU 0.30% → 0.20%, 실행 파일 1.1 MB. 보드 실측은 아직 |
+| 실행 | `dev/release-worker.sh manager` → `manager/bin/process-manager`. 시작 셸: `WORKSPACE_MANAGER_IMPL=cpp` 또는 `<데이터>/config/manager_impl`에 `cpp`(실행 파일이 없으면 Python 판). 점검: `dev/check.sh`가 빌드·단위·수락·TSan |
+
+Python 판과 다른 점(일부러):
+
+- 매니저 자신에게 온 SIGHUP: Python은 죽음, C++은 기록만 하고 무시
+- 로그 회전: 복사 후 비우기(rename하면 워커가 계속 옛 파일에 씀), 1 s마다·쓰기 큐가 빌 때 pm.store가 함(Python 10 s)
+- 쓰기 op: 검사를 모두 끝낸 뒤 파일을 씀(Python은 `save_preset` 충돌 때 프리셋 파일이 남았음)
+- pm.store 시간 상한 2 s는 지금 쓰고 있는 것만 잼(줄 선 시간은 안 셈, 쓰기가 몰릴 때 괜히 실패하지 않게)
+- 스레드 감시: 루프·pm.pub·pm.res가 3 s 멈추면 기록하고 exit 4(Python에는 없었음)
+- Python 판 버그: 쓰기 op에 `preset`이 문자열이면 Python은 답 없이 끊음, C++은 `bad_request`
+
+남은 위험: 스레드가 있는 프로세스의 fork(자식은 exec까지 시스템 호출만), 설정 스키마 `pattern`은 std::regex(ECMAScript) — 보드에서 확인.
 
 ## 7. 미결
 

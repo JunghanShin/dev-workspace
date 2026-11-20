@@ -32,11 +32,27 @@ run_py() {  # run_py <이름> <폴더> <unittest 인자>
 step "Python 시험"
 run_py test_schema "$ROOT/manager" test_schema
 run_py test_manager_api "$ROOT/manager" test_manager_api
+run_py test_manager_accept "$ROOT/manager" test_manager_accept
 run_py test_notify_race "$ROOT/manager" test_notify_race
 run_py test_workers "$ROOT" dev/test_workers.py
 run_py test_stream "$ROOT/rest" test_stream
 
 if (( ! QUICK )); then
+  # process-manager(C++, docs/process-manager.md): 빌드 → core 단위 시험 → 같은 수락 시험을 C++ 판으로
+  step "process-manager (C++)"
+  b="$OUT/manager"
+  if cmake -S "$ROOT/manager" -B "$b" -DCMAKE_BUILD_TYPE=Release >"$b.cfg.log" 2>&1      && cmake --build "$b" -j"$(nproc)" >"$b.build.log" 2>&1; then
+    if out="$(cd "$b" && ctest --output-on-failure 2>&1)"; then rc=0; else rc=$?; fi
+    echo "$out" | grep -E "tests passed|tests failed|FAIL" | head -5
+    (( rc == 0 )) || fail+=("manager-cpp unit")
+    out="$(cd "$ROOT/manager" && MANAGER_BIN="$b/process-manager" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_manager_api test_manager_accept 2>&1)"; rc=$?
+    echo "manager-cpp accept: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)"
+    ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:" | head -10; fail+=("manager-cpp accept"); }
+  else
+    echo "build failed: $b.build.log"
+    grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null
+    fail+=("manager-cpp build")
+  fi
   for w in "$ROOT"/workers/*/; do  # _template 포함
     w="${w%/}"
     name="$(basename "$w")"
@@ -67,7 +83,7 @@ if (( ! QUICK )); then
   # 최신 커널의 넓은 주소 무작위화와 TSan이 맞지 않아 setarch -R(그 실행만 무작위화 끔)로 돌린다
   tsan="-fsanitize=thread -g -O1"
   # libworker 단위 시험(스레드·큐·단계·잠금)과 템플릿·모든 워커의 시험(연동 ON). 경고가 하나라도 있으면 실패
-  for target in "$ROOT/workers/_template/lib/libworker" "$ROOT"/workers/*/; do
+  for target in "$ROOT/workers/_template/lib/libworker" "$ROOT/manager" "$ROOT"/workers/*/; do
     target="${target%/}"
     [[ -f "$target/CMakeLists.txt" ]] || continue
     name="$(basename "$target")"

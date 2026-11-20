@@ -1,6 +1,7 @@
 """Manager API를 쓰는 워커 시험(design.md 6.5). Linux(PC WSL·보드)에서. 표준 라이브러리만.
 
     cd manager && python3 -m unittest test_manager_api -v
+    MANAGER_BIN=~/pm-build/process-manager python3 -m unittest test_manager_api -v   # C++ 판
 
 임시 워크스페이스(워커 폴더 둘)와 데이터 폴더를 만들고 진짜 Manager를 띄운다:
   - adp: Manager API를 쓰는 워커(워커 선언 "manager_api": true). Manager 소켓(WORKSPACE_MANAGER_SOCKET)으로 명령을 보내고 결과를 파일에 쓴다
@@ -53,6 +54,12 @@ open(sys.argv[3], "w").write(json.dumps(out))
 while not stop.requested:
     hb.watchdog(1); time.sleep(0.2)
 '''
+
+
+def manager_cmd():
+    """시험할 Manager 실행 명령. MANAGER_BIN이 있으면 그 실행 파일(C++ process-manager), 없으면 Python 판"""
+    b = os.environ.get("MANAGER_BIN")
+    return [b] if b else [sys.executable, "-m", "workspace_manager"]
 
 
 def wait_for(fn, timeout=15.0):
@@ -128,7 +135,7 @@ class ManagerApiWorker(unittest.TestCase):
         env = dict(os.environ, WORKSPACE_ROOT=root, WORKSPACE_DATA=data, PYTHONPATH=HERE, PYTHONDONTWRITEBYTECODE="1",
                    WORKSPACE_PRODUCT="1" if product else "0")
         env.pop("WORKSPACE_CONFIG_WRITE", None)
-        self.mgr = subprocess.Popen([sys.executable, "-m", "workspace_manager", "--data", data], env=env,
+        self.mgr = subprocess.Popen(manager_cmd() + ["--data", data], env=env,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.run = os.path.join(data, "run")
         self.sock = os.path.join(self.run, "manager.sock")
@@ -196,7 +203,9 @@ class ManagerApiWorker(unittest.TestCase):
                 seen.append(v)
             time.sleep(0.05)
         self.assertTrue(seen and max(seen) <= 0.8 and max(seen) > 0.2, seen)
-        # start 명령이면 처음부터(연속 실패 표시 지움)
+        # start 명령이면 처음부터(연속 실패 표시 지움). 재시작 대기 중일 때 보낸다(프로세스가 떠 있는 짧은 순간에는
+        # 지우지 않는 규칙이라, 그때 보내면 두 판 모두 crash_loop가 남는다)
+        self.assertTrue(wait_for(lambda: self.status()["crash"].get("restart_in_s") is not None, 5))
         r = self.call(os.path.join(self.run, "manager-rest.sock"), {"op": "start", "id": "crash"})
         self.assertTrue(r["ok"], r)
         self.assertFalse(r["data"]["crash_loop"])

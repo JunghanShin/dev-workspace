@@ -223,8 +223,21 @@ echo $$ > "$DATA/run/workspace-start.pid"
 log "workspace=$ROOT data=$DATA user=$OWNER"
 
 rm -f "$DATA/run/manager.sock"
-run_as_owner "$ROOT/manager${EXTRA_PYTHONPATH:+:$EXTRA_PYTHONPATH}" workspace_manager \
-  ${EXTRA_LD:+LD_LIBRARY_PATH="$EXTRA_LD"}
+# Manager 고르기(design.md 6.3, docs/process-manager.md 6장): C++ process-manager로 옮기는 동안 둘 다 둔다.
+#   WORKSPACE_MANAGER_IMPL=cpp 또는 <데이터>/config/manager_impl 파일에 cpp → C++ 판(확정 실행 파일 manager/bin/process-manager,
+#   개발 빌드는 WORKSPACE_MANAGER_BIN으로 경로를 줌). 그 밖(기본) → Python 판. C++ 실행 파일이 없으면 Python 판으로 돌아간다
+MGR_IMPL="${WORKSPACE_MANAGER_IMPL:-$(cat "$DATA/config/manager_impl" 2>/dev/null || true)}"
+MGR_BIN="${WORKSPACE_MANAGER_BIN:-$ROOT/manager/bin/process-manager}"
+if [[ "$MGR_IMPL" == cpp && -x "$MGR_BIN" ]]; then
+  log "manager: C++ process-manager ($MGR_BIN)"
+  env ${EXTRA_LD:+LD_LIBRARY_PATH="$EXTRA_LD"} HOME="$OWNER_HOME" USER="$OWNER" LOGNAME="$OWNER" \
+    setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups \
+    "$MGR_BIN" --data "$DATA" &
+else
+  [[ "$MGR_IMPL" == cpp ]] && log "manager: $MGR_BIN not found, using Python"
+  run_as_owner "$ROOT/manager${EXTRA_PYTHONPATH:+:$EXTRA_PYTHONPATH}" workspace_manager \
+    ${EXTRA_LD:+LD_LIBRARY_PATH="$EXTRA_LD"}
+fi
 MGR=$!
 for (( i = 0; i < 100; i++ )); do
   [[ -S "$DATA/run/manager.sock" ]] && break
