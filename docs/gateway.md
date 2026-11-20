@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | 확정(2026-11-20, design.md 0.49 6.4). 구현 중(6장 순서) |
+| 상태 | 확정(2026-11-20, design.md 0.49 6.4). 6장 1~2 구현(0.50): C++ 판이 HTTP 수락 시험 36개·단위 시험·TSan 통과, 시작 셸에서 고름(기본 Python). 3~5 남음 |
 | 대상 | 플랫폼 블록 게이트웨이(design.md 4.1): 바깥(화면·외부 운용·도구)이 워크스페이스로 들어오는 단 하나의 문 |
 | 바꾸는 것 | Python REST(`rest/workspace_rest`, 약 1,600줄)를 **nginx(웹서버) + C++ 게이트웨이**로 나눈다(원칙 10: 상주 블록은 C++). 지금 REST 경로는 그대로 두고 4.1의 새 역할을 더한다 |
 | 바탕 | design.md 6.4(REST), 6.11(화면 제공), 9.6·9.7(명령·스트림), 10.3(접근 제어), 원칙 11~17 |
@@ -109,6 +109,18 @@
 3. nginx 앞단(시작 셸이 띄움, 화면 파일·`/api`) → 보드에서 C++로 실측
 4. 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시
 5. 기본을 C++로, Python REST 삭제
+
+### 6.1 구현 결과 (0.50)
+
+| 항목 | 결과 |
+|---|---|
+| 수락 시험 | `rest/test_rest_accept.py`(HTTP 블랙박스, 가짜 Manager·워커): Python 판 34(+ `test_stream` 3, 게이트웨이 전용 2개 건너뜀), C++ 판 36(`REST_BIN`) |
+| 단위 시험 | `test_core`(경로 표·합치기·지난 지표·비밀값 가림 등), `test_threads`. TSan 경고 0(TSan 판 게이트웨이로 수락 시험도 통과) |
+| 자원(PC WSL) | 메모리 20.8 → 6.8 MB(SSE 2개 7.0 MB), 실행 파일 1.4 MB. 보드 실측은 아직 |
+| 실행 | `dev/release-worker.sh gateway` → `gateway/bin/gateway`. 시작 셸: `WORKSPACE_REST_IMPL=cpp` 또는 `<데이터>/config/rest_impl`에 `cpp`(기본 Python). `WORKSPACE_GATEWAY_SOCKET`(Unix 소켓, nginx용), `WORKSPACE_GATEWAY_THREADS`(동시 요청 상한, 기본 48, SSE 포함). 신분 확인은 아직 `off`만 |
+| 라이브러리 | cpp-httplib v0.18.3(MIT, 사본) |
+
+Python 판과 다른 점: HEAD·PATCH·OPTIONS는 JSON 501, Range 요청은 206, 워커 명령 시간 상한은 전체 시간으로 셈, Python이 예외로 답 없이 끊던 경우는 500·503으로 답함, 제품 빌드는 취소 중인 자식이 끝나기 전 새 시작을 막음(Python은 옛 상태가 섞였음), SSE 기준 상태를 잠금 안에서 넣어 드문 경합이 없어짐, 새로: 동시 요청 상한(넘으면 503), 받기·스트림 스레드 10 s 멈춤 → exit 4.
 
 ## 7. 미결
 

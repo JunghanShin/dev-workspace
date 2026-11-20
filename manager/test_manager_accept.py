@@ -814,7 +814,11 @@ class Accept(unittest.TestCase):
         e.ok({"op": "stop", "id": "k"})
         e.ok({"op": "stop", "id": "c"})
         time.sleep(0.5)
-        self.assertTrue(pid_alive(sk["pid"]))  # SIGTERM을 무시하는 중
+        # SIGTERM을 무시하는 중이라 살아 있어야 함. 단, 기계가 바빠 잠이 stop_timeout_sec(1 s)를 넘겼으면
+        # Manager가 이미 SIGKILL했을 수 있다(맞는 동작): 실제로 지난 시간이 1 s 안일 때만 본다
+        alive = pid_alive(sk["pid"])
+        if time.time() - t0 < 0.9:
+            self.assertTrue(alive)
         s = e.wait_state("k", "stopped", timeout=5)
         self.assertGreater(time.time() - t0, 0.9)
         self.assertEqual((s["last_signal"], s["last_exit_code"]), ("SIGKILL", None))

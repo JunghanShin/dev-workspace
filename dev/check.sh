@@ -33,6 +33,7 @@ step "Python 시험"
 run_py test_schema "$ROOT/manager" test_schema
 run_py test_manager_api "$ROOT/manager" test_manager_api
 run_py test_manager_accept "$ROOT/manager" test_manager_accept
+run_py test_rest_accept "$ROOT/rest" test_rest_accept
 run_py test_notify_race "$ROOT/manager" test_notify_race
 run_py test_workers "$ROOT" dev/test_workers.py
 run_py test_stream "$ROOT/rest" test_stream
@@ -52,6 +53,22 @@ if (( ! QUICK )); then
     echo "build failed: $b.build.log"
     grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null
     fail+=("manager-cpp build")
+  fi
+  # 게이트웨이(C++, docs/gateway.md): 빌드 → core·스레드 단위 시험 → 같은 HTTP 수락 시험을 C++ 판으로
+  step "gateway (C++)"
+  b="$OUT/gateway"
+  if cmake -S "$ROOT/gateway" -B "$b" -DCMAKE_BUILD_TYPE=Release >"$b.cfg.log" 2>&1 \
+     && cmake --build "$b" -j"$(nproc)" >"$b.build.log" 2>&1; then
+    if out="$(cd "$b" && ctest --output-on-failure 2>&1)"; then rc=0; else rc=$?; fi
+    echo "$out" | grep -E "tests passed|tests failed|FAIL" | head -5
+    (( rc == 0 )) || fail+=("gateway-cpp unit")
+    out="$(cd "$ROOT/rest" && REST_BIN="$b/gateway" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_rest_accept 2>&1)"; rc=$?
+    echo "gateway-cpp accept: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)"
+    ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:" | head -10; fail+=("gateway-cpp accept"); }
+  else
+    echo "build failed: $b.build.log"
+    grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null
+    fail+=("gateway-cpp build")
   fi
   for w in "$ROOT"/workers/*/; do  # _template 포함
     w="${w%/}"
@@ -83,7 +100,7 @@ if (( ! QUICK )); then
   # 최신 커널의 넓은 주소 무작위화와 TSan이 맞지 않아 setarch -R(그 실행만 무작위화 끔)로 돌린다
   tsan="-fsanitize=thread -g -O1"
   # libworker 단위 시험(스레드·큐·단계·잠금)과 템플릿·모든 워커의 시험(연동 ON). 경고가 하나라도 있으면 실패
-  for target in "$ROOT/workers/_template/lib/libworker" "$ROOT/manager" "$ROOT"/workers/*/; do
+  for target in "$ROOT/workers/_template/lib/libworker" "$ROOT/manager" "$ROOT/gateway" "$ROOT"/workers/*/; do
     target="${target%/}"
     [[ -f "$target/CMakeLists.txt" ]] || continue
     name="$(basename "$target")"

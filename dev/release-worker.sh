@@ -5,6 +5,7 @@
 #   dev/release-worker.sh <워커>     지금 소스로 jetson-build --test(빌드 + QEMU 시험) → build/jetson/install/bin/*
 #                                    → workers/<워커>/workspace/bin/ + BUILD, git에 올려 둠(exec 비트)
 #   dev/release-worker.sh manager    플랫폼 process-manager(C++) → manager/bin/ (같은 방식)
+#   dev/release-worker.sh gateway    플랫폼 게이트웨이(C++) → gateway/bin/
 #   git commit
 #
 # 빌드를 이 스크립트가 직접 한다: 따로 빌드하게 두면 빌드가 실패하거나 안 돌았을 때(예: jetson-build를 못 찾음)
@@ -25,9 +26,9 @@ for a in "$@"; do
     *) name="$a" ;;
   esac
 done
-if [[ "$name" == manager ]]; then  # 플랫폼 process-manager(워커가 아님)
-  W="$ROOT/manager"
-  SRCDIR="manager"
+if [[ "$name" == manager || "$name" == gateway ]]; then  # 플랫폼 블록(워커가 아님)
+  W="$ROOT/$name"
+  SRCDIR="$name"
 else
   [[ -n "$name" && -d "$ROOT/workers/$name" ]] || { echo "usage: $0 <worker folder>|manager [--dirty]  (e.g. replay)" >&2; exit 1; }
   W="$ROOT/workers/$name"

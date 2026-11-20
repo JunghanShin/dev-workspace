@@ -1,0 +1,140 @@
+// 게이트웨이 HTTP (docs/gateway.md 2장). cpp-httplib가 연결을 받고, 요청마다 같은 단계를 지난다:
+//   신분 확인 → 권한 → 전달(Manager op · 워커 명령 · 스트림 · 보드 읽기 · 화면) → 기록 → 응답
+//
+// 스레드:
+//   gw.listen   받기(TCP, Unix 소켓마다 하나). 받은 연결을 gw.http 풀에 넣기만 한다(막히지 않음)
+//   gw.http ×N  요청 하나씩(SSE면 그 화면이 끝날 때까지). 동시 요청이 threads를 넘으면 503
+//               (풀 스레드는 threads + 여분 4: 503을 답할 스레드가 늘 남게)
+//   gw.up.<워커> 워커 스트림 구독(hub.hpp)
+//   gw.build    제품 빌드 출력 읽기(productbuild.hpp)
+// 연결 하나에 요청 하나(keep-alive 없음, Python REST의 HTTP/1.0과 같음). 읽기·쓰기 상한 5 s.
+#pragma once
+
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "hub.hpp"
+#include "pipeline.hpp"
+#include "productbuild.hpp"
+#include "reads.hpp"
+#include "sys.hpp"
+#include "ui.hpp"
+#include "worker/thread.hpp"
+
+namespace httplib {
+class Server;
+}
+
+namespace gw {
+
+struct GatewayConfig {
+    std::string data_dir;        // WORKSPACE_DATA(그대로, 비어 있을 수 있음)
+    std::string workspace;       // WORKSPACE_ROOT(절대 경로)
+    std::string manager_socket;
+    std::string bind = "0.0.0.0";
+    int port = 8080;
+    std::string unix_socket;     // WORKSPACE_GATEWAY_SOCKET(비어 있으면 TCP만)
+    double connect_timeout = 1.0, response_timeout = 2.0, command_timeout = 3.0;
+    size_t threads = 16;         // 동시 요청 상한(SSE 포함)
+    std::string token;           // WORKSPACE_REST_TOKEN
+    bool ui_enabled = true, product = false;
+    UiConfig ui;
+    double io_timeout = 5.0;     // HTTP 읽기·쓰기 상한(느린 클라이언트가 스레드를 붙잡지 못하게)
+    double ping_s = 15.0;
+    StreamTiming stream;
+    std::string python = "python3";
+};
+
+// 응답 하나
+struct Reply {
+    enum class Kind { Json, Raw, File, Sse } kind = Kind::Json;
+    int status = 200;
+    std::string body, ctype;
+    std::vector<std::pair<std::string, std::string>> headers;
+    std::string file_path;
+    std::shared_ptr<SseSession> sse;
+};
+
+// 요청 본문(필요할 때만 읽음)
+struct Body {
+    bool ok = true;
+    Json value;          // 비어 있으면 null
+    std::string error;
+};
+
+// gw.http 풀: 크기 고정, 대기열 상한(넘치면 연결을 닫음)
+class Pool {
+public:
+    Pool(size_t threads, size_t queue_cap);
+    ~Pool();
+    bool enqueue(std::function<void()> fn);
+    // 멈추고 기다린다(상한). 상한 안에 다 끝나면 true
+    bool shutdown(double timeout_s);
+
+private:
+    void run();
+    const size_t cap_;
+    std::mutex mu_;  // q_, stop_, active_
+    std::condition_variable cv_, idle_cv_;
+    std::deque<std::function<void()>> q_;
+    bool stop_ = false;
+    size_t alive_ = 0;
+    std::vector<std::thread> threads_;
+    bool joined_ = false;
+};
+
+class Gateway {
+public:
+    explicit Gateway(GatewayConfig cfg);
+    ~Gateway();
+    // 소켓을 열고 스레드를 띄운다. 실패하면 false와 이유
+    bool start(std::string& err);
+    // 받기를 멈추고 진행 중인 요청을 상한(timeout_s)까지 기다린다. 다 끝나면 true
+    bool stop(double timeout_s);
+    int port() const { return bound_port_; }
+    // 멈춘 스레드 이름(없으면 "")
+    std::string stalled();
+    void tick();  // 주기 정리(끝난 Upstream 거두기)
+
+    // 요청 단계(시험에서도 부름). body: 본문을 읽는 함수(필요할 때만 부름)
+    Reply handle(const RequestView& rq, const std::function<Body()>& body, const std::string& remote);
+
+private:
+    Reply forward(const RequestView& rq, const std::function<Body()>& body);
+    Reply manager_op(const Route& r, const std::function<Body()>& body);
+    Reply manager_reply(const Json& resp, int ok_status);
+    Reply health();
+    Reply command(const std::string& id, const std::function<Body()>& body);
+    Reply stream(const std::string& id, const std::string& query);
+    Reply product_build(const std::string& method, const std::string& path, const std::string& sub,
+                        const std::string& query, const std::function<Body()>& body);
+    Reply read(const Route& r, const std::string& query);
+    int open_stream(const std::string& worker_id, std::string& why);
+    void setup(httplib::Server& svr, int watch_slot);
+
+    GatewayConfig cfg_;
+    ManagerClient mgr_;
+    Reads reads_;
+    Ui ui_;
+    ProductBuild build_;
+    Hub hub_;
+    std::unique_ptr<Auth> auth_;
+    std::unique_ptr<Recorder> recorder_;
+
+    worker::ThreadWatch watch_;
+    Pool pool_;
+    std::atomic<size_t> in_flight_{0};
+    std::atomic<bool> stopping_{false};
+    std::unique_ptr<httplib::Server> tcp_, unix_;
+    std::vector<std::thread> listeners_;
+    int bound_port_ = 0;
+};
+
+}  // namespace gw

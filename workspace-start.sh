@@ -252,7 +252,19 @@ fi
 log "manager started (pid $MGR)"
 
 # REST(화면): 늘 띄운다(워커 개발 작업대, design.md 6.1)
-run_as_owner "$ROOT/rest" workspace_rest
+# 고르기(design.md 6.4, docs/gateway.md 6장): C++ 게이트웨이로 옮기는 동안 둘 다 둔다.
+#   WORKSPACE_REST_IMPL=cpp 또는 <데이터>/config/rest_impl 파일에 cpp → C++ 게이트웨이(확정 실행 파일 gateway/bin/gateway,
+#   개발 빌드는 WORKSPACE_GATEWAY_BIN). 그 밖(기본) → Python REST. C++ 실행 파일이 없으면 Python
+REST_IMPL="${WORKSPACE_REST_IMPL:-$(cat "$DATA/config/rest_impl" 2>/dev/null || true)}"
+GW_BIN="${WORKSPACE_GATEWAY_BIN:-$ROOT/gateway/bin/gateway}"
+if [[ "$REST_IMPL" == cpp && -x "$GW_BIN" ]]; then
+  log "rest: C++ gateway ($GW_BIN)"
+  env HOME="$OWNER_HOME" USER="$OWNER" LOGNAME="$OWNER" \
+    setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups "$GW_BIN" &
+else
+  [[ "$REST_IMPL" == cpp ]] && log "rest: $GW_BIN not found, using Python"
+  run_as_owner "$ROOT/rest" workspace_rest
+fi
 REST=$!
 log "rest started (pid $REST)"
 run_as_owner "$ROOT/logger" workspace_logger
