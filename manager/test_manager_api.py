@@ -94,6 +94,20 @@ class ManagerApiWorker(unittest.TestCase):
                 decl["exec_candidates"] = [os.path.join(self.tmp, "no-such-build", "python3"), sys.executable]
             os.makedirs(os.path.join(data, "config", "worker-types.d"), exist_ok=True)
             json.dump({name + "_t": decl}, open(os.path.join(data, "config", "worker-types.d", name + ".json"), "w"))
+        # 입출력 정의(design.md 6.6.7.1): dev 워커에 역할·워커 정의, 틀에 공통 정의 → get_io
+        dev_dir = os.path.join(root, "workers", "dev")
+        os.makedirs(os.path.join(dev_dir, "io", "uses"))
+        os.makedirs(os.path.join(dev_dir, "lib", "libx", "io"))
+        json.dump({"provides": ["dev_role"], "uses": {"up": {"from": "up_role", "version": "1.0", "required": False}}},
+                  open(os.path.join(dev_dir, "io.json"), "w"))
+        json.dump({"name": "dev_role", "version": "1.0", "topics": {}}, open(os.path.join(dev_dir, "io", "dev_role.json"), "w"))
+        json.dump({"name": "up_role", "version": "1.0"}, open(os.path.join(dev_dir, "io", "uses", "up_role.json"), "w"))
+        json.dump({"name": "self", "version": "1.0", "include": ["lib/libx/io/x.json"], "status": {}},
+                  open(os.path.join(dev_dir, "io", "self.json"), "w"))
+        json.dump({"name": "x", "version": "1.0", "metrics": {}}, open(os.path.join(dev_dir, "lib", "libx", "io", "x.json"), "w"))
+        os.makedirs(os.path.join(root, "workers", "_template", "io"))
+        shutil.copyfile(os.path.join(HERE, "..", "workers", "_template", "io", "common.json"),
+                        os.path.join(root, "workers", "_template", "io", "common.json"))
         # 예전 구성이 남긴 데이터: Manager가 지워야 한다(예전 이름 소켓, 빠진 워커의 실행 설정 파일)
         os.makedirs(os.path.join(data, "run"), exist_ok=True)
         os.makedirs(os.path.join(data, "state", "workers"), exist_ok=True)
@@ -209,6 +223,21 @@ class ManagerApiWorker(unittest.TestCase):
         self.assertTrue(r["ok"], r)  # REST는 쓰기 가능
 
 
+
+    def test_get_io(self):
+        """입출력 정의 읽기(읽기 전용 소켓에서도 됨). 정의가 없는 워커는 not_found"""
+        self.start()
+        self.assertTrue(wait_for(lambda: os.path.exists(self.sock)))
+        r = self.call(self.sock, {"op": "get_io", "id": "dev"})
+        self.assertTrue(r["ok"], r)
+        d = r["data"]
+        self.assertEqual(d["common"]["name"], "common")
+        self.assertEqual(d["self"]["name"], "self")
+        self.assertEqual(d["includes"]["lib/libx/io/x.json"]["name"], "x")
+        self.assertEqual(d["provides"]["dev_role"]["name"], "dev_role")
+        self.assertEqual(d["uses"]["up"]["definition"]["name"], "up_role")
+        r = self.call(self.sock, {"op": "get_io", "id": "adp"})
+        self.assertEqual(r["error"]["code"], "not_found", r)
 
     def test_product_mode(self):
         """제품 모드(WORKSPACE_PRODUCT=1): 설정 잠금(시작·정지는 됨), 가짜 장치 설정 워커는 띄우지 않음, 상태에 표시"""

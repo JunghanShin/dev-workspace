@@ -277,6 +277,19 @@ class IoDefinitions(unittest.TestCase):
         for k in ("id", "config_version", "runtime"):
             self.assertIn(k, d.get("status", {}), "common.json status." + k)
 
+    def test_library_fragments(self):
+        """라이브러리 조각(lib/<라이브러리>/io/<모듈>.json): 형식, 지표 이름은 그 조각의 status 모듈로 시작"""
+        allowed = {"name", "version", "description", "status", "metrics", "commands", "topics", "definitions"}
+        for p in sorted(glob.glob(os.path.join(ROOT, "workers", "*", "lib", "*", "io", "*.json"))):
+            rel = os.path.relpath(p, ROOT)
+            with self.subTest(fragment=rel):
+                d = load_json(p)
+                self.assertEqual(d.get("name"), os.path.splitext(os.path.basename(p))[0], rel + ": name은 파일 이름")
+                self.assertIsNotNone(version_tuple(d.get("version")), rel + ": version은 '큰.작은'")
+                self.check_parts(d, rel, d.get("definitions", {}), allowed)
+                for m in d.get("metrics", {}):
+                    self.assertTrue(any(m.startswith(k + "_") for k in d.get("status", {})), "%s: 지표 %s는 <모듈>_" % (rel, m))
+
     def test_self_definitions(self):
         """워커 정의(io/self.json)와 include 조각. 없는 워커는 미준수 목록(알림)"""
         allowed = {"name", "version", "description", "include", "status", "metrics", "commands", "topics", "definitions",

@@ -219,6 +219,19 @@ def stage_tree(product, info, stage, version):
         shutil.copy2(os.path.join(src, "presets", i["preset"] + ".json"), os.path.join(dst, "presets", i["preset"] + ".json"))
         with open(os.path.join(dst, "config.json"), "w", encoding="utf-8") as f:
             json.dump({"active": i["preset"], "autostart": i["autostart"]}, f, indent=2)
+        # 입출력 정의(design.md 6.6.7.1): 보드가 계약을 내줌(REST GET /workers/{id}/io). io.json, io/, self.json의 include 조각
+        wdir = os.path.join(ROOT, "workers", w)
+        if os.path.exists(os.path.join(wdir, "io.json")):
+            shutil.copy2(os.path.join(wdir, "io.json"), os.path.join(stage, "workers", w, "io.json"))
+            shutil.copytree(os.path.join(wdir, "io"), os.path.join(stage, "workers", w, "io"))
+            sp = os.path.join(wdir, "io", "self.json")
+            for inc in (json.load(open(sp, encoding="utf-8")).get("include", []) if os.path.exists(sp) else []):
+                d = os.path.join(stage, "workers", w, inc)
+                os.makedirs(os.path.dirname(d), exist_ok=True)
+                shutil.copy2(os.path.join(wdir, inc), d)
+            common = os.path.join(stage, "workers", "_template", "io", "common.json")
+            os.makedirs(os.path.dirname(common), exist_ok=True)
+            shutil.copy2(os.path.join(ROOT, "workers", "_template", "io", "common.json"), common)
     # 시스템 모니터(기본 탑재): 컴파일한 실행 파일로
     if product.get("system_monitor", True):
         mon = os.path.join(stage, "monitor")

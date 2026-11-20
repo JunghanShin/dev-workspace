@@ -40,3 +40,7 @@ host.add<video::TapModule>([&cam] { video::TapConfig t; t.source = cam.rtsp_url(
 설정 폼: `stream-schema.json`은 송출 한 항목의 화면 설정 폼 스키마 원본이다(워크스페이스 design.md 6.10). 송출하는 장치 워커는 자기 `worker-types.json`의 `config_schema` 안 `streams` 목록 `fields`에 이 내용을 그대로 넣는다. `StreamConfig` 키를 바꾸면 이 파일도 같이 고친다.
 
 송출 모듈(워커 모듈 구조, 워크스페이스 design.md 6.6.3): `video/module.hpp`의 `video::StreamsModule`(모듈 이름 `stream`). 장치 워커가 `host.add<video::StreamsModule>([&cam] { return cam.stream_defaults(); })`로 붙인다(입력 기본값은 장치 모듈이 줌). 설정 `{"stream": {"streams": [...]}}`, 명령 `stream.start|stop {name}`, 상태 `get_status` → `data.stream`(송출 목록), 지표 `stream_<이름>_link|fps|restarts`.
+
+## 입출력 정의 조각 (워크스페이스 design.md 6.6.7.1)
+
+이 라이브러리 모듈이 내는 상태·지표·명령은 조각 정의 `io/stream.json`(모듈 `stream`), `io/tap.json`(모듈 `tap`)에 있다. 이 라이브러리를 쓰는 워커는 칸을 다시 적지 않고 `io/self.json`에 `"include": ["lib/libvideo/io/stream.json", "lib/libvideo/io/tap.json"]`(쓰는 모듈만)로 가져온다. 모듈을 고쳐 내보내는 칸이 바뀌면 조각도 같이 고친다(출력 대조가 잡는다).

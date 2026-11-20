@@ -1,0 +1,33 @@
+{
+  "name": "tap",
+  "version": "1.0",
+  "description": "libvideo 프레임 탭 모듈(TapModule, 모듈 이름 tap) 조각 정의. 워커의 io/self.json이 include로 가져온다(워크스페이스 design.md 6.6.7.1 라이브러리 조각)",
+  "status": {
+    "tap": {
+      "type": "object", "required": ["enabled"],
+      "description": "꺼 두었거나 시작 전이면 enabled만",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "link": {"type": "string", "enum": ["up", "down"]},
+        "source": {"type": "string", "description": "입력 주소"},
+        "socket": {"type": "string", "description": "프레임 버스 알림 소켓"},
+        "width": {"type": "integer"}, "height": {"type": "integer"},
+        "pixel": {"type": "string"},
+        "fps": {"type": "number", "unit": "fps"},
+        "frames": {"type": "integer"},
+        "restarts": {"type": "integer"},
+        "bus": {"type": "object", "required": ["published", "dropped", "consumers"],
+                "properties": {"published": {"type": "integer"}, "dropped": {"type": "integer"}, "consumers": {"type": "integer"}}},
+        "last_error": {"type": "string"}
+      }
+    }
+  },
+  "metrics": {
+    "tap_link": {"type": "integer", "enum": [0, 1], "optional": true, "description": "켜 두었을 때만(아래 모두)"},
+    "tap_fps": {"type": "number", "unit": "fps", "optional": true},
+    "tap_frames": {"type": "integer", "optional": true},
+    "tap_dropped": {"type": "integer", "optional": true},
+    "tap_consumers": {"type": "integer", "optional": true},
+    "tap_restarts": {"type": "integer", "optional": true}
+  }
+}

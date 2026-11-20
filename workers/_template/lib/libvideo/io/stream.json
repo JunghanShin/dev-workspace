@@ -1,0 +1,58 @@
+{
+  "name": "stream",
+  "version": "1.0",
+  "description": "libvideo 송출 모듈(StreamsModule, 모듈 이름 stream) 조각 정의. 워커의 io/self.json이 include로 가져온다(워크스페이스 design.md 6.6.7.1 라이브러리 조각)",
+  "status": {
+    "stream": {
+      "type": "array", "description": "송출 목록",
+      "items": {
+        "type": "object",
+        "required": ["name", "enabled", "link", "input", "source", "mode", "url", "transport", "restarts", "fps"],
+        "properties": {
+          "name": {"type": "string"},
+          "enabled": {"type": "boolean", "description": "켜 둔 송출(stream.start·stop, autostart)"},
+          "link": {"type": "string", "enum": ["up", "down"]},
+          "input": {"type": "string", "description": "입력 주소"},
+          "source": {"type": "string", "description": "입력 방식"},
+          "mode": {"type": "string", "description": "relay 또는 encode"},
+          "url": {"type": "string", "description": "송출 주소"},
+          "target": {"type": "string", "description": "실제 보내는 주소(url과 다를 때만)"},
+          "transport": {"type": "string"},
+          "srt_latency_ms": {"type": "integer", "unit": "ms"},
+          "restarts": {"type": "integer"},
+          "fps": {"type": "number", "unit": "fps"},
+          "bitrate_kbps": {"type": "integer", "unit": "kbps"},
+          "overlay_time": {"type": "boolean"},
+          "keyframe_sec": {"type": "number", "unit": "s"},
+          "intra_refresh_sec": {"type": "number", "unit": "s"},
+          "framebus": {"type": "object", "required": ["width", "height", "pixel", "fed", "skipped"],
+                       "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "pixel": {"type": "string"},
+                                      "fed": {"type": "integer"}, "skipped": {"type": "integer"}, "error": {"type": "string"}}},
+          "last_error": {"type": "string"}
+        }
+      }
+    }
+  },
+  "metrics": {
+    "stream_<송출>_link": {"type": "integer", "enum": [0, 1], "optional": true, "description": "켜 둔 송출만"},
+    "stream_<송출>_fps": {"type": "number", "unit": "fps", "optional": true},
+    "stream_<송출>_restarts": {"type": "integer", "optional": true}
+  },
+  "commands": {
+    "stream.start": {
+      "description": "송출 켜기",
+      "args": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
+      "reply": {"$ref": "#/definitions/stream_status"},
+      "errors": ["bad_request"]
+    },
+    "stream.stop": {
+      "description": "송출 끄기",
+      "args": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
+      "reply": {"$ref": "#/definitions/stream_status"},
+      "errors": ["bad_request"]
+    }
+  },
+  "definitions": {
+    "stream_status": {"type": "object", "additionalProperties": true, "description": "status.stream의 항목 하나와 같은 모양"}
+  }
+}

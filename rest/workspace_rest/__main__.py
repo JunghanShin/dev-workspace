@@ -46,6 +46,8 @@ ROUTES = [
     ("DELETE", r"/workers/" + _ID + r"/presets/" + _NAME, "delete_preset", 202, None),
     # 설정 폼 스키마(워커 type 선언의 config_schema, design.md 6.10)
     ("GET", r"/workers/" + _ID + r"/schema", "get_schema", 200, None),
+    # 입출력 정의(계약, design.md 6.6.7.1): 공통·워커·역할·쓰는 정의. 화면 담당자가 보드에서 바로 받음
+    ("GET", r"/workers/" + _ID + r"/io", "get_io", 200, None),
     # 부팅 정책. 본문 {"autostart": true|false}
     ("PUT", r"/workers/" + _ID + r"/autostart", "set_autostart", 202, "autostart"),
     ("POST", r"/workers/" + _ID + r"/start", "start", 202, None),

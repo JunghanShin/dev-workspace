@@ -4,6 +4,7 @@
 """
 import asyncio
 import ctypes
+import json
 import logging
 import os
 import re
@@ -340,6 +341,49 @@ class Supervisor:
         t = self.types.get(w.rec.get("type")) or {}
         return {"id": w.id, "type": w.rec.get("type"), "schema": t.get("config_schema"),
                 "live_keys": list(t.get("live_keys") or ())}
+
+    def get_io(self, worker_id):
+        """입출력 정의(design.md 6.6.7.1): 공통·워커(+ include 조각)·역할·쓰는 정의 사본. 워커 폴더의 파일을 그대로 읽는다.
+        화면 담당자가 저장소 없이 실행 중인 보드에서 계약을 받는 길(REST GET /workers/{id}/io)"""
+        w = self._get(worker_id)
+        if not w.files:
+            raise ApiError("not_found", "worker %s has no worker folder" % w.id)
+        folder = os.path.dirname(w.files.dir) if os.path.basename(w.files.dir) == "workspace" else w.files.dir
+
+        def load(path, what):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError, ValueError) as e:
+                raise ApiError("not_found", "%s: %s" % (what, e))
+
+        index_path = os.path.join(folder, "io.json")
+        if not os.path.exists(index_path):
+            raise ApiError("not_found", "worker %s has no io definitions (io.json)" % w.id)
+        index = load(index_path, "io.json")
+        out = {"id": w.id, "common": None, "self": None, "includes": {}, "provides": {}, "uses": {}}
+        common = os.path.join(settings_mod.WORKSPACE_ROOT, "workers", "_template", "io", "common.json")
+        if os.path.exists(common):
+            out["common"] = load(common, "common.json")
+        self_path = os.path.join(folder, "io", "self.json")
+        if os.path.exists(self_path):
+            out["self"] = load(self_path, "io/self.json")
+            for inc in out["self"].get("include", []):
+                p = os.path.normpath(os.path.join(folder, inc))
+                if not p.startswith(folder + os.sep):
+                    raise ApiError("not_found", "io/self.json include %s: outside worker folder" % inc)
+                out["includes"][inc] = load(p, inc)
+        for role in index.get("provides", []):
+            p = os.path.join(folder, "io", role + ".json")
+            if not os.path.exists(p):
+                p = os.path.join(folder, "io", "uses", role + ".json")
+            out["provides"][role] = load(p, "provides %s" % role)
+        for name, u in index.get("uses", {}).items():
+            entry = dict(u)
+            p = os.path.join(folder, "io", "uses", "%s.json" % u.get("from"))
+            entry["definition"] = load(p, "uses %s" % name) if os.path.exists(p) else None
+            out["uses"][name] = entry
+        return out
 
     def _config_errors(self, wtype, config):
         return check_config((self.types.get(wtype) or {}).get("config_schema"), config)

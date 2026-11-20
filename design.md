@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.43 |
+| 문서 버전 | 0.44 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -234,6 +234,7 @@
 | `system` | — | | `GET /system` |
 | `list` / `get` | — / `id` | | `GET /workers`, `GET /workers/{id}` |
 | `get_config` / `get_schema` | `id` | | `GET /workers/{id}/config`, `/schema` |
+| `get_io` | `id` | 입출력 정의(6.6.7.1): `common`, `self`, `includes`(조각), `provides`(역할), `uses`(입력별 + 사본 `definition`). 워커 폴더 파일을 읽음, `io.json`이 없으면 `not_found` | `GET /workers/{id}/io` |
 | `subscribe` | `topics`, `period_ms` | | (logger, Manager API를 쓰는 워커) |
 | `set_config` | `id`, `config`, `save`(기본 true) | ✓ | 저장 `PUT /workers/{id}/config`, 임시 `POST /workers/{id}/config/apply` |
 | `use_preset` | `id`, `name` | ✓ | `POST /workers/{id}/presets/{name}/use` |
@@ -703,7 +704,7 @@ workers/<이름>/
 - **설계서와의 관계:** 운용에서 쓰이는 것은 정의 파일과 설정뿐이다. 워커 design.md 3장(ICD)은 칸 목록을 다시 적지 않고 `io/`를 가리키며, 사람이 알아야 할 것(칸의 뜻, 주기를 그렇게 정한 이유, 상대가 없을 때 동작)만 둔다
 - **정의에 넣는 것(0.41):** 바깥으로 나가는 것 전부(위 세 정의). 예전(0.38~0.40)에는 워커끼리 주고받는 것만 넣고 `get_status`·지표·화면용 주제는 뺐다. 화면을 따로 맡기고 매니저가 정의만 보고 쓰려면 화면이 쓰는 칸도 계약에 있어야 해서 바꿈
 - **엄격함:** 정의의 `object`는 적힌 칸만 허용한다(검사기는 `additionalProperties`를 적지 않으면 false로 본다). 이름이 바뀌는 칸(예: 메시지 이름별 주기)은 `"additionalProperties": {<값의 모양>}`으로 적는다. `runtime`만 `"additionalProperties": true`
-- **보드가 정의를 내줌:** REST `GET /workers/{id}/io` → `{"common": …, "self": …, "provides": {"<역할>": …}, "uses": {…}}`(워커 폴더의 파일을 읽음). 화면 담당자는 저장소 없이 실행 중인 보드에서 계약을 받는다
+- **보드가 정의를 내줌:** REST `GET /workers/{id}/io`(Manager API `get_io`, 6.2) → `{"common": …, "self": …, "includes": {"<경로>": …}, "provides": {"<역할>": …}, "uses": {"<입력>": {…, "definition": <사본>}}}`. 워커 폴더의 파일을 읽는다(제품 빌드도 `io.json`·`io/`·조각·공통 정의를 넣음). 화면 담당자는 저장소 없이 실행 중인 보드에서 계약을 받는다
 - **실행 파일에 넣는다(구현 예정):** 빌드가 정의를 실행 파일에 넣는다(실행 때 파일을 찾지 않음, 단독 실행 그대로). `<exec> --io`가 정의를 출력한다
 - **칸 검사(구현 예정):** 받는 쪽은 운용 중에도 받은 주제·응답의 칸을 사본으로 검사한다(필수 칸 없음, 형식 틀림 → 그 줄 버림 + 지표 `inputs_<입력>_bad`). 보내는 쪽은 시험 빌드에서 정의대로 내보내는지 확인한다
 
@@ -1407,7 +1408,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | 워커 설정 = 워커 폴더 프리셋(임시 적용·저장·전환, 커밋은 사용자) | 구현 |
 | 프레임 버스(데이터 버스) | CPU 공유 메모리, 영상·원시 레코드, Latest·InOrder. NvBufSurface는 미결 |
 | 데이터 버스 녹화·재생 | 구현(`workers/replay`, 녹화 → 재생 왕복 시험) |
-| 계약 규칙(6.6.7.1~6.6.7.2: 세 정의, 정의 밖 칸 금지, 출력 대조, REST `/io`) | 템플릿 구현(0.43): `io/common.json`, 예제 `io/self.json`, `io.json` `check`, 정의 파일 점검, 출력 대조(`dev/test_io_output.py`, `check.sh`), 예제 주제에 `t_mono_ns`(정의 `example` 1.1). 남은 순서: REST `/io` → 라이브러리 조각(libvideo) → flight-control·siyi `self.json` → ximea·replay 정의 처음 |
+| 계약 규칙(6.6.7.1~6.6.7.2: 세 정의, 정의 밖 칸 금지, 출력 대조, REST `/io`) | 템플릿 구현(0.43): `io/common.json`, 예제 `io/self.json`, `io.json` `check`, 정의 파일 점검, 출력 대조(`dev/test_io_output.py`, `check.sh`), 예제 주제에 `t_mono_ns`(정의 `example` 1.1). REST `/io`(Manager `get_io`)·라이브러리 조각(libvideo `io/stream.json`·`io/tap.json`) 구현(0.44). 남은 순서: flight-control·siyi `self.json` → ximea·replay 정의 처음 |
 | 계층과 매니저(4.1, `docs/layers.md`) | 설계 확정(0.40), 구현 전. 언어(원칙 10, 0.42): 매니저는 C++(libworker 위), 지금 Python인 REST·Manager·logger는 게이트웨이·process-manager·record-manager로 재구성하면서 C++로 다시 짬. 순서: 계약 규칙(상태·화면용 주제도 정의에, 실제 출력 대조) → 게이트웨이 → record → status → fault → mission·payload → config → 명령 경로 강제 |
 | 워커 | 세 워커 모두 템플릿 규칙 충족(유닛·모듈·워커 시험, 설계서 3장 ICD, 미준수 목록 없음). 워커별 구조 설계(모듈 나누기, 워커 간 통신 적용)는 다음 단계 |
 
@@ -1524,6 +1525,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.44 | **보드가 계약을 내줌:** Manager API `get_io`(6.2)·REST `GET /workers/{id}/io`: 공통·워커(+ 조각)·역할·쓰는 정의 사본을 워커 폴더에서 읽어 줌. 제품 빌드가 `io.json`·`io/`·include 조각·공통 정의를 넣음. **libvideo 조각 정의** `lib/libvideo/io/stream.json`(송출 상태·지표 `stream_<송출>_*`·`stream.start`·`stop`), `io/tap.json`(프레임 탭 상태·지표). 조각 점검(`dev/test_workers.py`) |
 | 0.43 | **계약 규칙 템플릿 구현(6.6.7.1~6.6.7.2).** 공통 정의 `workers/_template/io/common.json`(get_status 겉모양·공통 명령·오류·호스트·단계 지표·스트림 겉모양·이벤트), 예제 워커 정의 `io/self.json`(모듈별 status·지표), `io.json` `check`(가짜 장치 프리셋·부를 명령·듣는 시간). 정의 파일 점검(`dev/test_workers.py`: 공통·워커 정의·include 조각, 지표 이름 `<모듈>_`, check), 출력 대조(`dev/test_io_output.py`, `dev/io_contract.py`: 워커를 띄워 실제 출력을 정의와 대조, 정의 밖 칸 실패. `check.sh`가 부름). 예제 주제 `source`에 `t_mono_ns`(정의 `example` 1.1). 6.6.7.1에 라이브러리 조각(`lib/<라이브러리>/io/<모듈>.json`, `include`), 이름 자리 `<이름>`, 주제 값의 시각. `new-worker.sh`는 `common.json`을 복사하지 않음 |
 | 0.42 | **언어 원칙(원칙 10):** 보드에 상주하는 플랫폼(process-manager·게이트웨이·기록)과 매니저는 C++(한 번 만들고 늘 도는 것이라 실행 비용 우선, 보드 실측 Python 12~25 MB vs C++ 2~5 MB), 워커는 성능에 따라 C/C++ 또는 Python. 4장 프로세스 표 언어를 C++로. **원칙 18:** 매니저는 엔진(코드)과 규칙(데이터, config-manager가 관리)을 나눔. 12장: REST·Manager·logger는 재구성하면서 C++로 |
 | 0.41 | **계약 규칙(6.6.7.1~6.6.7.2).** 바깥으로 나가는 것은 모두 정의에(명령 응답·주제·`get_status`·지표·이벤트·데이터 버스, 예외 `runtime`). 정의 세 가지: 역할 정의 `io/<역할>.json`(매니저·다른 워커, 갈아 끼워도 같음), 워커 정의 `io/self.json`(모듈별 status·지표·진단 주제·정비 명령·임대 끊김 안전 상태, 사본 없음), 공통 정의 `_template/io/common.json`(get_status 겉모양·오류·heartbeat·스트림·이벤트·시각·임대). `object`는 적힌 칸만(정의 밖 칸 실패). 출력 대조 `dev/test_io_output.py`: 가짜 장치 프리셋(`io.json` `check`)으로 띄워 실제 출력을 정의와 대조. REST `GET /workers/{id}/io`. **계층 보강(4.1, 원칙 13~17):** 기능 평면(매니저·워커)과 플랫폼 평면(게이트웨이·추상화 층·process-manager), 블록별 입출력 표, 명령 소유(역할마다 매니저 하나, 소켓 접근 허용), 매니저 간 방향(fault → mission, mission ↔ payload, 상태는 status), 명령 임대(끊기면 안전 상태), 비행 컨트롤러와의 경계, 그림 `docs/layers-io.svg`. 설계 문서에서 현재 구현 서술을 뺌(옮기는 계획은 12장) |

@@ -190,6 +190,7 @@ class ApiServer:
             "get": lambda: self.sup.get(req.get("id")),
             "get_config": lambda: self.sup.get_config(req.get("id")),
             "get_schema": lambda: self.sup.get_schema(req.get("id")),
+            "get_io": lambda: self.sup.get_io(req.get("id")),
             "set_config": lambda: self.sup.set_config(req.get("id"), req.get("config"),
                                                       save=req.get("save", True) is not False),
             "use_preset": lambda: self.sup.use_preset(req.get("id"), req.get("name")),
