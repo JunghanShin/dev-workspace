@@ -128,7 +128,8 @@ core는 워커의 모듈 코어처럼 시스템 호출을 모른다(시계·spaw
 |---|---|
 | 수락 시험 | `manager/test_manager_accept.py`(15, 새로)·`test_manager_api.py`(6): Python 판·C++ 판(`MANAGER_BIN`) 모두 통과. Python 판은 `test_schema`·`test_notify_race` 포함 37 |
 | 단위 시험 | `test_core`(상태 규칙·설정 검사·일찍 온 heartbeat, 가짜 시계·spawn·store), `test_threads`(pm.store·pm.pub·pm.res). TSan 경고 0 |
-| 자원(PC WSL, 워커 5·구독자 2) | 메모리 22.4 MB → 5.0 MB, CPU 0.30% → 0.20%, 실행 파일 1.1 MB. 보드 실측은 아직 |
+| 자원(PC WSL, 워커 5·구독자 2) | 메모리 22.4 MB → 5.0 MB, CPU 0.30% → 0.20%, 실행 파일 1.1 MB |
+| 보드 실측(워커 5, 60 s 평균) | 메모리 25.6 → 6.7 MB, CPU 3.48 → 1.92%, 스레드 6 → 4. 스레드별: 루프 0.70%, pm.res 1.03%, pm.pub 0.07%, pm.store 0.03%. 워커 기동·REST·`/io`·스트림·패널 정상 |
 | 실행 | `dev/release-worker.sh manager` → `manager/bin/process-manager`. 시작 셸: `WORKSPACE_MANAGER_IMPL=cpp` 또는 `<데이터>/config/manager_impl`에 `cpp`(실행 파일이 없으면 Python 판). 점검: `dev/check.sh`가 빌드·단위·수락·TSan |
 
 Python 판과 다른 점(일부러):
@@ -140,7 +141,9 @@ Python 판과 다른 점(일부러):
 - 스레드 감시: 루프·pm.pub·pm.res가 3 s 멈추면 기록하고 exit 4(Python에는 없었음)
 - Python 판 버그: 쓰기 op에 `preset`이 문자열이면 Python은 답 없이 끊음, C++은 `bad_request`
 
-남은 위험: 스레드가 있는 프로세스의 fork(자식은 exec까지 시스템 호출만), 설정 스키마 `pattern`은 std::regex(ECMAScript) — 보드에서 확인.
+남은 위험: 설정 스키마 `pattern`은 std::regex(ECMAScript). 스레드가 있는 프로세스의 fork는 보드에서 워커 정상 기동으로 확인.
+
+**CPU 목표(0.5%)는 아직:** 보드에서 1.92%, 대부분 pm.res(1초마다 /proc 전체를 훑어 프로세스 그룹을 찾음). 줄일 방법: 그룹의 pid를 기억하고 전체 훑기는 5초마다만
 
 ## 7. 미결
 
