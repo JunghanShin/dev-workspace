@@ -311,6 +311,13 @@ void Gateway::setup(httplib::Server& svr, int watch_slot) {
 bool Gateway::start(std::string& err) {
     tcp_.reset(new httplib::Server());
     setup(*tcp_, watch_.add("gw.listen.tcp"));
+    // cpp-httplib 기본은 Linux에서 SO_REUSEPORT만 켠다. 그러면 ① 앞 서버(지난 실행, Python REST)의 연결이
+    // TIME-WAIT로 남아 있는 동안 같은 포트를 못 연다(보드에서 재시작 직후 bind 실패로 확인) ② 다른 프로그램이
+    // 같은 포트를 열어 요청을 나눠 가질 수 있다. 그래서 SO_REUSEADDR만 켠다(Python http.server와 같음)
+    tcp_->set_socket_options([](socket_t sock) {
+        int one = 1;
+        ::setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    });
     if (cfg_.port == 0) {
         bound_port_ = tcp_->bind_to_any_port(cfg_.bind);
         if (bound_port_ < 0) {

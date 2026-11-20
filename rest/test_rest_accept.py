@@ -306,8 +306,8 @@ class FakeStreamWorker:
 class Server:
     """REST 서버 프로세스(REST_BIN이면 그 실행 파일, 아니면 python -m workspace_rest)"""
 
-    def __init__(self, env=None, args=None, name="rest"):
-        self.port = free_port()
+    def __init__(self, env=None, args=None, name="rest", python=False):
+        self.port = int((env or {}).get("WORKSPACE_REST_PORT") or free_port())
         e = dict(os.environ)
         e.update({
             "WORKSPACE_DATA": T["data"], "WORKSPACE_ROOT": T["root"], "WORKSPACE_REST_BIND": "127.0.0.1",
@@ -318,7 +318,7 @@ class Server:
                   "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_GATEWAY_SOCKET", "WORKSPACE_GATEWAY_THREADS"):
             e.pop(k, None)
         e.update(env or {})
-        cmd = [REST_BIN] if REST_BIN else [sys.executable, "-m", "workspace_rest"]
+        cmd = [REST_BIN] if REST_BIN and not python else [sys.executable, "-m", "workspace_rest"]
         self.log_path = os.path.join(T["tmp"], "%s-%d.log" % (name, self.port))
         self.log = open(self.log_path, "wb")
         self.proc = subprocess.Popen(cmd + list(args or []), cwd=HERE, env=e, stdout=self.log, stderr=self.log)
@@ -1243,6 +1243,23 @@ class Streams(unittest.TestCase):
 
 class Modes(unittest.TestCase):
     """제품 모드·토큰·화면 끔·Manager 없음·화면 파일 없음(서버를 따로 띄움)"""
+
+    def test_restart_same_port(self):
+        """Python REST가 요청을 받은 뒤 끝나고, 바로 같은 포트로 고른 서버(REST_BIN)를 띄운다. 앞 서버가 먼저 끊은
+        연결이 TIME-WAIT로 남아도 열려야 한다(SO_REUSEADDR. 보드에서 Python REST → C++ 게이트웨이로 바꿀 때
+        bind 실패로 드러남: cpp-httplib 기본은 SO_REUSEPORT만 켜서 Python 쪽 TIME-WAIT와 맞지 않았음)"""
+        first = Server(name="restart-a", python=True)
+        port = first.port
+        try:
+            for _ in range(20):
+                self.assertEqual(first.request("GET", "/health")[0], 200)
+        finally:
+            first.stop()
+        second = Server({"WORKSPACE_REST_PORT": str(port)}, name="restart-b")
+        try:
+            self.assertEqual(second.request("GET", "/health")[0], 200)
+        finally:
+            second.stop()
 
     def test_product_mode(self):
         srv = Server({"WORKSPACE_PRODUCT": "1"}, name="product")
