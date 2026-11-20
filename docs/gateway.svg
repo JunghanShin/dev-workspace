@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="640" viewBox="0 0 940 640" role="img" font-family="'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif">
+<title>게이트웨이 실행 구조</title>
+<desc>브라우저와 외부 프로그램은 nginx로만 들어온다. nginx는 화면 파일을 바로 내주고, HTTPS·요청 크기·접속 수를 제한하고, API만 보드 안 Unix 소켓으로 게이트웨이에 넘긴다. 게이트웨이는 신분 확인, 명령 기록, 운용·정비 모드, 매니저·process-manager·워커로 전달, 스트림 중계를 한다. 판단은 하지 않는다</desc>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="0" y="0" width="940" height="640" fill="#ffffff"/>
+
+<!-- 바깥 -->
+<rect x="20" y="40" width="180" height="120" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+<text x="110" y="64" text-anchor="middle" font-size="13.5" font-weight="500" fill="#444441">바깥 손님</text>
+<text x="110" y="88" text-anchor="middle" font-size="11.5" fill="#5F5E5A">브라우저(화면)</text>
+<text x="110" y="106" text-anchor="middle" font-size="11.5" fill="#5F5E5A">원격 화면 · 외부 운용</text>
+<text x="110" y="124" text-anchor="middle" font-size="11.5" fill="#5F5E5A">로컬 도구</text>
+<text x="110" y="146" text-anchor="middle" font-size="10.5" fill="#888780">HTTP(S) 하나의 포트</text>
+
+<!-- nginx -->
+<rect x="240" y="40" width="200" height="200" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+<text x="340" y="64" text-anchor="middle" font-size="13.5" font-weight="500" fill="#3C3489">nginx (웹서버)</text>
+<text x="340" y="88" text-anchor="middle" font-size="11.5" fill="#534AB7">화면 파일 직접(ui/web, 패널)</text>
+<text x="340" y="106" text-anchor="middle" font-size="11.5" fill="#534AB7">HTTPS(선택) · 압축</text>
+<text x="340" y="124" text-anchor="middle" font-size="11.5" fill="#534AB7">요청 크기 · 접속 수 · 속도 제한</text>
+<text x="340" y="142" text-anchor="middle" font-size="11.5" fill="#534AB7">/api 와 REST 경로만 넘김</text>
+<text x="340" y="160" text-anchor="middle" font-size="11.5" fill="#534AB7">스트림은 버퍼링 끔</text>
+<text x="340" y="188" text-anchor="middle" font-size="10.5" fill="#888780">시작 셸이 워크스페이스 계정으로 띄움</text>
+<text x="340" y="204" text-anchor="middle" font-size="10.5" fill="#888780">설정은 데이터 폴더에 만든 파일</text>
+<text x="340" y="220" text-anchor="middle" font-size="10.5" fill="#888780">(시스템 nginx 설정 안 건드림)</text>
+
+<!-- 게이트웨이 -->
+<rect x="480" y="30" width="440" height="400" rx="16" fill="none" stroke="#534AB7" stroke-width="1.2" stroke-dasharray="6 4"/>
+<text x="496" y="52" font-size="14" font-weight="500" fill="#3C3489">gateway (C++, 플랫폼) — Unix 소켓만 엶</text>
+
+<rect x="500" y="66" width="400" height="108" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+<text x="700" y="88" text-anchor="middle" font-size="13" font-weight="500" fill="#3C3489">요청 처리 스레드 묶음 gw.http (상한 N개)</text>
+<text x="700" y="108" text-anchor="middle" font-size="11.5" fill="#534AB7">① 신분 확인(세션 · 토큰) → ② 권한(역할 · 운용/정비 모드)</text>
+<text x="700" y="126" text-anchor="middle" font-size="11.5" fill="#534AB7">③ 전달: Manager API · 워커 명령 · (나중) 매니저 · 보드 읽기</text>
+<text x="700" y="144" text-anchor="middle" font-size="11.5" fill="#534AB7">④ 명령 기록 큐에 넣기 → ⑤ 응답</text>
+<text x="700" y="164" text-anchor="middle" font-size="10.5" fill="#888780">요청 하나 = 짧은 일. 기다림마다 상한(Manager 2 s, 워커 명령 설정값)</text>
+
+<rect x="500" y="200" width="190" height="96" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8"/>
+<text x="595" y="222" text-anchor="middle" font-size="12.5" font-weight="500" fill="#085041">gw.up.&lt;워커&gt;</text>
+<text x="595" y="241" text-anchor="middle" font-size="10.5" fill="#0F6E56">워커 스트림 구독(워커당 하나)</text>
+<text x="595" y="257" text-anchor="middle" font-size="10.5" fill="#0F6E56">최신 상태 · 최근 이벤트 보관</text>
+<text x="595" y="273" text-anchor="middle" font-size="10.5" fill="#0F6E56">화면마다 hz로 합쳐 SSE</text>
+<rect x="710" y="200" width="190" height="96" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8"/>
+<text x="805" y="222" text-anchor="middle" font-size="12.5" font-weight="500" fill="#085041">gw.log</text>
+<text x="805" y="241" text-anchor="middle" font-size="10.5" fill="#0F6E56">명령 기록 쓰기</text>
+<text x="805" y="257" text-anchor="middle" font-size="10.5" fill="#0F6E56">누가 · 언제 · 무엇을 · 결과</text>
+<text x="805" y="273" text-anchor="middle" font-size="10.5" fill="#0F6E56">큐 1024, 넘치면 버리고 셈</text>
+
+<rect x="500" y="322" width="400" height="88" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+<text x="700" y="344" text-anchor="middle" font-size="12.5" font-weight="500" fill="#444441">작은 공유 상태 (잠금 하나, 잠금 안에서 I/O 금지)</text>
+<text x="700" y="364" text-anchor="middle" font-size="11" fill="#5F5E5A">세션(만료) · 운용/정비 모드(저장 안 함, 재시작하면 운용)</text>
+<text x="700" y="382" text-anchor="middle" font-size="11" fill="#5F5E5A">사용자 · 역할은 파일(config-manager가 생기면 그쪽이 관리)</text>
+<text x="700" y="398" text-anchor="middle" font-size="10.5" fill="#888780">게이트웨이는 판단하지 않음: 허가는 매니저, 기록 보관은 record-manager</text>
+
+<!-- 아래쪽 대상 -->
+<rect x="480" y="490" width="140" height="70" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+<text x="550" y="516" text-anchor="middle" font-size="12" font-weight="500" fill="#3C3489">process-manager</text>
+<text x="550" y="536" text-anchor="middle" font-size="10.5" fill="#534AB7">Manager API · 구독</text>
+<rect x="635" y="490" width="140" height="70" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8"/>
+<text x="705" y="516" text-anchor="middle" font-size="12" font-weight="500" fill="#085041">매니저(나중)</text>
+<text x="705" y="536" text-anchor="middle" font-size="10.5" fill="#0F6E56">운용 명령 받는 곳</text>
+<rect x="790" y="490" width="130" height="70" rx="10" fill="#FAECE7" stroke="#993C1D" stroke-width="0.8"/>
+<text x="855" y="516" text-anchor="middle" font-size="12" font-weight="500" fill="#712B13">워커</text>
+<text x="855" y="536" text-anchor="middle" font-size="10.5" fill="#993C1D">명령 · 스트림 소켓</text>
+
+<rect x="240" y="300" width="200" height="80" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+<text x="340" y="324" text-anchor="middle" font-size="12" fill="#444441">파일 · 보드 읽기</text>
+<text x="340" y="344" text-anchor="middle" font-size="10.5" fill="#5F5E5A">ui/web · 워커 패널(nginx)</text>
+<text x="340" y="360" text-anchor="middle" font-size="10.5" fill="#5F5E5A">로그 · 기록 · /proc(게이트웨이)</text>
+
+<!-- 화살표 -->
+<g fill="none" stroke="#444441" stroke-width="1.2">
+<line x1="200" y1="100" x2="240" y2="100" marker-start="url(#a)" marker-end="url(#a)"/>
+<line x1="440" y1="120" x2="500" y2="120" marker-start="url(#a)" marker-end="url(#a)"/>
+<line x1="340" y1="240" x2="340" y2="300" marker-end="url(#a)"/>
+<line x1="550" y1="430" x2="550" y2="490" marker-start="url(#a)" marker-end="url(#a)"/>
+<line x1="705" y1="430" x2="705" y2="490" marker-start="url(#a)" marker-end="url(#a)"/>
+<line x1="855" y1="430" x2="855" y2="490" marker-start="url(#a)" marker-end="url(#a)"/>
+</g>
+<g fill="none" stroke="#0F6E56" stroke-width="1.2">
+<line x1="595" y1="174" x2="595" y2="200" marker-start="url(#a)"/>
+<line x1="805" y1="174" x2="805" y2="200" marker-end="url(#a)"/>
+</g>
+<g font-size="10.5" fill="#5F5E5A">
+<text x="220" y="94" text-anchor="middle">요청</text>
+<text x="470" y="113" text-anchor="middle">/api</text>
+<text x="470" y="139" text-anchor="middle">Unix 소켓</text>
+<text x="346" y="275">파일</text>
+<text x="602" y="190">SSE</text>
+<text x="812" y="190">기록</text>
+</g>
+
+<!-- 범례·규칙 -->
+<g font-size="11" fill="#444441">
+<text x="20" y="590" font-weight="500">규칙</text>
+<text x="20" y="608">화면 하나를 위한 전용 기능을 게이트웨이에 넣지 않는다(일반 중계만). 지금 REST 경로는 그대로(화면 · DURU_ui가 안 바뀜).</text>
+<text x="20" y="626">바깥에 열린 것은 nginx 하나. 게이트웨이 · process-manager · 워커는 보드 안 Unix 소켓만.</text>
+</g>
+</svg>

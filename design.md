@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.48 |
+| 문서 버전 | 0.49 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -329,6 +329,8 @@ workers/<워커>/workspace/
 예전 `<데이터>/config/workers.json`이 남아 있고 워커 폴더에 설정 파일이 없으면, Manager가 처음 시작할 때 그 값을 워커 폴더(`presets/default.json`, `config.json`)로 옮기고 `workers.json.moved`로 이름을 바꾼다. 옮긴 파일은 사용자가 커밋한다.
 
 ### 6.4 REST
+
+**nginx + C++ 게이트웨이로 다시 만든다(0.49, 설계 `docs/gateway.md`):** 바깥은 nginx 하나(화면 파일·HTTPS·제한), 게이트웨이는 보드 안 Unix 소켓만 엶. 이 절의 경로·상태 코드는 그대로, 더하는 일: 신분 확인(세션·토큰, 역할 viewer·operator·maintainer, 개발 보드 기본 끔), 운용/정비 모드, 명령 기록, Manager 구독 캐시. 옮기는 동안 시작 셸이 고른다.
 
 별도 프로세스(늘 띄움), 패키지 `workspace_rest`, 무상태. 바인딩 `WORKSPACE_REST_BIND:WORKSPACE_REST_PORT`(기본 `0.0.0.0:8080`).
 
@@ -1528,6 +1530,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |
 | 0.48 | process-manager: 시작 셸 기본을 C++로(되돌리기 `WORKSPACE_MANAGER_IMPL=python`·`config/manager_impl`), pm.res가 그룹 pid를 기억해 /proc 전체 훑기를 5초마다로(보드 CPU 대부분이 여기서 나왔음) |
 | 0.47 | **process-manager C++ 판 구현**(`manager/` CMake: core·src·lib 사본·단위 시험). 수락 시험 `manager/test_manager_accept.py`(15) 새로, `test_manager_api.py`는 `MANAGER_BIN`으로 판을 고름. 시작 셸 `WORKSPACE_MANAGER_IMPL=cpp`·`config/manager_impl`(기본 Python), `dev/release-worker.sh manager`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/process-manager.md` 6.1 |
 | 0.46 | **process-manager 설계 확정**(`docs/process-manager.md`, 그림 `docs/process-manager.svg`): 지금 Manager를 C++로(하는 일·API·파일 그대로, 수락 시험 = 지금 Python 시험), 제어 루프 + `pm.pub`·`pm.store`·`pm.res`, 연결 선언·명령 소유·권한 표, 워커는 process-manager에 기대지 않음(설정 값이 없으면 단독 실행 기본값), 막기 단계 `command_guard` off → warn → enforce(6단계) |
