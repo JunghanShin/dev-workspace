@@ -82,7 +82,7 @@ OWNER_GID="$(id -g "$OWNER")"
 if [[ "$OWNER_UID" -eq 0 ]]; then
   log "warning: workspace is owned by root; programs will run as root"
 fi
-# 제품 묶음은 Manager·게이트웨이가 C++ 실행 파일, logger·시스템 모니터가 컴파일된 실행 파일(app/)이라 python3가 필요 없다
+# 제품 묶음은 Manager·게이트웨이·시스템 모니터가 C++ 실행 파일, logger가 컴파일된 실행 파일(app/)이라 python3가 필요 없다
 [[ -d "$ROOT/app" || -x "$PY" ]] || { log "python3 not found: $PY"; exit 1; }
 
 # ---- 1. 데이터 폴더 -----------------------------------------------------------------

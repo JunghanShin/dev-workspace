@@ -1,5 +1,5 @@
 """워커 폴더 구조 검사(표준 라이브러리만, 워크스페이스 design.md 3장 "단계"와 6.6). 템플릿과 모든 워커를 본다:
-  - 공용 라이브러리 사본(lib/lib*)이 틀(workers/_template)의 원본과 같은지
+  - 공용 라이브러리 사본(lib/lib*)이 틀(workers/_template)의 원본과 같은지(틀로 만든 플랫폼 블록 monitor/ 포함)
   - 폴더 구성: 워커(CMake·README·design·main·workspace/), 모듈(core/include·include·src·test·README·schema)
   - 층 규칙: 모듈 코어(① 유닛)가 libworker를 쓰지 않는지(쓰면 실패)
   - 패널 id 겹침, Python 도우미 사본
@@ -28,6 +28,8 @@ TEMPLATE = os.path.join(ROOT, "workers", "_template")
 # 공용 라이브러리 = 틀에 있는 lib/lib*(원본). 워커는 쓰는 것만 사본으로 둔다. 틀의 예제 모듈(source 등)은 출발점이라 비교하지 않는다
 COPIED_LIBS = tuple(sorted(os.path.basename(d) for d in glob.glob(os.path.join(TEMPLATE, "lib", "lib*")) if os.path.isdir(d)))
 SKIP_DIRS = {"build", ".git", "__pycache__"}
+# 워커 틀로 만든 플랫폼 블록(워커 폴더가 아님): 시스템 모니터 sysmon(C++). 사본 라이브러리·코어 층 규칙만 같이 본다
+PLATFORM_WORKERS = (os.path.join(ROOT, "monitor"),)
 
 
 def workers(with_template=False):
@@ -64,7 +66,7 @@ def files(top):
 
 class LibCopies(unittest.TestCase):
     def test_copies_match_template(self):
-        for w in workers():
+        for w in workers() + list(PLATFORM_WORKERS):
             for lib in COPIED_LIBS:
                 copy = os.path.join(w, "lib", lib)
                 if not os.path.isdir(copy):
@@ -105,13 +107,15 @@ class Layout(unittest.TestCase):
 class Layers(unittest.TestCase):
     def test_core_does_not_use_libworker(self):
         """① 유닛(모듈 코어)은 libworker를 모른다: 다른 프로그램에 core/만 가져가 쓸 수 있어야 한다(design.md 6.6.4)"""
-        for w in workers(with_template=True):
-            for m in modules(w):
-                for f in sources(os.path.join(m, "core")):
-                    text = read(f)
-                    with self.subTest(file=os.path.relpath(f, ROOT)):
-                        self.assertNotIn('#include "worker/', text)
-                        self.assertNotIn("#include <worker/", text)
+        platform = [d for w in PLATFORM_WORKERS for d in sorted(glob.glob(os.path.join(w, "lib", "*")))
+                    if os.path.isdir(os.path.join(d, "core"))]  # 플랫폼 블록 모듈(schema.json 없음)
+        self.assertTrue(platform, "monitor/lib/<모듈>/core")
+        for m in [m for w in workers(with_template=True) for m in modules(w)] + platform:
+            for f in sources(os.path.join(m, "core")):
+                text = read(f)
+                with self.subTest(file=os.path.relpath(f, ROOT)):
+                    self.assertNotIn('#include "worker/', text)
+                    self.assertNotIn("#include <worker/", text)
 
 
 class Compliance(unittest.TestCase):
@@ -401,7 +405,7 @@ class PythonHelper(unittest.TestCase):
         orig = os.path.join(TEMPLATE, "python", "workspace_worker.py")
         copies = [p for p in glob.glob(os.path.join(ROOT, "**", "workspace_worker.py"), recursive=True)
                   if os.path.abspath(p) != os.path.abspath(orig) and "build" not in p.split(os.sep)]
-        self.assertTrue(copies)
+        # 사본이 없어도 된다(시스템 모니터가 C++로 바뀌어 지금은 Python 워커가 없음)
         for p in copies:
             with self.subTest(copy=os.path.relpath(p, ROOT)):
                 self.assertTrue(filecmp.cmp(orig, p, shallow=False))

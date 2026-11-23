@@ -1,6 +1,11 @@
 {
   "sysmon": {
-    "exec": ["/usr/bin/python3", "@WORKSPACE_ROOT@/monitor/sysmon.py"],
+    "exec": ["@WORKSPACE_ROOT@/monitor/bin/sysmon"],
+    "exec_candidates": [
+      "@WORKSPACE_ROOT@/monitor/build/sysmon",
+      "@WORKSPACE_ROOT@/monitor/build/jetson/install/bin/sysmon",
+      "@WORKSPACE_ROOT@/monitor/bin/sysmon"
+    ],
     "start_timeout_sec": 10,
     "watchdog_sec": 5,
     "stop_timeout_sec": 3,

@@ -6,7 +6,7 @@
 #
 # Python: manager/test_schema.py(스키마·프리셋), dev/test_workers.py(워커 폴더 구성·사본 라이브러리·패널 id·Python 도우미·정의 파일 형식), dev/test_io_output.py(빌드 뒤 출력 대조),
 # Python 도구: workers/_template/python/test_comm.py(Python ↔ C++ 워커 통신, 틀 빌드 뒤)
-# 빌드: workers/_template + workers/*/ 마다 cmake → ctest, 결과는 /tmp/workspace-check/<저장소 폴더>/<워커>-<ON|OFF>
+# 빌드: process-manager·게이트웨이·시스템 모니터(monitor), workers/_template + workers/*/ 마다 cmake → ctest, 결과는 /tmp/workspace-check/<저장소 폴더>/<워커>-<ON|OFF>
 # ThreadSanitizer(제공 도구, design.md 6.6.9 ③): libworker·libframebus 단위·스트레스 시험, 템플릿과 모든 워커의 시험을 TSan 빌드로.
 #   워커가 빼려면 그 시험에 CTest 라벨 no_tsan(set_tests_properties(<시험> PROPERTIES LABELS no_tsan))
 # Jetson(크로스 빌드 + QEMU) 시험은 확정할 때 워커마다 jetson-build --test (design.md 11.3)
@@ -68,6 +68,20 @@ if (( ! QUICK )); then
     grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null
     fail+=("gateway-cpp build")
   fi
+  # 시스템 모니터 sysmon(C++, monitor/design.md): 빌드 → 코어 유닛 시험(tegrastats 줄·가짜 /proc·/sys) + 통합 시험(가짜 tegrastats·수집기).
+  # 기본 탑재 워커라 워크스페이스 연동(ON) 빌드만(통합 시험이 heartbeat를 받는다)
+  step "monitor sysmon (C++)"
+  b="$OUT/monitor"
+  if cmake -S "$ROOT/monitor" -B "$b" -DCMAKE_BUILD_TYPE=Release >"$b.cfg.log" 2>&1 \
+     && cmake --build "$b" -j"$(nproc)" >"$b.build.log" 2>&1; then
+    if out="$(cd "$b" && ctest --output-on-failure 2>&1)"; then rc=0; else rc=$?; fi
+    echo "$out" | grep -E "tests passed|tests failed|FAIL" | head -5
+    (( rc == 0 )) || fail+=("monitor test")
+  else
+    echo "build failed: $b.build.log"
+    grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null
+    fail+=("monitor build")
+  fi
   for w in "$ROOT"/workers/*/; do  # _template 포함
     w="${w%/}"
     name="$(basename "$w")"
@@ -98,7 +112,7 @@ if (( ! QUICK )); then
   # 최신 커널의 넓은 주소 무작위화와 TSan이 맞지 않아 setarch -R(그 실행만 무작위화 끔)로 돌린다
   tsan="-fsanitize=thread -g -O1"
   # libworker 단위 시험(스레드·큐·단계·잠금)과 템플릿·모든 워커의 시험(연동 ON). 경고가 하나라도 있으면 실패
-  for target in "$ROOT/workers/_template/lib/libworker" "$ROOT/manager" "$ROOT/gateway" "$ROOT"/workers/*/; do
+  for target in "$ROOT/workers/_template/lib/libworker" "$ROOT/manager" "$ROOT/gateway" "$ROOT/monitor" "$ROOT"/workers/*/; do
     target="${target%/}"
     [[ -f "$target/CMakeLists.txt" ]] || continue
     name="$(basename "$target")"

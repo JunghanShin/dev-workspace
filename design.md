@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.59 |
+| 문서 버전 | 0.60 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -947,7 +947,7 @@ Manager /proc 측정 ───────┘                                   
 | 워커 지표 | heartbeat의 1초 지표(`<모듈>_<이름>`) |
 | 워커별 자원 | Manager가 1초마다 프로세스 그룹 CPU·메모리·프로세스·스레드 수(8.2 `resources`) |
 | 워커 내부 | REST `/workers/{id}/tasks`: 프로세스·스레드와 스레드별 CPU, 스레드 우선순위(정책·값)·CPU 고정(시스템 모니터 워커 보기를 열었을 때만 측정). 루프 시간·안전망과 (단계 도구를 쓰면) 단계·큐는 워커 `get_status`의 `runtime`(6.6.9) |
-| 시스템 모니터 | 기본 탑재 워커 `system-monitor`(`monitor/sysmon.py`, Python). root 수집기가 쓴 tegrastats 한 줄 → CPU·GPU·메모리·온도·전력·전용 HW 지표. tegrastats가 없으면(PC) 사용 안 함 |
+| 시스템 모니터 | 기본 탑재 워커 `system-monitor`(`monitor/`, C++ libworker 워커 `sysmon`). root 수집기가 쓴 tegrastats 한 줄 → CPU·GPU·메모리·온도·전력·전용 HW 지표. tegrastats가 없으면(PC) 사용 안 함 |
 | `workspace-logger` | 상태·지표·명령 이력을 같은 시간축으로 부팅 단위 파일에 기록 |
 | 지난 지표 | `logger/workspace_history.py`가 기록을 기간·칸 평균으로 줄임(REST `/history`, 화면 그래프·CSV) |
 
@@ -1118,7 +1118,7 @@ workers/<워커>/workspace/panel/       워커 패널(id = panel.json "id")
 
 ## 9. 프로세스 계약 (워크스페이스 ↔ 워커)
 
-워커가 무슨 언어로 무엇을 하든 Manager가 보는 것은 이 장뿐이다. 템플릿의 호스트(libworker)가 모두 구현한다. Python 워커는 직접 구현한다(예: `monitor/sysmon.py`).
+워커가 무슨 언어로 무엇을 하든 Manager가 보는 것은 이 장뿐이다. 템플릿의 호스트(libworker)가 모두 구현한다. Python 워커는 도우미(`workers/_template/python/workspace_worker.py`)를 복사해 쓴다.
 
 ### 9.1 Spawn
 
@@ -1549,6 +1549,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.57 | **입력 연결 구현**(6.6.7.3~6.6.7.5): process-manager가 계약(uses·provides)·연결 선언(`connections`)·프리셋 `inputs`로 입력을 풀고(선언 → 자동 → 설정), 검사(역할·버전·주제·명령·데이터)한 결과를 `run/inputs/<id>.json` + `WORKSPACE_INPUTS_FILE`로 넣음, 바뀌면 그 워커만 다시 시작, 워커 상태 `inputs`. libworker 0.11 `host.uses`·`input_link`(지표 `inputs_<입력>_link`, 공통 정의 1.2 `inputs`). 템플릿 `peer` 모듈이 입력 `upstream`으로. 자동 상태 화면에 입력 연결 |
 | 0.58 | **Python 판 process-manager 삭제**: 시작 셸은 C++ 실행 파일만(없으면 끝냄, `manager_impl` 없어짐), `manager/workspace_manager/`·`test_notify_race.py` 삭제, 수락 시험은 C++ 전용(`MANAGER_BIN` 없으면 건너뜀), 저장소 설정 점검 `test_schema.py`는 기준 코드 `manager/reference_schema.py`로 |
 | 0.59 | **연결 화면**(6.6.7.4): 공용 패널 `connections`(설정 묶음): 연결 그림, 입력마다 상대 고르기(자동·내보내는 워커, 저장은 `PUT /connections`, 개발 모드에서만), 명령하는 곳 보기. 서버 기능은 더하지 않음(있는 경로만) |
+| 0.60 | **시스템 모니터 C++**(`monitor/`, 설계 `monitor/design.md`): Python sysmon을 libworker 워커로(코어 `lib/sysmon/core`는 libworker 없음, tegrastats 해석은 옛 정규식 그대로·같은 입력 3008줄에서 출력 글자까지 같음). 확정 실행 파일 `monitor/bin/sysmon`(`dev/release-worker.sh monitor`), 제품 묶음은 Nuitka 대신 이 실행 파일. 지표 이름·뜻 그대로. 설정은 `{"sysmon": {"interval_ms"}}`(옛 맨 위 `interval_ms`도 읽음). logger는 record-manager 때 정리 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

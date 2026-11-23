@@ -282,7 +282,7 @@ Manager가 SIGHUP을 보내면 호스트가 설정 파일을 다시 읽어 바�
 
 ## Python 워커
 
-계약(design.md 9장)은 Python으로도 지킬 수 있다. `python/workspace_worker.py`를 워커 폴더에 복사해 `load_config`, `Watchdog`, `Heartbeat`(`ready()`, `watchdog(progress, metrics)`), `StopFlag`를 쓴다(예: `monitor/sysmon.py`). 사본이 원본과 같은지 `dev/test_workers.py`가 확인한다.
+계약(design.md 9장)은 Python으로도 지킬 수 있다. `python/workspace_worker.py`를 워커 폴더에 복사해 `load_config`, `Watchdog`, `Heartbeat`(`ready()`, `watchdog(progress, metrics)`), `StopFlag`를 쓴다. 사본이 원본과 같은지 `dev/test_workers.py`가 확인한다.
 
 워커 간 통신(design.md 6.6.7)도 C++과 같은 통로·같은 이름으로 쓴다. 형식이 언어와 무관해서 C++ 워커와 그대로 주고받는다:
 

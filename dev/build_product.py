@@ -1,8 +1,8 @@
 """제품 묶음 만들기(워크스페이스 design.md 11.4). 표준 라이브러리만.
 
 워크스페이스(개발 작업대)에서 개발 부품을 걷어내고 장비에 올릴 결과물 하나를 만든다:
-  넣음: 확정 워커 실행 파일(workspace/bin, 소스와 같은지 확인), Manager·REST·logger·시스템 모니터(aarch64 네이티브로 컴파일,
-        소스 없음), 잠근 설정(워커마다 고른 프리셋 하나), 프로필, 시작 셸, 제품 설치 스크립트(서비스·되돌리기),
+  넣음: 확정 워커 실행 파일(workspace/bin, 소스와 같은지 확인), Manager·게이트웨이·시스템 모니터(C++ 확정 실행 파일),
+        logger(aarch64 네이티브로 컴파일, 소스 없음), 잠근 설정(워커마다 고른 프리셋 하나), 프로필, 시작 셸, 제품 설치 스크립트(서비스·되돌리기),
         기본 화면(셸 + 시스템 모니터 + 워커 패널, product.json ui=true일 때), 전원 모드(설치가 맞춤, power_mode)
   뺌:   소스·깃·문서·배포 키·빌드 도구, 가짜 장치(*-sim, libfake_*), 다른 프리셋, 개발 빌드 후보(build/),
         진단·설정 화면(로그·명령 이력·워크스페이스)
@@ -36,11 +36,11 @@ import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 APPS = {  # app/<모듈>/<모듈>: 시작 셸이 python3 -m <모듈> 대신 쓴다(workspace-start.sh run_as_owner)
-    # Manager·게이트웨이는 C++ 확정 실행 파일(manager/bin, gateway/bin)을 그대로 넣는다(PLATFORM_BINS)
+    # Manager·게이트웨이·시스템 모니터는 C++ 확정 실행 파일(manager/bin, gateway/bin, monitor/bin)을 그대로 넣는다(PLATFORM_BINS)
     "workspace_logger": {"src": "logger", "pkg": "workspace_logger", "entry": "from workspace_logger.__main__ import main"},
-    "sysmon": {"src": "monitor", "pkg": None, "entry": "from sysmon import main"},
 }
-PLATFORM_BINS = {"manager/bin": ["process-manager", "BUILD"], "gateway/bin": ["gateway", "BUILD"]}  # C++ 확정 실행 파일(release-worker.sh)
+PLATFORM_BINS = {"manager/bin": ["process-manager", "BUILD"], "gateway/bin": ["gateway", "BUILD"],
+                 "monitor/bin": ["sysmon", "BUILD"]}  # C++ 확정 실행 파일(release-worker.sh)
 DEV_ONLY = ("-sim", "libfake_")  # 가짜 장치 부품(제품에서 뺌)
 DEPS = "$HOME/.cache/workspace-product/nuitka-deps"  # 컴파일 도구(Nuitka) 받아 두는 곳(컴파일하는 계정의 홈)
 MIN_FREE_GB = 1.5
@@ -238,13 +238,14 @@ def stage_tree(product, info, stage, version):
             common = os.path.join(stage, "workers", "_template", "io", "common.json")
             os.makedirs(os.path.dirname(common), exist_ok=True)
             shutil.copy2(os.path.join(ROOT, "workers", "_template", "io", "common.json"), common)
-    # 시스템 모니터(기본 탑재): 컴파일한 실행 파일로
+    # 시스템 모니터(기본 탑재): C++ 확정 실행 파일(monitor/bin/sysmon, 위 PLATFORM_BINS로 들어감). 개발 빌드 후보는 뺀다
     if product.get("system_monitor", True):
         mon = os.path.join(stage, "monitor")
-        os.makedirs(mon)
+        os.makedirs(mon, exist_ok=True)
         t = json.load(open(os.path.join(ROOT, "monitor", "worker-types.json"), encoding="utf-8"))
         for v in t.values():
-            v["exec"] = ["@WORKSPACE_ROOT@/app/sysmon/sysmon"]
+            v["exec"] = ["@WORKSPACE_ROOT@/monitor/bin/sysmon"]
+            v.pop("exec_candidates", None)
         json.dump(t, open(os.path.join(mon, "worker-types.json"), "w", encoding="utf-8"), indent=2, ensure_ascii=False)
         for f in ("config.json", "presets"):
             cp(os.path.join("monitor", f))
