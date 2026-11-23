@@ -1,6 +1,6 @@
 # monitor 워커 실행 파일(Jetson aarch64). dev/release-worker.sh가 만든다. 손으로 고치지 않는다
-source_commit: 57f6bee
+source_commit: c5eef60
 build_env: jetson-dev 2.1
-built: 2026-11-23 19:14
+built: 2026-11-23 21:53
 sha256:
-  40f824f6d1ecb67d0b40e71c513693e5749ddd262f9a82609acea25fdca30bc2  sysmon
+  3796fbad6fb0163ae5b122657af319e1f39a683c7e52e652335a2558182ade58  sysmon
