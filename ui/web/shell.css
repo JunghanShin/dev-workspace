@@ -234,6 +234,8 @@ dialog.dlg::backdrop { background: rgba(0, 0, 0, .55); }
 .brand-name { font-size: 20px; font-weight: 700; letter-spacing: .06em; }
 .brand-sub { font-size: 13px; color: var(--muted); padding-left: 10px; border-left: 1px solid var(--line-2); }
 #clock { font-size: 15px; color: var(--muted); min-width: 72px; text-align: right; }
+#mode:empty, #who:empty { display: none; }
+#who { display: inline-flex; align-items: center; gap: 6px; }  /* 사용자·역할 배지 + 로그아웃 */
 #body { height: calc(100% - 56px); }
 #nav { width: 236px; padding: 6px 0 16px; }
 #nav .group { font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--faint); padding: 18px 20px 6px; }

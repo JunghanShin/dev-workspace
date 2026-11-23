@@ -151,12 +151,17 @@ class FakeManager(UnixServer):
 
     def __init__(self, path):
         self.requests = []
+        self.subs = 0      # 구독 시도(C++ 게이트웨이의 캐시 gw.mgr). 이 가짜는 구독을 모른다고 답해 캐시가 쓰이지 않는다
         self.mode = None   # None | "slow" | "garbage" | "close" | "huge"
         super().__init__(path)
 
     def handle(self, c):
         line = self.read_line(c)
         req = json.loads(line)
+        if req.get("op") == "subscribe":  # requests에 넣지 않음(요청 모양 시험이 1초마다 오는 재시도와 섞이지 않게)
+            self.subs += 1
+            c.sendall(b'{"ok": false, "error": {"code": "bad_request", "message": "unknown op subscribe"}}\n')
+            return
         self.requests.append(req)
         mode = self.mode
         if mode == "slow":
@@ -316,7 +321,8 @@ class Server:
             "WORKSPACE_LOG_LEVEL": "WARNING", "WORKSPACE_UI_TITLE": "Test WS", "PYTHONPATH": HERE,
         })
         for k in ("WORKSPACE_REST_TOKEN", "WORKSPACE_UI", "WORKSPACE_PRODUCT", "WORKSPACE_UI_DIR",
-                  "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_GATEWAY_SOCKET", "WORKSPACE_GATEWAY_THREADS", "WORKSPACE_GATEWAY_TCP"):
+                  "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_GATEWAY_SOCKET", "WORKSPACE_GATEWAY_THREADS", "WORKSPACE_GATEWAY_TCP",
+                  "WORKSPACE_AUTH", "WORKSPACE_GATEWAY_CACHE"):
             e.pop(k, None)
         e.update(env or {})
         cmd = [REST_BIN] if REST_BIN and not python else [sys.executable, "-m", "workspace_rest"]
@@ -618,6 +624,163 @@ def oracle(module):
         return workspace_history
     import importlib
     return importlib.import_module("workspace_rest." + module)
+
+
+# ---- 신분 확인 도우미(C++ 게이트웨이 전용, docs/gateway.md 3장) ---------------------------------------
+
+PASSWORDS = {"v1": "viewer-pass-1", "o1": "operator-pass-1", "m1": "maint-pass-1"}
+ROLES = {"v1": "viewer", "o1": "operator", "m1": "maintainer"}
+AUTH_USERS_TOKEN = {}  # 데이터 폴더 → m1의 토큰 "ci"(원문, 시험만 앎)
+
+
+def slurp(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def gw_cli(data, *args, stdin=None):
+    """게이트웨이 설정 명령(gateway user …/token …). 반복 수는 시험이 빨리 돌게 줄인다"""
+    env = dict(os.environ, WORKSPACE_DATA=data, WORKSPACE_AUTH_ITERATIONS="1000")
+    return subprocess.run([REST_BIN] + list(args), input=stdin, capture_output=True, text=True, env=env, timeout=60)
+
+
+def add_user(data, name, role, password):
+    r = gw_cli(data, "user", "add", name, role, stdin="%s\n%s\n" % (password, password))
+    assert r.returncode == 0, r.stderr
+    return r
+
+
+def auth_data_dir():
+    """임시 데이터 폴더 + 사용자 v1·o1·m1 + m1의 토큰 ci"""
+    data = tempfile.mkdtemp(prefix="auth", dir=T["tmp"])
+    for name, pw in PASSWORDS.items():
+        add_user(data, name, ROLES[name], pw)
+    r = gw_cli(data, "token", "add", "m1", "ci")
+    assert r.returncode == 0, r.stderr
+    AUTH_USERS_TOKEN[data] = r.stdout.strip()
+    return data
+
+
+def auth_env(data, **extra):
+    env = {"WORKSPACE_DATA": data, "WORKSPACE_MANAGER_SOCKET": T["mgr"].path, "WORKSPACE_AUTH": "on"}
+    env.update(extra)
+    return env
+
+
+def users_count(srv):
+    """게이트웨이가 지금 들고 있는 사용자 수(/health?detail=1)"""
+    return srv.json("GET", "/health?detail=1")[1]["gateway"]["users"]["users"]
+
+
+def log_lines(data):
+    out = []
+    d = os.path.join(data, "records", "gateway")
+    for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        with open(os.path.join(d, name), encoding="utf-8") as f:
+            out += [json.loads(line) for line in f if line.strip()]
+    return out
+
+
+def log_text(data):
+    d = os.path.join(data, "records", "gateway")
+    text = ""
+    for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        with open(os.path.join(d, name), encoding="utf-8") as f:
+            text += f.read()
+    return text
+
+
+class Session:
+    """한 사용자(쿠키 세션 또는 토큰)로 요청"""
+
+    def __init__(self, srv, token=None):
+        self.srv, self.cookie, self.token = srv, None, token
+
+    def headers(self, extra=None):
+        h = dict(extra or {})
+        if self.cookie:
+            h["Cookie"] = "workspace_session=" + self.cookie
+        if self.token:
+            h["Authorization"] = "Bearer " + self.token
+        return h
+
+    def json(self, method, path, body=None, headers=None):
+        return self.srv.json(method, path, body, headers=self.headers(headers))
+
+    def login(self, name, password):
+        st, hdrs, data = self.srv.request("POST", "/api/auth/login", {"name": name, "password": password})
+        if st == 200:
+            cookie = hdrs["set-cookie"]
+            self.cookie = cookie.split(";", 1)[0].split("=", 1)[1]
+        return st, (json.loads(data) if data else None), hdrs
+
+
+class UnixHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, path, timeout=10):
+        super().__init__("localhost", timeout=timeout)
+        self.unix_path = path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(self.unix_path)
+
+
+def unix_json(path, method, target, body=None, headers=None):
+    conn = UnixHTTPConnection(path)
+    try:
+        conn.request(method, target, body=None if body is None else json.dumps(body).encode(), headers=headers or {})
+        r = conn.getresponse()
+        data = r.read()
+        return r.status, (json.loads(data) if data else None)
+    finally:
+        conn.close()
+
+
+class SubManager(UnixServer):
+    """구독을 아는 가짜 Manager(캐시 시험): 0.3 s마다 워커 전체 + system. stall이면 구독은 조용하고 요청은 3 s 늦음"""
+
+    def __init__(self, path):
+        self.workers = [{"id": "w2", "actual_state": "running", "metrics": {"도": 1.5}, "pid": 12},
+                        {"id": "w1", "actual_state": "stopped", "metrics": {}, "pid": None}]
+        self.system = {"clients": {"rest": "subscribed"}, "access_mode": "operation", "이름": "보드"}
+        self.stall = False
+        self.ops = []
+        self.lock = threading.Lock()
+        super().__init__(path)
+
+    def count(self, op):
+        with self.lock:
+            return sum(1 for r in self.ops if r.get("op") == op)
+
+    def handle(self, c):
+        req = json.loads(self.read_line(c))
+        op = req.get("op")
+        with self.lock:
+            self.ops.append(req)
+        send = lambda obj: c.sendall(json.dumps(obj, ensure_ascii=False).encode("utf-8") + b"\n")
+        if op == "subscribe":
+            send({"ok": True, "data": {"subscribed": ["system", "workers"]}})
+            while not self.stop:
+                if not self.stall:
+                    for w in self.workers:
+                        send({"event": "worker_status", "data": w})
+                    send({"event": "system", "data": self.system})
+                time.sleep(0.3)
+            return
+        if self.stall:
+            time.sleep(3.0)
+        if op == "list":
+            send({"ok": True, "data": self.workers})
+        elif op == "get":
+            hit = [w for w in self.workers if w["id"] == req.get("id")]
+            send({"ok": True, "data": hit[0]} if hit else {"ok": False, "error": {"code": "not_found", "message": "unknown"}})
+        elif op == "system":
+            send({"ok": True, "data": self.system})
+        elif op == "set_access_mode":
+            send({"ok": True, "data": {"access_mode": req.get("mode")}})
+        else:
+            send({"ok": True, "data": {"pong": True}})
 
 
 # ---- 시험 --------------------------------------------------------------------------------------
@@ -1265,15 +1428,21 @@ class Modes(unittest.TestCase):
             second.stop()
 
     def test_product_mode(self):
-        srv = Server({"WORKSPACE_PRODUCT": "1"}, name="product")
+        env, hdrs = {"WORKSPACE_PRODUCT": "1"}, {}
+        if REST_BIN:
+            # C++ 게이트웨이는 제품 모드면 신분 확인을 늘 켠다(docs/gateway.md 3장): 관리자 토큰으로 같은 것을 본다
+            data = auth_data_dir()
+            env.update(auth_env(data))
+            hdrs = {"Authorization": "Bearer " + AUTH_USERS_TOKEN[data]}
+        srv = Server(env, name="product")
         try:
             for method, path in (("GET", "/system/product-build"), ("POST", "/system/product-build"),
                                  ("GET", "/system/product-build/download"), ("DELETE", "/api/board/system/product-build/")):
-                st, obj, _ = srv.json(method, path)
+                st, obj, _ = srv.json(method, path, headers=hdrs)
                 self.assertEqual((st, obj), (404, {"error": {"code": "not_found", "message": "not available in product mode"}}))
-            st, obj, _ = srv.json("GET", "/api/ui")
+            st, obj, _ = srv.json("GET", "/api/ui", headers=hdrs)
             self.assertIs(obj["product"], True)
-            st, obj, _ = srv.json("GET", "/workers")
+            st, obj, _ = srv.json("GET", "/workers", headers=hdrs)
             self.assertEqual(st, 200)
         finally:
             srv.stop()
@@ -1486,6 +1655,402 @@ class GatewayOnly(unittest.TestCase):
             srv.stop()
         with self.assertRaises(RuntimeError):
             Server({"WORKSPACE_GATEWAY_TCP": "0"}, name="unixonly-bad", unix_only=os.path.join(T["tmp"], "never.sock"))
+
+
+# ---- 4단계: 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시 (C++ 게이트웨이만, docs/gateway.md 3장) ----
+
+UNAUTH = {"code": "unauthorized", "message": "login required (POST /api/auth/login or Authorization: Bearer <token>)"}
+
+
+@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(신분 확인)")
+class AuthOn(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.data = auth_data_dir()
+        cls.srv = Server(auth_env(cls.data), name="auth")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.stop()
+
+    def setUp(self):
+        T["mgr"].mode = None
+
+    def test_auth_off_unchanged(self):
+        """WORKSPACE_AUTH=off(기본): 지금처럼 누구나, me는 auth off·maintainer, 로그인은 400"""
+        srv = T["srv"]
+        st, obj, _ = srv.json("GET", "/api/auth/me")
+        self.assertEqual((st, obj), (200, {"auth": "off", "name": None, "role": "maintainer", "mode": "operation"}))
+        self.assertEqual(srv.json("GET", "/workers")[0], 200)
+        self.assertEqual(srv.json("POST", "/workers/w1/start")[0], 202)
+        st, obj, _ = srv.json("POST", "/api/auth/login", {"name": "m1", "password": "x"})
+        self.assertEqual((st, obj["error"]["code"]), (400, "bad_request"))
+        self.assertEqual(srv.json("POST", "/api/board/auth/logout")[0], 200)
+
+    def test_anonymous(self):
+        srv = self.srv
+        for method, path, code in (("GET", "/workers", 401), ("GET", "/api/board/system", 401), ("GET", "/api/ui", 401),
+                                   ("GET", "/api/panels", 401), ("GET", "/workers/s1/stream", 401),
+                                   ("POST", "/workers/w1/command", 401), ("POST", "/workers/w1/start", 401),
+                                   ("PUT", "/api/mode", 401), ("GET", "/health", 200), ("GET", "/api/board/health", 200),
+                                   ("GET", "/", 200), ("GET", "/kit.js", 200), ("GET", "/shell.css", 200)):
+            with self.subTest(method=method, path=path):
+                st, _, data = srv.request(method, path, {"cmd": "x"} if method == "POST" else None)
+                self.assertEqual(st, code)
+                if code == 401:
+                    self.assertEqual(json.loads(data), {"error": UNAUTH})
+        st, obj, _ = srv.json("GET", "/api/auth/me")
+        self.assertEqual((st, obj), (401, {"error": {"code": "unauthorized", "message": "login required"}, "auth": "on"}))
+
+    def test_login_logout(self):
+        s = Session(self.srv)
+        for name, pw in (("m1", "wrong-pass"), ("nobody", "maint-pass-1")):
+            st, obj, _ = s.login(name, pw)
+            self.assertEqual((st, obj["error"]["code"]), (401, "unauthorized"))
+        for body in ({"name": "m1"}, {"password": "x"}, [1], {"name": 1, "password": "x"}):
+            st, obj, _ = self.srv.json("POST", "/api/auth/login", body)
+            self.assertEqual(st, 400, body)
+        st, obj, hdrs = s.login("m1", PASSWORDS["m1"])
+        self.assertEqual((st, obj), (200, {"auth": "on", "name": "m1", "role": "maintainer", "mode": "operation"}))
+        cookie = hdrs["set-cookie"]
+        for part in ("HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=604800"):
+            self.assertIn(part, cookie)
+        self.assertEqual(len(s.cookie), 64)
+        st, obj, _ = s.json("GET", "/api/auth/me")
+        self.assertEqual((st, obj), (200, {"auth": "on", "name": "m1", "role": "maintainer", "mode": "operation", "via": "session"}))
+        self.assertEqual(s.json("GET", "/workers")[0], 200)
+        self.assertEqual(s.json("GET", "/api/board/workers/w1")[0], 200)
+        st, hdrs, _ = self.srv.request("POST", "/api/auth/logout", headers=s.headers())
+        self.assertEqual(st, 200)
+        self.assertIn("Max-Age=0", hdrs["set-cookie"])
+        self.assertEqual(s.json("GET", "/workers")[0], 401)  # 지운 세션은 다시 못 씀
+        self.assertEqual(Session(self.srv).json("GET", "/workers", headers={"Cookie": "workspace_session=" + "0" * 64})[0], 401)
+
+    def test_role_matrix(self):
+        sample = [  # (메서드, 경로, 본문, 필요한 권한)
+            ("GET", "/workers", None, "read"), ("GET", "/api/board/system", None, "read"), ("GET", "/api/mode", None, "read"),
+            ("GET", "/logs/workers/w1?lines=1", None, "read"), ("GET", "/api/panels", None, "read"),
+            ("GET", "/api/ui", None, "read"), ("GET", "/workers/w1/io", None, "read"),
+            ("POST", "/workers/w2/command", {"cmd": "x"}, "operate"), ("POST", "/api/board/workers/w2/command", {"cmd": "y"}, "operate"),
+            ("POST", "/workers/w1/start", None, "maintain"), ("POST", "/workers/w1/stop", None, "maintain"),
+            ("PUT", "/workers/w1/config", {"a": 1}, "maintain"), ("PUT", "/workers/w1/autostart", {"autostart": True}, "maintain"),
+            ("POST", "/workers/w1/presets", {"name": "x"}, "maintain"), ("PUT", "/api/mode", {"mode": "operation"}, "maintain"),
+            ("GET", "/system/product-build", None, "maintain"),
+        ]
+        allowed = {"viewer": {"read"}, "operator": {"read", "operate"}, "maintainer": {"read", "operate", "maintain"}}
+        for name, role in ROLES.items():
+            s = Session(self.srv)
+            self.assertEqual(s.login(name, PASSWORDS[name])[0], 200)
+            for method, path, body, need in sample:
+                with self.subTest(user=name, method=method, path=path):
+                    st, obj, _ = s.json(method, path, body)
+                    if need in allowed[role]:
+                        self.assertLess(st, 300, obj)
+                    else:
+                        self.assertEqual(st, 403, obj)
+                        self.assertEqual(obj["error"]["code"], "forbidden")
+                        self.assertIn("role " + role, obj["error"]["message"])
+
+    def test_bearer_token(self):
+        tok = AUTH_USERS_TOKEN[self.data]
+        s = Session(self.srv, token=tok)
+        st, obj, _ = s.json("GET", "/api/auth/me")
+        self.assertEqual((st, obj["name"], obj["role"], obj["via"]), (200, "m1", "maintainer", "token"))
+        self.assertEqual(s.json("POST", "/workers/w1/start")[0], 202)
+        self.assertEqual(self.srv.json("GET", "/workers?token=" + tok)[0], 200)  # EventSource용(GET만)
+        self.assertEqual(self.srv.json("POST", "/workers/w1/start?token=" + tok)[0], 401)
+        self.assertEqual(Session(self.srv, token=tok[:-1] + "x").json("GET", "/workers")[0], 401)
+        # 틀린 토큰이면 쿠키가 맞아도 익명(섞어 쓰지 않음)
+        c = Session(self.srv)
+        c.login("v1", PASSWORDS["v1"])
+        c.token = "nope"
+        self.assertEqual(c.json("GET", "/workers")[0], 401)
+        # 다른 토큰을 만들고 지우면 다시 시작하지 않아도 바로(1 s 안팎) 거절
+        r = gw_cli(self.data, "token", "add", "o1", "tmp")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        t2 = r.stdout.strip()
+        self.assertEqual(len(t2), 64)
+        self.assertNotIn(t2, slurp(os.path.join(self.data, "config", "users.json")))  # 파일에는 해시만
+        s2 = Session(self.srv, token=t2)
+        self.assertTrue(wait_for(lambda: s2.json("GET", "/workers")[0] == 200, 5))
+        self.assertEqual(s2.json("POST", "/workers/w1/start")[0], 403)  # o1은 operator
+        self.assertEqual(gw_cli(self.data, "token", "del", "o1", "tmp").returncode, 0)
+        self.assertTrue(wait_for(lambda: s2.json("GET", "/workers")[0] == 401, 5))
+        self.assertEqual(s.json("GET", "/workers")[0], 200)  # 다른 토큰은 그대로
+
+    def test_users_file_reload(self):
+        """사용자 파일을 바꾸면 다시 시작하지 않아도 반영: 새 사용자, 비밀번호 바꿈·지움은 그 세션을 끝냄"""
+        # 다시 읽었는지는 /health?detail=1의 사용자 수로 본다(로그인을 되풀이하면 실패 제한에 걸림)
+        n = users_count(self.srv)
+        add_user(self.data, "late", "viewer", "late-pass-1")
+        self.assertTrue(wait_for(lambda: users_count(self.srv) == n + 1, 5))
+        s = Session(self.srv)
+        self.assertEqual(s.login("late", "late-pass-1")[0], 200)
+        self.assertEqual(s.json("GET", "/workers")[0], 200)
+        r = gw_cli(self.data, "user", "passwd", "late", stdin="late-pass-2\nlate-pass-2\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(wait_for(lambda: s.json("GET", "/workers")[0] == 401, 5))
+        self.assertEqual(Session(self.srv).login("late", "late-pass-1")[0], 401)
+        s2 = Session(self.srv)
+        self.assertEqual(s2.login("late", "late-pass-2")[0], 200)
+        self.assertEqual(gw_cli(self.data, "user", "del", "late").returncode, 0)
+        self.assertTrue(wait_for(lambda: s2.json("GET", "/workers")[0] == 401, 5))
+        self.assertEqual(users_count(self.srv), n)
+        # 설정 명령의 오류: 짧은 비밀번호, 다른 두 번, 있는 이름, 없는 역할
+        for args, stdin in ((("user", "add", "x1", "viewer"), "short\nshort\n"), (("user", "add", "x1", "viewer"), "abcdefgh1\nabcdefgh2\n"),
+                            (("user", "add", "m1", "viewer"), "abcdefgh1\nabcdefgh1\n"), (("user", "add", "x1", "admin"), "abcdefgh1\nabcdefgh1\n"),
+                            (("user", "del", "nobody"), None), (("token", "add", "nobody", "t"), None)):
+            r = gw_cli(self.data, *args, stdin=stdin)
+            self.assertEqual(r.returncode, 1, (args, r.stdout, r.stderr))
+        self.assertEqual(gw_cli(self.data, "user").returncode, 2)
+        r = gw_cli(self.data, "user", "list")
+        self.assertIn("m1\tmaintainer\tpassword\ttokens: ci", r.stdout)
+        users = json.loads(slurp(os.path.join(self.data, "config", "users.json")))
+        self.assertEqual(os.stat(os.path.join(self.data, "config", "users.json")).st_mode & 0o777, 0o600)
+        m1 = [u for u in users["users"] if u["name"] == "m1"][0]
+        self.assertTrue(m1["password_hash"].startswith("pbkdf2-sha256$1000$"))
+        self.assertNotIn(PASSWORDS["m1"], json.dumps(users))
+
+    def test_default_iterations(self):
+        """반복 수를 정하지 않으면 200000(docs/gateway.md 3장)"""
+        data = tempfile.mkdtemp(prefix="iter", dir=T["tmp"])
+        env = dict(os.environ, WORKSPACE_DATA=data)
+        env.pop("WORKSPACE_AUTH_ITERATIONS", None)
+        r = subprocess.run([REST_BIN, "user", "add", "a1", "viewer"], input="pass-word-1\npass-word-1\n",
+                           capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        h = json.loads(slurp(os.path.join(data, "config", "users.json")))["users"][0]["password_hash"]
+        self.assertTrue(h.startswith("pbkdf2-sha256$200000$"), h)
+
+
+@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(신분 확인)")
+class AuthLimits(unittest.TestCase):
+    def test_rate_limit(self):
+        """주소마다 5번 틀리면 30 s 막힘. X-Forwarded-For는 nginx 소켓(Unix)으로 온 것만 믿는다"""
+        data = auth_data_dir()
+        sock = os.path.join(data, "gw.sock")
+        srv = Server(auth_env(data, WORKSPACE_GATEWAY_SOCKET=sock), name="ratelimit")
+        try:
+            for i in range(5):
+                st, obj, _ = Session(srv).login("o1", "wrong-%d" % i)
+                self.assertEqual(st, 401)
+            st, obj, hdrs = Session(srv).login("o1", PASSWORDS["o1"])
+            self.assertEqual((st, obj["error"]["code"]), (429, "too_many_requests"))
+            self.assertTrue(1 <= int(hdrs["retry-after"]) <= 30)
+            # TCP로 온 X-Forwarded-For는 무시(직접 붙은 쪽이 꾸밀 수 있음)
+            st, _, _ = srv.request("POST", "/api/auth/login", {"name": "o1", "password": PASSWORDS["o1"]},
+                                   headers={"X-Forwarded-For": "10.1.2.3"})
+            self.assertEqual(st, 429)
+            # nginx(Unix 소켓) 뒤의 다른 주소는 막히지 않음, 같은 주소는 막힘
+            self.assertTrue(wait_for(lambda: os.path.exists(sock), 5))
+            body = {"name": "o1", "password": PASSWORDS["o1"]}
+            self.assertEqual(unix_json(sock, "POST", "/api/auth/login", body, {"X-Forwarded-For": "10.1.2.3"})[0], 200)
+            for i in range(5):
+                unix_json(sock, "POST", "/api/auth/login", {"name": "o1", "password": "bad"}, {"X-Forwarded-For": "10.9.9.9"})
+            self.assertEqual(unix_json(sock, "POST", "/api/auth/login", body, {"X-Forwarded-For": "10.9.9.9"})[0], 429)
+            self.assertEqual(unix_json(sock, "POST", "/api/auth/login", body, {"X-Forwarded-For": "10.1.2.4"})[0], 200)
+        finally:
+            srv.stop()
+        lines = log_lines(data)
+        self.assertIn("10.9.9.9", {l["remote"] for l in lines})
+        self.assertIn("127.0.0.1", {l["remote"] for l in lines})
+
+    def test_product_forces_auth(self):
+        """제품 모드: WORKSPACE_AUTH=off여도 켬. 사용자 파일이 없으면 /health 말고 모두 503, 사용자를 넣으면 다시 시작 없이 열림"""
+        data = tempfile.mkdtemp(prefix="prod", dir=T["tmp"])
+        srv = Server(auth_env(data, WORKSPACE_PRODUCT="1", WORKSPACE_AUTH="off", WORKSPACE_LOG_LEVEL="INFO"), name="prodauth")
+        try:
+            self.assertEqual(srv.json("GET", "/health")[0], 200)
+            self.assertEqual(srv.json("GET", "/api/board/health")[0], 200)
+            for method, path in (("GET", "/workers"), ("GET", "/"), ("GET", "/kit.js"), ("GET", "/api/auth/me"),
+                                 ("POST", "/api/auth/login"), ("PUT", "/api/mode")):
+                with self.subTest(path=path):
+                    st, obj, _ = srv.json(method, path)
+                    self.assertEqual((st, obj["error"]["code"]), (503, "unavailable"))
+            log = slurp(srv.log_path)
+            self.assertIn("authentication forced on", log)
+            self.assertIn("no users in", log)
+            add_user(data, "m1", "maintainer", PASSWORDS["m1"])
+            self.assertTrue(wait_for(lambda: users_count(srv) == 1, 5))
+            s = Session(srv)
+            self.assertEqual(s.login("m1", PASSWORDS["m1"])[0], 200)
+            self.assertEqual(s.json("GET", "/workers")[0], 200)
+            self.assertEqual(srv.json("GET", "/workers")[0], 401)
+        finally:
+            srv.stop()
+
+
+@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(운용/정비 모드)")
+class AccessMode(unittest.TestCase):
+    def test_mode(self):
+        data = auth_data_dir()
+        srv = Server(auth_env(data), name="mode")
+        try:
+            m, o = Session(srv), Session(srv)
+            m.login("m1", PASSWORDS["m1"])
+            o.login("o1", PASSWORDS["o1"])
+            st, obj, _ = o.json("GET", "/api/mode")
+            self.assertEqual((st, obj), (200, {"mode": "operation", "since": None, "by": None}))
+            st, obj, _ = o.json("PUT", "/api/mode", {"mode": "maintenance"})
+            self.assertEqual((st, obj["error"]["code"]), (403, "forbidden"))
+            for bad in ({"mode": "maint"}, {"mode": None}, {}, ["maintenance"]):
+                self.assertEqual(m.json("PUT", "/api/mode", bad)[0], 400, bad)
+            n = len(T["mgr"].requests)
+            st, obj, _ = m.json("PUT", "/api/board/mode", {"mode": "maintenance"})
+            self.assertEqual(st, 200)
+            self.assertEqual((obj["mode"], obj["by"], obj["manager"]), ("maintenance", "m1", "ok"))
+            self.assertRegex(obj["since"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d\d:\d\d$")
+            self.assertIn({"op": "set_access_mode", "mode": "maintenance"}, T["mgr"].requests[n:])  # process-manager에 알림
+            st, obj, _ = o.json("GET", "/api/mode")
+            self.assertEqual((obj["mode"], obj["by"]), ("maintenance", "m1"))
+            self.assertEqual(o.json("GET", "/api/auth/me")[1]["mode"], "maintenance")
+            self.assertEqual(m.json("DELETE", "/api/mode")[0], 405)
+        finally:
+            srv.stop()
+        # 저장하지 않음: 다시 시작하면 운용
+        srv = Server(auth_env(data), name="mode2")
+        try:
+            s = Session(srv)
+            s.login("v1", PASSWORDS["v1"])
+            self.assertEqual(s.json("GET", "/api/mode")[1], {"mode": "operation", "since": None, "by": None})
+        finally:
+            srv.stop()
+        cmds = [l["cmd"] for l in log_lines(data)]
+        self.assertIn("mode:maintenance", cmds)
+
+    def test_manager_down(self):
+        """process-manager가 없어도 모드는 바뀜(manager: unreachable), 다시 붙으면 gw.mgr가 맞춤"""
+        data = tempfile.mkdtemp(prefix="modemgr", dir=T["tmp"])
+        path = os.path.join(data, "sub-manager.sock")
+        srv = Server({"WORKSPACE_DATA": data, "WORKSPACE_MANAGER_SOCKET": path}, name="modemgr")
+        try:
+            st, obj, _ = srv.json("PUT", "/api/mode", {"mode": "maintenance"})  # 인증 꺼짐: 누구나
+            self.assertEqual((st, obj["mode"]), (200, "maintenance"))
+            self.assertTrue(obj["manager"].startswith("unreachable"))
+            fake = SubManager(path)  # 이제 뜬 Manager는 운용 모드(다시 시작한 process-manager처럼)
+            try:
+                self.assertTrue(wait_for(lambda: fake.count("set_access_mode") >= 1, 8))
+                with fake.lock:
+                    self.assertEqual([r for r in fake.ops if r.get("op") == "set_access_mode"][0]["mode"], "maintenance")
+            finally:
+                fake.close()
+        finally:
+            srv.stop()
+
+
+@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(명령 기록)")
+class CommandLog(unittest.TestCase):
+    def test_log_lines(self):
+        data = auth_data_dir()
+        tok = AUTH_USERS_TOKEN[data]
+        srv = Server(auth_env(data), name="cmdlog")
+        try:
+            Session(srv).login("m1", "secret-wrong-pass")       # 틀린 비밀번호(있는 이름)
+            Session(srv).login("ghost-name", "another-secret")   # 없는 이름: 이름도 남기지 않음
+            o = Session(srv)
+            o.login("o1", PASSWORDS["o1"])
+            self.assertEqual(o.json("POST", "/workers/w2/command", {"cmd": "source.set_rate", "args": {"password": "argsecret"}})[0], 200)
+            self.assertEqual(o.json("POST", "/workers/w1/start")[0], 403)
+            m = Session(srv, token=tok)
+            self.assertEqual(m.json("PUT", "/workers/w1/config?token=" + tok, {"key": "v"})[0], 202)
+            self.assertEqual(m.json("PUT", "/api/mode", {"mode": "maintenance"})[0], 200)
+            self.assertEqual(m.json("POST", "/workers/w1/stop")[0], 202)
+            self.assertEqual(srv.json("POST", "/workers/w1/start")[0], 401)
+            for _ in range(3):
+                o.json("GET", "/workers")  # 읽기는 남기지 않음
+            self.assertEqual(srv.request("POST", "/api/auth/logout", headers=o.headers())[0], 200)
+            st, obj, _ = srv.json("GET", "/health?detail=1")
+            g = obj["gateway"]
+            self.assertEqual((g["auth"], g["mode"]["mode"], g["log"]["dropped"]), ("on", "maintenance", 0))
+            self.assertTrue(wait_for(lambda: srv.json("GET", "/health?detail=1")[1]["gateway"]["log"]["written"] >= 10, 5))
+        finally:
+            srv.stop()
+        lines = log_lines(data)
+        keys = {"t", "user", "role", "mode", "remote", "method", "path", "cmd", "code", "ms"}
+        for l in lines:
+            self.assertEqual(set(l), keys, l)
+        got = [(l["user"], l["role"], l["mode"], l["method"], l["path"], l["cmd"], l["code"]) for l in lines]
+        self.assertEqual(got, [
+            ("m1", "-", "operation", "POST", "/api/auth/login", "login", 401),
+            ("?", "-", "operation", "POST", "/api/auth/login", "login", 401),
+            ("o1", "operator", "operation", "POST", "/api/auth/login", "login", 200),
+            ("o1", "operator", "operation", "POST", "/workers/w2/command", "source.set_rate", 200),
+            ("o1", "operator", "operation", "POST", "/workers/w1/start", None, 403),
+            ("m1", "maintainer", "operation", "PUT", "/workers/w1/config", "set_config", 202),
+            ("m1", "maintainer", "operation", "PUT", "/api/mode", "mode:maintenance", 200),
+            ("m1", "maintainer", "maintenance", "POST", "/workers/w1/stop", "stop", 202),
+            ("-", "-", "maintenance", "POST", "/workers/w1/start", None, 401),
+            ("o1", "operator", "maintenance", "POST", "/api/auth/logout", "logout", 200),
+        ])
+        self.assertEqual({l["remote"] for l in lines}, {"127.0.0.1"})
+        text = log_text(data)
+        for secret in list(PASSWORDS.values()) + [tok, "secret-wrong-pass", "another-secret", "ghost-name", "argsecret", "token="]:
+            self.assertNotIn(secret, text)
+        name = os.listdir(os.path.join(data, "records", "gateway"))
+        self.assertEqual(len(name), 1)
+        self.assertRegex(name[0], r"^gateway-[0-9a-f]{8}\.jsonl$")
+        self.assertFalse([f for f in os.listdir(os.path.join(data, "records")) if f.endswith(".jsonl")])  # logger 폴더와 나눔
+        self.assertEqual(os.stat(os.path.join(data, "records", "gateway", name[0])).st_mode & 0o777, 0o600)
+
+
+@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(Manager 캐시)")
+class ManagerCache(unittest.TestCase):
+    def test_cache(self):
+        data = tempfile.mkdtemp(prefix="cache", dir=T["tmp"])
+        path = os.path.join(data, "sub-manager.sock")
+        fake = SubManager(path)
+        srv = Server({"WORKSPACE_DATA": data, "WORKSPACE_MANAGER_SOCKET": path}, name="cache")
+        try:
+            detail = lambda: srv.json("GET", "/health?detail=1")[1]["gateway"]["cache"]
+            self.assertTrue(wait_for(lambda: detail()["fresh"], 8), detail())
+            # 직접 부른 답과 같은 모양(GET /workers는 list 순서 그대로)
+            lists = fake.count("list")
+            for _ in range(10):
+                st, _, body = srv.request("GET", "/workers")
+                self.assertEqual(st, 200)
+                self.assertEqual(json.loads(body), fake.workers)
+            self.assertEqual(body.decode(), json.dumps(fake.workers, ensure_ascii=False))
+            self.assertEqual(srv.json("GET", "/api/board/workers/w1")[1], fake.workers[1])
+            self.assertEqual(srv.json("GET", "/system")[1], fake.system)
+            self.assertEqual(fake.count("list"), lists)  # 화면 요청이 Manager list로 가지 않음
+            self.assertEqual(fake.count("system"), 0)
+            # 없는 워커는 Manager에 직접(not_found)
+            self.assertEqual(srv.json("GET", "/workers/nope")[0], 404)
+            # Manager가 잠깐 멈춤: 3 s 안에는 캐시로 바로 답한다
+            fake.stall = True
+            t0 = time.monotonic()
+            self.assertEqual(srv.json("GET", "/workers")[0], 200)
+            self.assertLess(time.monotonic() - t0, 0.5)
+            # 오래되면 직접 묻는다(지금처럼): 멈춘 Manager라 응답 상한(2 s) 뒤 503
+            time.sleep(3.3)
+            self.assertFalse(detail()["fresh"])
+            st, obj, _ = srv.json("GET", "/workers")
+            self.assertEqual((st, obj["error"]["code"]), (503, "unavailable"))
+            fake.stall = False
+            self.assertTrue(wait_for(lambda: detail()["fresh"], 10))
+            self.assertEqual(srv.json("GET", "/workers")[1], fake.workers)
+            # 쓰기는 늘 직접
+            n = fake.count("start")
+            self.assertEqual(srv.json("POST", "/workers/w1/start")[0], 202)
+            self.assertEqual(fake.count("start"), n + 1)
+        finally:
+            srv.stop()
+            fake.close()
+
+    def test_cache_off(self):
+        data = tempfile.mkdtemp(prefix="nocache", dir=T["tmp"])
+        path = os.path.join(data, "sub-manager.sock")
+        fake = SubManager(path)
+        srv = Server({"WORKSPACE_DATA": data, "WORKSPACE_MANAGER_SOCKET": path, "WORKSPACE_GATEWAY_CACHE": "0"}, name="nocache")
+        try:
+            for _ in range(3):
+                self.assertEqual(srv.json("GET", "/workers")[1], fake.workers)
+            self.assertEqual(fake.count("list"), 3)
+            self.assertEqual(fake.count("subscribe"), 0)
+            self.assertIsNone(srv.json("GET", "/health?detail=1")[1]["gateway"]["cache"])
+        finally:
+            srv.stop()
+            fake.close()
 
 
 if __name__ == "__main__":

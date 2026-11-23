@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.51 |
+| 문서 버전 | 0.52 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -243,6 +243,7 @@
 | `delete_preset` | `id`, `name` | ✓ | `DELETE /workers/{id}/presets/{name}` |
 | `set_autostart` | `id`, `autostart` | ✓ | `PUT /workers/{id}/autostart` |
 | `start` / `stop` | `id` | ✓ | `POST /workers/{id}/start`, `/stop` |
+| `set_access_mode` | `mode`(`operation`\|`maintenance`) | ✓(`manager-rest.sock`만) | 게이트웨이 `PUT /api/mode`(원칙 17, `docs/gateway.md` 3장). 메모리에만, `system`·구독에 `access_mode`, 재시작하면 `operation`(0.52) |
 
 에러 `code`: `bad_request`(설정 오류면 `fields: {경로: 메시지}`), `not_found`, `conflict`, `forbidden`, `internal`. Manager는 요청 처리 중 워커 기동·종료를 기다리지 않는다.
 
@@ -1220,6 +1221,7 @@ REST는 `0.0.0.0` 바인딩이라 새 IP로 닿는 즉시 재개된다(진행 �
 ### 10.3 접근 제어
 
 - REST는 정비망에서만 허용(nftables, 프로필)
+- C++ 게이트웨이(0.52): 신분 확인(로그인 세션·사용자별 토큰)과 역할 viewer·operator·maintainer, 쓰기 요청마다 명령 기록. 개발 보드 기본 끔, 제품 묶음은 늘 켬(`docs/gateway.md` 3장)
 - Manager API·명령·스트림·프레임 버스는 Unix 소켓(`0600`). Manager 클라이언트는 접속 소켓으로 구분
 - 인증 없는 장치 프로토콜은 같은 망의 장비가 직접 제어할 수 있다. 라우터 VLAN/ACL로 막거나 운영 규칙으로 둔다(워커 설계서)
 - 화면의 워크스페이스 보기는 비밀값(이름에 PASS·TOKEN·SECRET·API_KEY)을 가린다
@@ -1531,6 +1533,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 | 버전 | 내용 |
 |---|---|
+| 0.52 | **게이트웨이 4단계**(`docs/gateway.md` 3장·6.2): 신분 확인 `WORKSPACE_AUTH=on`(제품 모드는 늘), 사용자 파일 `config/users.json`(PBKDF2-HMAC-SHA256, 토큰은 sha256)·설정 명령 `gateway user`·`token`, 로그인 세션·Bearer 토큰·역할(viewer·operator·maintainer), 운용/정비 모드 `GET·PUT /api/mode` + Manager op `set_access_mode`(6.2, Python·C++ 판 둘 다), 명령 기록 `records/gateway/`, Manager 구독 캐시, 화면 로그인·머리 배지·워크스페이스 패널 모드 토글 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

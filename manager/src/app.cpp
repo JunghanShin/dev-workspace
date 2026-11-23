@@ -186,7 +186,30 @@ Json App::system_status() {
     out["manager_api_workers"] = apiw;
     out["product"] = cfg_.product;
     out["config_write"] = cfg_.config_write;
+    out["access_mode"] = access_mode_;
     return out;
+}
+
+Json App::set_access_mode(const Json& req, const std::optional<std::string>& client) {
+    // 운용/정비 모드(원칙 17): 주인은 게이트웨이. 여기서는 받아 적기만 하고 저장하지 않는다(다시 시작하면 운용)
+    if (!client || *client != "rest") return error("forbidden", "set_access_mode is allowed only from manager-rest.sock");
+    const Json mode = jget(req, "mode");
+    if (!mode.is_string() || (mode != "operation" && mode != "maintenance"))
+        return error("bad_request", "mode must be 'operation' or 'maintenance'");
+    const std::string m = mode.get<std::string>();
+    if (m != access_mode_) {
+        PM_INFO("access mode %s -> %s", access_mode_.c_str(), m.c_str());
+        access_mode_ = m;
+        if (!subs_.empty()) {  // 구독자에게 바로(주기를 기다리지 않음)
+            Json obj = Json::object();
+            obj["event"] = "system";
+            obj["data"] = system_status();
+            pub_.offer({"system", "system", dump_line(obj) + "\n"});
+        }
+    }
+    Json d = Json::object();
+    d["access_mode"] = access_mode_;
+    return ok(d);
 }
 
 void App::record_command(const Json& req, const std::optional<std::string>& client, const Json& resp) {
@@ -204,6 +227,8 @@ void App::record_command(const Json& req, const std::optional<std::string>& clie
         data["save"] = !(req.contains("save") && req["save"] == Json(false));
     } else if (op == "set_autostart") {
         data["autostart"] = jget(req, "autostart");
+    } else if (op == "set_access_mode") {
+        data["mode"] = jget(req, "mode");
     } else if (op == "use_preset" || op == "rename_preset" || op == "delete_preset" || op == "save_preset") {
         const Json name = jget(req, "name");
         const Json preset = jget(req, "preset");
@@ -310,6 +335,12 @@ void App::handle_line(Conn& c, const std::string& line) {
     const std::string op = (*req)["op"].get<std::string>();
     if (op == "subscribe") {
         subscribe(c, *req);
+        return;
+    }
+    if (op == "set_access_mode") {  // 파일을 쓰지 않으니 쓰기 차례(pm.store)를 거치지 않고 바로
+        const Json resp = set_access_mode(*req, c.client);
+        record_command(*req, c.client, resp);
+        reply(c, resp);
         return;
     }
     if (kWriteOps.count(op)) {

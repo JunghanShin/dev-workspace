@@ -1,12 +1,16 @@
 // 요청 처리 단계 (docs/gateway.md 2장): 신분 확인 → 권한 → 전달 → 기록 → 응답.
 //
-// 지금(6장 1~2단계)은 WORKSPACE_AUTH=off만: 신분 확인은 익명, 권한은 지금 REST와 같은 토큰 검사
-// (WORKSPACE_REST_TOKEN, 비어 있으면 모두 허용), 기록은 하지 않음. 로그인·역할·운용/정비 모드·명령 기록은
-// 4단계에서 Auth·Recorder 구현을 바꿔 끼운다(server.cpp는 그대로).
+// Auth 구현 둘:
+//   AuthOff(여기)        WORKSPACE_AUTH=off(개발 보드 기본). 지금 REST와 같은 토큰 검사(WORKSPACE_REST_TOKEN, 비면 모두 허용)
+//   AuthOn(src/auth.hpp) WORKSPACE_AUTH=on·제품 묶음. 사용자 파일·세션·토큰·역할(access.hpp 규칙)
+// Recorder: 쓰기 요청마다 기록 한 줄(src/recorder.hpp의 gw.log). 데이터 폴더가 없으면 NoRecorder.
 #pragma once
 
 #include <functional>
 #include <string>
+
+#include "access.hpp"
+#include "crypto.hpp"
 
 namespace gw {
 
@@ -20,8 +24,10 @@ struct RequestView {
 
 struct Identity {
     std::string user = "-";
-    std::string role = "-";
+    Role role = Role::None;
     bool anonymous = true;
+    std::string via;  // "session" | "token" | ""(익명·인증 꺼짐)
+    std::string sid;  // 세션으로 왔으면 그 세션(로그아웃용)
 };
 
 struct Decision {
@@ -33,38 +39,39 @@ struct Decision {
 class Auth {
 public:
     virtual ~Auth() = default;
-    virtual Identity identify(const RequestView& rq) const = 0;
-    virtual Decision authorize(const Identity& who, const RequestView& rq) const = 0;
+    virtual bool on() const = 0;
+    virtual Identity identify(const RequestView& rq) = 0;
+    virtual Decision authorize(const Identity& who, const RequestView& rq) = 0;
 };
 
 class Recorder {
 public:
     virtual ~Recorder() = default;
-    // 쓰기 요청 기록 한 줄(4단계: gw.log 큐로). 지금은 아무것도 안 함
-    virtual void record(const Identity& who, const RequestView& rq, int status, double ms) = 0;
+    virtual void record(RecordFields f) = 0;  // 막히지 않는다(큐가 차면 버리고 셈)
 };
 
 class NoRecorder : public Recorder {
 public:
-    void record(const Identity&, const RequestView&, int, double) override {}
+    void record(RecordFields) override {}
 };
 
 // WORKSPACE_AUTH=off: 지금 REST와 같은 토큰 검사(Python Handler._authorized)
 class AuthOff : public Auth {
 public:
     AuthOff(std::string token, bool ui_enabled) : token_(std::move(token)), ui_enabled_(ui_enabled) {}
-    Identity identify(const RequestView&) const override { return Identity{}; }
-    Decision authorize(const Identity& who, const RequestView& rq) const override;
+    bool on() const override { return false; }
+    Identity identify(const RequestView&) override { return Identity{}; }
+    Decision authorize(const Identity& who, const RequestView& rq) override;
 
     // 토큰 없이 열어 두는 경로인가(/health, 화면 파일)
-    static bool open_path(const std::string& path, bool ui_enabled);
+    static bool open_path(const std::string& path, bool ui_enabled) { return gw::open_path(path, ui_enabled); }
 
 private:
     std::string token_;
     bool ui_enabled_;
 };
 
-// 같은 길이면 끝까지 비교(시간으로 토큰을 알아내지 못하게)
-bool constant_time_equal(const std::string& a, const std::string& b);
+// Authorization: Bearer <값>(없으면 "")
+std::string bearer_token(const std::string& authorization);
 
 }  // namespace gw

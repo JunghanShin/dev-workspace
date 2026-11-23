@@ -7,6 +7,10 @@
 //               (풀 스레드는 threads + 여분 4: 503을 답할 스레드가 늘 남게)
 //   gw.up.<워커> 워커 스트림 구독(hub.hpp)
 //   gw.build    제품 빌드 출력 읽기(productbuild.hpp)
+//   gw.mgr      Manager 구독 하나로 워커·시스템 상태 캐시(mgr_cache.hpp)
+//   gw.log      명령 기록 파일 쓰기(recorder.hpp)
+// 신분 확인: WORKSPACE_AUTH=off면 AuthOff(지금 REST 토큰 검사), on·제품 모드면 AuthOn(auth.hpp).
+// 게이트웨이가 직접 답하는 경로: /api/auth/login·logout·me, /api/mode(운용/정비 모드).
 // 연결 하나에 요청 하나(keep-alive 없음, Python REST의 HTTP/1.0과 같음). 읽기·쓰기 상한 5 s.
 #pragma once
 
@@ -20,8 +24,11 @@
 #include <thread>
 #include <vector>
 
+#include "auth.hpp"
 #include "hub.hpp"
+#include "mgr_cache.hpp"
 #include "pipeline.hpp"
+#include "recorder.hpp"
 #include "productbuild.hpp"
 #include "reads.hpp"
 #include "sys.hpp"
@@ -44,7 +51,11 @@ struct GatewayConfig {
     bool tcp = true;             // WORKSPACE_GATEWAY_TCP=0이면 TCP를 열지 않음(nginx가 포트를 가질 때, Unix 소켓 필수)
     double connect_timeout = 1.0, response_timeout = 2.0, command_timeout = 3.0;
     size_t threads = 16;         // 동시 요청 상한(SSE 포함)
-    std::string token;           // WORKSPACE_REST_TOKEN
+    std::string token;           // WORKSPACE_REST_TOKEN(신분 확인 꺼짐일 때만)
+    bool auth_on = false;        // WORKSPACE_AUTH=on 또는 제품 모드
+    std::string users_file;      // 비면 <데이터>/config/users.json
+    bool record = true;          // 명령 기록(데이터 폴더가 있을 때)
+    bool cache = true;           // Manager 캐시(gw.mgr)
     bool ui_enabled = true, product = false;
     UiConfig ui;
     double io_timeout = 5.0;     // HTTP 읽기·쓰기 상한(느린 클라이언트가 스레드를 붙잡지 못하게)
@@ -107,20 +118,38 @@ public:
     // 요청 단계(시험에서도 부름). body: 본문을 읽는 함수(필요할 때만 부름)
     Reply handle(const RequestView& rq, const std::function<Body()>& body, const std::string& remote);
 
+    // 운용/정비 모드(원칙 17): 게이트웨이가 주인. 메모리에만(시작하면 운용)
+    struct Mode {
+        std::string mode = "operation", since, by;
+    };
+    Mode mode();
+
 private:
+    // 요청 하나의 기록거리(명령 이름, 로그인 이름 등)
+    struct Ctx {
+        std::string cmd, user;
+        Role role = Role::None;
+        bool user_set = false;
+    };
     bool start_tcp(std::string& err);
     bool start_unix(std::string& err);
-    Reply forward(const RequestView& rq, const std::function<Body()>& body);
+    Reply dispatch(const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
+                   const Identity& who, Ctx& ctx);
+    Reply own(Own o, const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
+              const Identity& who, Ctx& ctx);
+    Reply set_mode(const std::string& m, const Identity& who);
+    void sync_mode(const Json& system);  // gw.mgr: Manager가 다른 모드를 들고 있으면 다시 알림
+    Reply forward(const RequestView& rq, const std::function<Body()>& body, Ctx& ctx);
     Reply manager_op(const Route& r, const std::function<Body()>& body);
     Reply manager_reply(const Json& resp, int ok_status);
-    Reply health();
-    Reply command(const std::string& id, const std::function<Body()>& body);
+    Reply health(const std::string& query);
+    Reply command(const std::string& id, const std::function<Body()>& body, Ctx& ctx);
     Reply stream(const std::string& id, const std::string& query);
     Reply product_build(const std::string& method, const std::string& path, const std::string& sub,
                         const std::string& query, const std::function<Body()>& body);
     Reply read(const Route& r, const std::string& query);
     int open_stream(const std::string& worker_id, std::string& why);
-    void setup(httplib::Server& svr, int watch_slot);
+    void setup(httplib::Server& svr, int watch_slot, bool via_unix);
 
     GatewayConfig cfg_;
     ManagerClient mgr_;
@@ -129,7 +158,13 @@ private:
     ProductBuild build_;
     Hub hub_;
     std::unique_ptr<Auth> auth_;
+    AuthOn* auth_on_ = nullptr;           // auth_가 AuthOn이면 그것(로그인·세션)
     std::unique_ptr<Recorder> recorder_;
+    FileRecorder* file_rec_ = nullptr;    // recorder_가 FileRecorder면 그것(지표)
+    ManagerCache cache_;
+    std::mutex mode_mu_;  // mode_ (I/O 없음)
+    Mode mode_;
+    double last_mode_push_ = -1e9;  // gw.mgr만
 
     worker::ThreadWatch watch_;
     Pool pool_;

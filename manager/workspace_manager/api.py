@@ -6,6 +6,7 @@
   {run_dir}/manager-<워커 id>.sock                   Manager API를 쓰는 워커. 자기 워커는 못 건드림
   {run_dir}/manager.sock                             로컬 도구용. 읽기 전용
 워크스페이스는 워커 개발 작업대라 운용 모드·제어권을 두지 않는다(design.md 6.1).
+운용/정비 모드(원칙 17)는 게이트웨이가 정하고 set_access_mode(REST 소켓만)로 알려 준다. 메모리에만 둔다.
 """
 import asyncio
 import json
@@ -52,6 +53,7 @@ class ApiServer:
         self.subscribers = set()
         self.last_seen = {}
         self.command_seq = 0
+        self.access_mode = "operation"  # 운용/정비 모드: 게이트웨이가 알려 줌(set_access_mode). 저장하지 않음
         supervisor.listeners.append(self._on_event)
 
     async def start(self, run_dir):
@@ -102,7 +104,21 @@ class ApiServer:
             else:
                 clients[name] = "disconnected"
         return {"clients": clients, "manager_api_workers": self.api_workers,
-                "product": settings_mod.PRODUCT, "config_write": settings_mod.CONFIG_WRITE}
+                "product": settings_mod.PRODUCT, "config_write": settings_mod.CONFIG_WRITE,
+                "access_mode": self.access_mode}
+
+    def set_access_mode(self, req, client):
+        """운용/정비 모드(원칙 17). 주인은 게이트웨이, 여기서는 받아 적기만 한다(다시 시작하면 운용)"""
+        if client != "rest":
+            return self._error("forbidden", "set_access_mode is allowed only from manager-rest.sock")
+        mode = req.get("mode")
+        if mode not in ("operation", "maintenance") or not isinstance(mode, str):
+            return self._error("bad_request", "mode must be 'operation' or 'maintenance'")
+        if mode != self.access_mode:
+            log.info("access mode %s -> %s", self.access_mode, mode)
+            self.access_mode = mode
+            self._publish("system", ("system", None), {"event": "system", "data": self.system_status()})
+        return {"ok": True, "data": {"access_mode": self.access_mode}}
 
     def _on_event(self, event, key, data):
         self._publish("workers", (event, key), {"event": event, "data": data})
@@ -121,6 +137,8 @@ class ApiServer:
             data["save"] = req.get("save", True) is not False
         elif req["op"] == "set_autostart":
             data["autostart"] = req.get("autostart")
+        elif req["op"] == "set_access_mode":
+            data["mode"] = req.get("mode")
         elif req["op"] in ("use_preset", "rename_preset", "delete_preset", "save_preset"):
             data["preset"] = req.get("name") or (req.get("preset") or {}).get("name")
         if not resp["ok"]:
@@ -150,6 +168,11 @@ class ApiServer:
             return
         if req["op"] == "subscribe":
             await self._subscribe(req, writer, client)
+            return
+        if req["op"] == "set_access_mode":
+            resp = self.set_access_mode(req, client)
+            self._record_command(req, client, resp)
+            await self._reply(writer, resp)
             return
         resp = self._dispatch(req, client)
         if req["op"] in WRITE_OPS:

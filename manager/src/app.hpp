@@ -6,7 +6,7 @@
 // API(design.md 6.1·6.2): 요청 1건 = 연결 1개, JSON 한 줄. 읽기 1 s 상한, 64 KiB 상한.
 // 쓰기 op는 한 번에 하나씩 차례로 처리한다: 검사 → 워커 폴더 파일(pm.store) → 상태 바꿈 → 실행 기록 파일
 // (pm.store) → 응답. 다음 쓰기 op는 앞 것이 끝난 상태를 보고 검사한다(Python 판처럼 순서대로).
-// 읽기 op는 기다리지 않고 바로 답한다.
+// 읽기 op는 기다리지 않고 바로 답한다. set_access_mode(운용/정비 모드, REST 소켓만)는 메모리 값만 바꿔 바로 답한다.
 #pragma once
 
 #include <deque>
@@ -59,6 +59,7 @@ private:
     double now() const;
     void on_event(const std::string& event, const std::string& key, const Json& data);
     Json system_status();
+    Json set_access_mode(const Json& req, const std::optional<std::string>& client);
     void accept_on(int lfd, const std::optional<std::string>& client);
     void read_conn(Conn& c);
     void handle_line(Conn& c, const std::string& line);
@@ -100,6 +101,7 @@ private:
     double last_house_ = 0;
     std::vector<int> last_pgids_;
     bool stopping_ = false;
+    std::string access_mode_ = "operation";  // 게이트웨이가 알려 줌(set_access_mode). 저장하지 않음
 };
 
 }  // namespace pm

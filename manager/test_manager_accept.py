@@ -399,7 +399,8 @@ class Accept(unittest.TestCase):
         self.assertEqual((d["config"], d["presets"]), ({}, []))
         # system
         d = e.call("manager.sock", {"op": "system"})["data"]
-        self.assertEqual(set(d), {"clients", "manager_api_workers", "product", "config_write"})
+        self.assertEqual(set(d), {"clients", "manager_api_workers", "product", "config_write", "access_mode"})
+        self.assertEqual(d["access_mode"], "operation")
         self.assertEqual(set(d["clients"]), {"rest", "logger"})
         self.assertEqual((d["manager_api_workers"], d["product"], d["config_write"]), ([], False, True))
         self.assertIn(d["clients"]["rest"], ("idle", "disconnected"))
@@ -735,6 +736,51 @@ class Accept(unittest.TestCase):
         finally:
             slow.close()
             fast.close()
+
+    # ---- 운용/정비 모드(set_access_mode, 원칙 17) ----------------------------
+
+    def test_access_mode(self):
+        """게이트웨이(manager-rest.sock)만 바꿈, 값 검사, system·구독·명령 이력에 보임, 다시 시작하면 운용"""
+        e = self.env({"w": {"config": {}, "autostart": False},
+                      "adp": {"config": {}, "autostart": False, "decl": {"manager_api": True}}}).start()
+        mode = lambda: e.call("manager.sock", {"op": "system"})["data"]["access_mode"]
+        self.assertEqual(mode(), "operation")
+        for sock in ("manager.sock", "manager-logger.sock", "manager-adp.sock"):
+            r = e.call(sock, {"op": "set_access_mode", "mode": "maintenance"})
+            self.assertEqual(r["ok"], False, sock)
+            self.assertEqual(r["error"]["code"], "forbidden", sock)
+        for bad in ("maint", None, 1, ["maintenance"], ""):
+            r = e.rest({"op": "set_access_mode", "mode": bad})
+            self.assertEqual((r["ok"], r["error"]["code"]), (False, "bad_request"), bad)
+        self.assertEqual(e.rest({"op": "set_access_mode"})["error"]["code"], "bad_request")
+        self.assertEqual(mode(), "operation")
+        sub = Subscriber(e.sock("manager-logger.sock"), {"op": "subscribe", "topics": ["system"], "period_ms": 5000})
+        cmd = Subscriber(e.sock("manager.sock"), {"op": "subscribe", "topics": ["commands"]})
+        try:
+            self.assertTrue(wait_for(lambda: len(sub.snapshot()) >= 2, 3))
+            self.assertTrue(wait_for(lambda: len(cmd.snapshot()) >= 1, 3))
+            t0 = time.time()
+            self.assertEqual(e.ok({"op": "set_access_mode", "mode": "maintenance"}), {"access_mode": "maintenance"})
+            self.assertEqual(mode(), "maintenance")
+            # 구독자에게 바로(주기 5 s를 기다리지 않음)
+            got = wait_for(lambda: [t for t, x in sub.snapshot() if x.get("event") == "system"
+                                    and x["data"].get("access_mode") == "maintenance"], 3)
+            self.assertTrue(got)
+            self.assertLess(got[0] - t0, 1.5)
+            c = wait_for(lambda: [x["data"] for _, x in cmd.snapshot() if x.get("event") == "command"], 3)
+            self.assertEqual(c[0], {"op": "set_access_mode", "id": None, "client": "rest", "ok": True, "mode": "maintenance"})
+            # 같은 값 다시: 그대로 ok
+            self.assertEqual(e.ok({"op": "set_access_mode", "mode": "maintenance"}), {"access_mode": "maintenance"})
+        finally:
+            sub.close()
+            cmd.close()
+        # 다른 쓰기 op는 그대로(정비 모드가 막지 않음, 막기는 나중 단계)
+        self.assertTrue(e.rest({"op": "set_autostart", "id": "w", "autostart": True})["ok"])
+        # 저장하지 않음: 다시 시작하면 운용
+        e.stop()
+        e.start()
+        self.assertEqual(mode(), "operation")
+        self.assertEqual(e.ok({"op": "set_access_mode", "mode": "operation"}), {"access_mode": "operation"})
 
     # ---- 다시 시작해도 상태 유지 ----------------------------------------
 

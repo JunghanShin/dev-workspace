@@ -4,7 +4,8 @@
     cd rest && REST_BIN=<게이트웨이> python3 -m unittest test_nginx_front -v
 
 확인: 화면 파일은 nginx가 직접(게이트웨이가 꺼져도 나옴), 없는 경로(API·워커 패널 파일)는 게이트웨이로, Host 전달,
-스트림(SSE)은 버퍼링 없이 바로, 본문 상한(64 KiB) 넘으면 413. nginx나 REST_BIN이 없으면 건너뛴다.
+스트림(SSE)은 버퍼링 없이 바로, 본문 상한(64 KiB) 넘으면 413, 명령 기록의 보낸 쪽 주소는 nginx가 넣은 값.
+nginx나 REST_BIN이 없으면 건너뛴다.
 """
 import json
 import os
@@ -91,6 +92,14 @@ class NginxFront(unittest.TestCase):
         st, _, data = self.req("GET", "/panels/alpha-panel/panel.js")
         self.assertEqual((st, data), (200, b"// alpha\n"))
         self.assertEqual(self.req("GET", "/no/such/thing")[0], 404)
+
+    def test_remote_from_nginx(self):
+        """명령 기록의 보낸 쪽 주소는 nginx가 넣은 값($remote_addr). 클라이언트가 X-Forwarded-For를 꾸며도 덮인다"""
+        st, _, _ = self.req("POST", "/workers/w1/command", {"cmd": "via_nginx"}, headers={"X-Forwarded-For": "203.0.113.9"})
+        self.assertEqual(st, 200)
+        last = lambda: [l for l in t.log_lines(t.T["data"]) if l["cmd"] == "via_nginx"]
+        self.assertTrue(t.wait_for(lambda: last(), 5))
+        self.assertEqual(last()[-1]["remote"], "127.0.0.1")
 
     def test_host_passed(self):
         st, _, data = self.req("GET", "/api/ui", headers={"Host": "board.test:8080"})

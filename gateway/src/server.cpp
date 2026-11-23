@@ -158,10 +158,27 @@ Gateway::Gateway(GatewayConfig cfg)
       ui_(cfg_.ui),
       build_(path_join(path_join(cfg_.workspace, "dev"), "build_product.py"), cfg_.data_dir, cfg_.python),
       hub_([this](const std::string& wid, std::string& why) { return open_stream(wid, why); }, cfg_.stream),
-      auth_(new AuthOff(cfg_.token, cfg_.ui_enabled)),
-      recorder_(new NoRecorder()),
+      cache_(cfg_.manager_socket, cfg_.connect_timeout, cfg_.response_timeout),
       watch_(std::chrono::milliseconds(static_cast<long>(kStallS * 1000))),
-      pool_(cfg_.threads + kPoolSpare, kPoolQueue) {}
+      pool_(cfg_.threads + kPoolSpare, kPoolQueue) {
+    if (cfg_.auth_on) {
+        AuthConfig ac;
+        ac.users_file = cfg_.users_file.empty() ? path_join(path_join(cfg_.data_dir, "config"), "users.json") : cfg_.users_file;
+        ac.product = cfg_.product;
+        ac.ui_enabled = cfg_.ui_enabled;
+        auth_on_ = new AuthOn(ac);
+        auth_.reset(auth_on_);
+    } else {
+        auth_.reset(new AuthOff(cfg_.token, cfg_.ui_enabled));
+    }
+    if (cfg_.record && !cfg_.data_dir.empty()) {
+        file_rec_ = new FileRecorder(path_join(path_join(cfg_.data_dir, "records"), "gateway"), boot_id8());
+        recorder_.reset(file_rec_);
+    } else {
+        recorder_.reset(new NoRecorder());
+    }
+    cache_.on_system = [this](const Json& sys) { sync_mode(sys); };
+}
 
 Gateway::~Gateway() {
     stopping_.store(true);
@@ -169,9 +186,10 @@ Gateway::~Gateway() {
     if (unix_) unix_->stop();
     for (auto& t : listeners_)
         if (t.joinable()) t.join();
+    cache_.stop();
 }
 
-void Gateway::setup(httplib::Server& svr, int watch_slot) {
+void Gateway::setup(httplib::Server& svr, int watch_slot, bool via_unix) {
     svr.new_task_queue = [this, watch_slot] { return new PoolQueue(pool_, watch_, watch_slot); };
     const auto sec = static_cast<time_t>(cfg_.io_timeout);
     const auto usec = static_cast<time_t>((cfg_.io_timeout - static_cast<double>(sec)) * 1e6);
@@ -181,7 +199,7 @@ void Gateway::setup(httplib::Server& svr, int watch_slot) {
     svr.set_idle_interval(1, 0);
     svr.set_payload_max_length(kMaxBody);
 
-    auto serve = [this](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader* reader) {
+    auto serve = [this, via_unix](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader* reader) {
         if (req.method == "HEAD") {
             res.status = 501;
             res.set_content(py_dumps(Json{{"error", {{"code", "not_implemented"}, {"message", "Unsupported method ('HEAD')"}}}}),
@@ -237,7 +255,16 @@ void Gateway::setup(httplib::Server& svr, int watch_slot) {
             else b.value = std::move(*j);
             return b;
         };
-        Reply r = handle(rq, body, req.remote_addr);
+        // 보낸 쪽 주소: Unix 소켓이면 앞의 nginx가 넣은 X-Forwarded-For(nginx는 $remote_addr로 덮어씀),
+        // TCP면 접속 주소(직접 붙은 클라이언트가 X-Forwarded-For를 꾸며도 무시)
+        std::string remote = req.remote_addr;
+        if (via_unix) {
+            const std::string xff = req.get_header_value("X-Forwarded-For");
+            const size_t comma = xff.rfind(',');
+            remote = strip(comma == std::string::npos ? xff : xff.substr(comma + 1));
+            if (remote.empty()) remote = "unix";
+        }
+        Reply r = handle(rq, body, remote);
         res.status = r.status;
         for (const auto& h : r.headers) res.set_header(h.first, h.second);
         switch (r.kind) {
@@ -317,6 +344,8 @@ bool Gateway::start(std::string& err) {
     }
     if (cfg_.tcp && !start_tcp(err)) return false;
     if (!cfg_.unix_socket.empty() && !start_unix(err)) return false;
+    if (file_rec_) file_rec_->start();
+    if (cfg_.cache) cache_.start(&watch_);
     if (tcp_)
         listeners_.emplace_back([this] {
             pthread_setname_np(pthread_self(), "gw.listen");
@@ -332,7 +361,7 @@ bool Gateway::start(std::string& err) {
 
 bool Gateway::start_tcp(std::string& err) {
     tcp_.reset(new httplib::Server());
-    setup(*tcp_, watch_.add("gw.listen.tcp"));
+    setup(*tcp_, watch_.add("gw.listen.tcp"), false);
     // cpp-httplib 기본은 Linux에서 SO_REUSEPORT만 켠다. 그러면 ① 앞 서버(지난 실행, Python REST)의 연결이
     // TIME-WAIT로 남아 있는 동안 같은 포트를 못 연다(보드에서 재시작 직후 bind 실패로 확인) ② 다른 프로그램이
     // 같은 포트를 열어 요청을 나눠 가질 수 있다. 그래서 SO_REUSEADDR만 켠다(Python http.server와 같음)
@@ -367,7 +396,7 @@ bool Gateway::start_unix(std::string& err) {
             ::unlink(cfg_.unix_socket.c_str());  // 지난 실행이 남긴 소켓
         }
         unix_.reset(new httplib::Server());
-        setup(*unix_, watch_.add("gw.listen.unix"));
+        setup(*unix_, watch_.add("gw.listen.unix"), true);
         unix_->set_address_family(AF_UNIX);
         if (!unix_->bind_to_port(cfg_.unix_socket, 80)) {
             err = "bind " + cfg_.unix_socket + " failed: " + errno_text(errno);
@@ -387,9 +416,11 @@ bool Gateway::stop(double timeout_s) {
     listeners_.clear();
     if (unix_) ::unlink(cfg_.unix_socket.c_str());
     const bool ok = pool_.shutdown(timeout_s);
+    cache_.stop();
     if (!ok) return false;
     build_.shutdown();
     hub_.stop_all();
+    if (file_rec_) file_rec_->stop(2.0);  // 남은 기록 줄을 쓰고(상한)
     return true;
 }
 
@@ -407,26 +438,207 @@ void Gateway::tick() { hub_.reap(); }
 
 Reply Gateway::handle(const RequestView& rq, const std::function<Body()>& body, const std::string& remote) {
     const double t0 = mono_now();
-    const Identity who = auth_->identify(rq);
-    const Decision d = auth_->authorize(who, rq);
+    const std::string mode_at = mode().mode;
+    Identity who;
+    Ctx ctx;
     Reply r;
-    if (!d.allowed) {
-        r = json_error(d.status, d.code, d.message);
-    } else {
-        try {
-            r = forward(rq, body);
-        } catch (const std::exception& e) {  // 처리 실패가 게이트웨이를 멈추지 않게
-            GW_ERROR("%s %s failed: %s", rq.method.c_str(), rq.path.c_str(), e.what());
-            r = json_error(500, "internal", e.what());
-        }
+    try {
+        who = auth_->identify(rq);
+        const Decision d = auth_->authorize(who, rq);
+        if (!d.allowed) r = json_error(d.status, d.code, d.message);
+        else r = dispatch(rq, body, remote, who, ctx);
+    } catch (const std::exception& e) {  // 처리 실패가 게이트웨이를 멈추지 않게
+        GW_ERROR("%s %s failed: %s", rq.method.c_str(), rq.path.c_str(), e.what());
+        r = json_error(500, "internal", e.what());
     }
-    recorder_->record(who, rq, r.status, (mono_now() - t0) * 1000);
-    GW_INFO("%s \"%s %s%s%s\" %d", remote.c_str(), rq.method.c_str(), rq.path.c_str(), rq.query.empty() ? "" : "?",
-            rq.query.c_str(), r.status);
+    // 쓰기 요청(GET이 아닌 것)마다 기록 한 줄. 본문·쿼리·헤더는 넣지 않는다(비밀번호·토큰)
+    if (rq.method != "GET") {
+        RecordFields f;
+        f.t = iso_now();
+        f.user = ctx.user_set ? ctx.user : who.user;
+        f.role = role_name(ctx.user_set ? ctx.role : who.role);
+        f.mode = mode_at;
+        f.remote = remote;
+        f.method = rq.method;
+        f.path = rq.path;
+        f.cmd = ctx.cmd;
+        f.code = r.status;
+        f.ms = (mono_now() - t0) * 1000;
+        recorder_->record(std::move(f));
+    }
+    if (log_enabled(Level::Info)) {
+        const std::string q = redact_query(rq.query);
+        GW_INFO("%s \"%s %s%s%s\" %d", remote.c_str(), rq.method.c_str(), rq.path.c_str(), q.empty() ? "" : "?",
+                q.c_str(), r.status);
+    }
     return r;
 }
 
-Reply Gateway::forward(const RequestView& rq, const std::function<Body()>& body) {
+Gateway::Mode Gateway::mode() {
+    std::lock_guard<std::mutex> lock(mode_mu_);
+    return mode_;
+}
+
+namespace {
+Json mode_json(const Gateway::Mode& m) {
+    Json o = Json::object();
+    o["mode"] = m.mode;
+    o["since"] = m.since.empty() ? Json(nullptr) : Json(m.since);
+    o["by"] = m.by.empty() ? Json(nullptr) : Json(m.by);
+    return o;
+}
+
+std::string body_str(const Json& obj, const char* key) {
+    if (!obj.is_object()) return "";
+    auto it = obj.find(key);
+    return it != obj.end() && it->is_string() ? it->get<std::string>() : "";
+}
+}  // namespace
+
+Reply Gateway::dispatch(const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
+                        const Identity& who, Ctx& ctx) {
+    const Own o = own_route(rq.method, rq.path);
+    if (o != Own::None) return own(o, rq, body, remote, who, ctx);
+    return forward(rq, body, ctx);
+}
+
+Reply Gateway::own(Own o, const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
+                   const Identity& who, Ctx& ctx) {
+    const std::string auth = auth_->on() ? "on" : "off";
+    switch (o) {
+        case Own::Login: {
+            ctx.cmd = "login";
+            if (!auth_on_) return json_error(400, "bad_request", "authentication is off (WORKSPACE_AUTH=off)");
+            Body b = body();
+            if (!b.ok) return json_error(400, "bad_request", "invalid JSON body: " + b.error);
+            const std::string name = body_str(b.value, "name"), password = body_str(b.value, "password");
+            if (name.empty() || password.empty())
+                return json_error(400, "bad_request", "body must be {\"name\": \"...\", \"password\": \"...\"}");
+            const auto res = auth_on_->login(name, password, remote);
+            // 기록: 있는 사용자 이름만(없는 이름 칸에 비밀번호를 잘못 넣었을 수도 있어서)
+            ctx.user_set = true;
+            ctx.user = res.known_user ? name : "?";
+            ctx.role = res.status == 200 ? res.who.role : Role::None;
+            if (res.status != 200) {
+                Reply r = json_error(res.status, res.code, res.message);
+                if (res.status == 429)
+                    r.headers.push_back({"Retry-After", std::to_string(static_cast<int>(res.retry_after + 0.999))});
+                return r;
+            }
+            Json out = Json::object();
+            out["auth"] = auth;
+            out["name"] = res.who.user;
+            out["role"] = role_name(res.who.role);
+            out["mode"] = mode().mode;
+            Reply r = json_reply(200, out);
+            // 쿠키: 스크립트가 못 읽게(HttpOnly), 다른 사이트에서 온 요청에는 안 붙게(SameSite=Strict).
+            // 브라우저 보관은 절대 만료(7일)까지, 쉼 만료(12시간)는 게이트웨이가 본다
+            r.headers.push_back({"Set-Cookie", "workspace_session=" + res.sid + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" +
+                                                   std::to_string(static_cast<long long>(auth_on_->absolute_s()))});
+            return r;
+        }
+        case Own::Logout: {
+            ctx.cmd = "logout";
+            if (auth_on_ && !who.sid.empty()) auth_on_->logout(who.sid);
+            Reply r = json_reply(200, Json::object());
+            r.headers.push_back({"Set-Cookie", "workspace_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"});
+            return r;
+        }
+        case Own::Me: {
+            Json out = Json::object();
+            out["auth"] = auth;
+            if (!auth_on_) {
+                // 신분 확인 꺼짐: 누구나 모든 것을 한다(지금 개발 보드)
+                out["name"] = nullptr;
+                out["role"] = "maintainer";
+                out["mode"] = mode().mode;
+                return json_reply(200, out);
+            }
+            if (who.anonymous) {
+                Json e = Json{{"error", {{"code", "unauthorized"}, {"message", "login required"}}}};
+                e["auth"] = auth;
+                return json_reply(401, e);
+            }
+            out["name"] = who.user;
+            out["role"] = role_name(who.role);
+            out["mode"] = mode().mode;
+            out["via"] = who.via;
+            return json_reply(200, out);
+        }
+        case Own::ModeGet:
+            return json_reply(200, mode_json(mode()));
+        case Own::ModeSet: {
+            Body b = body();
+            if (!b.ok) return json_error(400, "bad_request", "invalid JSON body: " + b.error);
+            const std::string m = body_str(b.value, "mode");
+            if (m != "operation" && m != "maintenance") {
+                ctx.cmd = "mode";
+                return json_error(400, "bad_request", "body must be {\"mode\": \"operation\" | \"maintenance\"}");
+            }
+            ctx.cmd = "mode:" + m;
+            return set_mode(m, who);
+        }
+        case Own::MethodNotAllowed: {
+            std::string p = starts_with(rq.path, "/api/board/") ? rq.path.substr(10) : rq.path;
+            return json_error(405, "method_not_allowed", rq.method + " not allowed on " + p);
+        }
+        case Own::None:
+            break;
+    }
+    return json_error(404, "not_found", "no route " + rq.path);
+}
+
+Reply Gateway::set_mode(const std::string& m, const Identity& who) {
+    const std::string now = iso_now();
+    Mode snap;
+    bool changed;
+    {
+        std::lock_guard<std::mutex> lock(mode_mu_);
+        changed = mode_.mode != m;
+        if (changed) {
+            mode_.mode = m;
+            mode_.since = now;
+            mode_.by = who.user;
+        }
+        snap = mode_;
+    }
+    if (changed) GW_WARN("mode -> %s by %s", m.c_str(), who.user.c_str());
+    // process-manager에 알림(잠금 밖). 실패해도 모드는 바뀐 것: gw.mgr가 다시 붙을 때 맞춘다
+    std::string mgr = "ok";
+    try {
+        const Json resp = mgr_.call(Json{{"op", "set_access_mode"}, {"mode", m}});
+        if (!py_truthy(get_or(resp, "ok", Json(nullptr)))) {
+            const Json err = get_or(resp, "error", Json::object());
+            mgr = "error: " + py_str(get_or(err, "code", Json("?")));
+        }
+    } catch (const ManagerUnavailable& e) {
+        mgr = std::string("unreachable: ") + e.what();
+    }
+    if (mgr != "ok") GW_WARN("set_access_mode %s: %s", m.c_str(), mgr.c_str());
+    Json out = mode_json(snap);
+    out["manager"] = mgr;
+    return json_reply(200, out);
+}
+
+void Gateway::sync_mode(const Json& system) {
+    // gw.mgr 스레드. Manager가 다시 시작돼(운용으로 돌아감) 게이트웨이와 다르면 게이트웨이 값을 다시 알린다
+    if (!system.is_object()) return;
+    auto it = system.find("access_mode");
+    if (it == system.end() || !it->is_string()) return;  // 모드를 모르는 Manager
+    const std::string want = mode().mode;
+    if (*it == want) return;
+    const double now = mono_now();
+    if (now - last_mode_push_ < 2.0) return;  // 바꾸는 중(PUT과 엇갈림)이면 다음 주기에
+    last_mode_push_ = now;
+    try {
+        mgr_.call(Json{{"op", "set_access_mode"}, {"mode", want}});
+        GW_INFO("manager had access_mode %s; told it %s", it->get<std::string>().c_str(), want.c_str());
+    } catch (const ManagerUnavailable& e) {
+        GW_DEBUG("set_access_mode resync failed: %s", e.what());
+    }
+}
+
+Reply Gateway::forward(const RequestView& rq, const std::function<Body()>& body, Ctx& ctx) {
     const std::string& m = rq.method;
     std::string path = rq.path;
     if (!cfg_.ui_enabled && m == "GET" &&
@@ -470,18 +682,20 @@ Reply Gateway::forward(const RequestView& rq, const std::function<Body()>& body)
     const Route rt = route(m, path, cfg_.product);
     switch (rt.kind) {
         case RouteKind::Health:
-            return health();
+            return health(rq.query);
         case RouteKind::ProductOff:
             return json_error(404, "not_found", "not available in product mode");
         case RouteKind::ProductBuild:
+            ctx.cmd = "product_build";
             return product_build(m, rstrip_char(path, '/'), rt.sub, rq.query, body);
         case RouteKind::Read:
             return read(rt, rq.query);
         case RouteKind::Stream:
             return stream(rt.id, rq.query);
         case RouteKind::Command:
-            return command(rt.id, body);
+            return command(rt.id, body, ctx);
         case RouteKind::Manager:
+            ctx.cmd = rt.op;
             return manager_op(rt, body);
         case RouteKind::MethodNotAllowed:
             return json_error(405, "method_not_allowed", m + " not allowed on " + path);
@@ -509,6 +723,13 @@ Reply Gateway::manager_op(const Route& r, const std::function<Body()>& body) {
         if (!b.ok) return json_error(400, "bad_request", "invalid JSON body: " + b.error);
         req[r.body_key] = b.value;
     }
+    // 화면이 1초마다 묻는 상태는 캐시가 새로우면 거기서(같은 답 모양). 아니면 지금처럼 Manager에 직접
+    if (cfg_.cache) {
+        Json cached;
+        if ((r.op == "list" && cache_.workers(cached)) || (r.op == "get" && r.has_id && cache_.worker(r.id, cached)) ||
+            (r.op == "system" && cache_.system(cached)))
+            return json_reply(r.ok_status, cached);
+    }
     Json resp;
     try {
         resp = mgr_.call(req);
@@ -518,7 +739,7 @@ Reply Gateway::manager_op(const Route& r, const std::function<Body()>& body) {
     return manager_reply(resp, r.ok_status);
 }
 
-Reply Gateway::health() {
+Reply Gateway::health(const std::string& query) {
     std::string manager;
     try {
         manager = py_truthy(get_or(mgr_.call(Json{{"op", "ping"}}), "ok", Json(nullptr))) ? "ok" : "error";
@@ -528,6 +749,18 @@ Reply Gateway::health() {
     Json o = Json::object();
     o["rest"] = "ok";
     o["manager"] = manager;
+    // ?detail=1: 게이트웨이 속사정(신분 확인·모드·명령 기록·캐시). 기본 답은 지금 REST와 같게 둔다
+    const Params p = parse_qs(query);
+    auto it = p.find("detail");
+    if (it != p.end() && it->second == "1") {
+        Json g = Json::object();
+        g["auth"] = auth_->on() ? "on" : "off";
+        if (auth_on_) g["users"] = auth_on_->state();
+        g["mode"] = mode_json(mode());
+        g["log"] = file_rec_ ? file_rec_->stats() : Json(nullptr);
+        g["cache"] = cfg_.cache ? cache_.state() : Json(nullptr);
+        o["gateway"] = g;
+    }
     return json_reply(200, o);
 }
 
@@ -556,11 +789,12 @@ std::string socket_path(const Json& resp, const char* key, const std::string& da
 }
 }  // namespace
 
-Reply Gateway::command(const std::string& id, const std::function<Body()>& body) {
+Reply Gateway::command(const std::string& id, const std::function<Body()>& body, Ctx& ctx) {
     Body b = body();
     if (!b.ok) return json_error(400, "bad_request", "invalid JSON body: " + b.error);
     if (!b.value.is_object() || !b.value.contains("cmd") || !b.value["cmd"].is_string())
         return json_error(400, "bad_request", "body must be {\"cmd\": \"...\", \"args\": {...}}");
+    ctx.cmd = b.value["cmd"].get<std::string>();  // 기록에는 명령 이름만(인자는 넣지 않음)
     // 소켓 위치는 워커 설정(command_socket), 없으면 기본 위치 (design.md 9.6)
     Json resp;
     try {

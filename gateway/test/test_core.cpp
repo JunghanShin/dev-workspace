@@ -1,12 +1,16 @@
 // core 단위 시험(시스템 호출 없음): Python 판과 같은 결과인지 작은 예로 확인한다.
 //   글·JSON(py_dumps, splitlines, utf8_replace, int/float), 경로 표, 화면 규칙(normpath, Content-Type, Host),
-//   SSE 합치기(SseMerge·UpstreamState), 지난 지표(시각 해석·칸 평균·출력), 비밀값 가림·env 설명, ps·stat·빌드 줄, 토큰 검사
+//   SSE 합치기(SseMerge·UpstreamState), 지난 지표(시각 해석·칸 평균·출력), 비밀값 가림·env 설명, ps·stat·빌드 줄, 토큰 검사,
+//   4단계: SHA-256·HMAC·PBKDF2 공개 벡터, 비밀번호 해시 형식, 사용자 파일, 역할 표, 세션 만료(가짜 시계), 로그인 실패 제한, 기록 줄
+#include <algorithm>
 #include <cstdlib>
 #include <ctime>
 #include <iostream>
 #include <string>
 
+#include "access.hpp"
 #include "board_parse.hpp"
+#include "crypto.hpp"
 #include "history.hpp"
 #include "pipeline.hpp"
 #include "profile_rules.hpp"
@@ -325,6 +329,286 @@ void test_auth() {
     rq.path = "/logs/a.js";
     CHECK(!tok.authorize(Identity{}, rq).allowed);
     CHECK(constant_time_equal("abc", "abc") && !constant_time_equal("abc", "abd") && !constant_time_equal("ab", "abc"));
+    CHECK(constant_time_equal("", "") && !constant_time_equal("", "a") && !constant_time_equal("abc", "ab"));
+}
+
+std::string unhex(const std::string& h) {
+    std::string out;
+    for (size_t i = 0; i + 1 < h.size(); i += 2) out += static_cast<char>(std::stoi(h.substr(i, 2), nullptr, 16));
+    return out;
+}
+
+// 공개 시험 벡터: NIST SHA-256(FIPS 180-2 예), RFC 4231 HMAC-SHA256, RFC 7914 11장·RFC 6070 꼴 PBKDF2-HMAC-SHA256
+void test_crypto() {
+    CHECK_EQ(sha256_hex(""), std::string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+    CHECK_EQ(sha256_hex("abc"), std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+    CHECK_EQ(sha256_hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+             std::string("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"));
+    CHECK_EQ(sha256_hex(std::string(1000000, 'a')),
+             std::string("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"));
+    {
+        // 조각으로 나눠 넣어도 같은 값(블록 경계 55·56·63·64·65)
+        const std::string s(200, 'x');
+        for (size_t cut : {1, 55, 56, 63, 64, 65, 119, 128}) {
+            Sha256 h;
+            h.update(s.substr(0, cut));
+            h.update(s.substr(cut));
+            const auto d = h.finish();
+            CHECK_EQ(to_hex(std::string(reinterpret_cast<const char*>(d.data()), 32)), sha256_hex(s));
+        }
+    }
+    CHECK_EQ(to_hex(hmac_sha256(std::string(20, '\x0b'), "Hi There")),
+             std::string("b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"));
+    CHECK_EQ(to_hex(hmac_sha256("Jefe", "what do ya want for nothing?")),
+             std::string("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"));
+    CHECK_EQ(to_hex(hmac_sha256(std::string(131, '\xaa'), "Test Using Larger Than Block-Size Key - Hash Key First")),
+             std::string("60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"));
+    CHECK_EQ(to_hex(pbkdf2_sha256("passwd", "salt", 1, 64)),
+             std::string("55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc"
+                         "49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783"));
+    CHECK_EQ(to_hex(pbkdf2_sha256("Password", "NaCl", 80000, 64)),
+             std::string("4ddcd8f60b98be21830cee5ef22701f9641a4418d04c0414aeff08876b34ab56"
+                         "a1d425a1225833549adb841b51c9b3176a272bdebba1d078478f62b397f33c8d"));
+    CHECK_EQ(to_hex(pbkdf2_sha256("password", "salt", 1, 32)),
+             std::string("120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"));
+    CHECK_EQ(to_hex(pbkdf2_sha256("password", "salt", 2, 32)),
+             std::string("ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43"));
+    CHECK_EQ(to_hex(pbkdf2_sha256("password", "salt", 4096, 32)),
+             std::string("c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a"));
+    CHECK_EQ(to_hex(pbkdf2_sha256("passwordPASSWORDpassword", "saltSALTsaltSALTsaltSALTsaltSALTsalt", 4096, 40)),
+             std::string("348c89dbcbd32b2f32d814b8116e84cf2b17347ebc1800181c4e2a1fb8dd53e1c635518c7dac47e9"));
+    // base64(RFC 4648 10장)
+    const char* b64[][2] = {{"", ""}, {"f", "Zg=="}, {"fo", "Zm8="}, {"foo", "Zm9v"}, {"foob", "Zm9vYg=="},
+                            {"fooba", "Zm9vYmE="}, {"foobar", "Zm9vYmFy"}};
+    for (auto& v : b64) {
+        CHECK_EQ(base64_encode(v[0]), std::string(v[1]));
+        std::string d;
+        CHECK(base64_decode(v[1], d) && d == v[0]);
+    }
+    std::string d;
+    CHECK(!base64_decode("Zm9", d));
+    CHECK(!base64_decode("Zm=v", d));
+    CHECK(!base64_decode("Z!9v", d));
+    CHECK(!base64_decode("Zg==Zg==", d));
+    const std::string bin = unhex("00ff10e0");
+    CHECK(base64_decode(base64_encode(bin), d) && d == bin);
+}
+
+void test_password_hash() {
+    const std::string salt = "0123456789abcdef";
+    const std::string h = make_password_hash("correct horse", salt, 1000);
+    CHECK(starts_with(h, "pbkdf2-sha256$1000$MDEyMzQ1Njc4OWFiY2RlZg==$"));
+    PasswordHash p;
+    CHECK(parse_password_hash(h, p));
+    CHECK_EQ(p.iterations, 1000u);
+    CHECK_EQ(p.salt, salt);
+    CHECK_EQ(p.hash, pbkdf2_sha256("correct horse", salt, 1000, 32));
+    CHECK(verify_password(h, "correct horse"));
+    CHECK(!verify_password(h, "correct horsE"));
+    CHECK(!verify_password(h, ""));
+    // 형식 오류는 모두 거절(로그인 실패로)
+    for (const std::string& bad : {std::string(""), std::string("scrypt$1000$AAAA$AAAA"), std::string("pbkdf2-sha256$1000$MDEy"),
+                                  std::string("pbkdf2-sha256$999$MDEyMzQ1Njc4OWFiY2RlZg==$") + base64_encode(std::string(32, 'x')),
+                                  std::string("pbkdf2-sha256$99999999$MDEyMzQ1Njc4OWFiY2RlZg==$") + base64_encode(std::string(32, 'x')),
+                                  std::string("pbkdf2-sha256$1x00$MDEyMzQ1Njc4OWFiY2RlZg==$") + base64_encode(std::string(32, 'x')),
+                                  std::string("pbkdf2-sha256$1000$MDEyMzQ1Njc4OWFiY2RlZg==$") + base64_encode(std::string(31, 'x')),
+                                  std::string("pbkdf2-sha256$1000$MDEy$") + base64_encode(std::string(32, 'x')),
+                                  h + "$x"}) {
+        CHECK(!parse_password_hash(bad, p));
+        CHECK(!verify_password(bad, "correct horse"));
+    }
+    // 기본 반복 수 그대로 만든 값도 맞는다
+    const std::string hd = make_password_hash("pw-default", salt, kPbkdf2Iterations);
+    CHECK(starts_with(hd, "pbkdf2-sha256$200000$"));
+    CHECK(verify_password(hd, "pw-default"));
+}
+
+void test_users_file() {
+    const std::string tok = "abc123";
+    const std::string text = std::string(R"({"users": [
+        {"name": "op1", "role": "operator", "password_hash": ")") + make_password_hash("pw-op1", "saltsaltsalt", 1000) +
+        R"(", "tokens": [{"name": "ext", "hash": ")" + sha256_hex(tok) + R"("}]},
+        {"name": "v.1", "role": "viewer", "password_hash": "", "tokens": []}]})";
+    UsersDb db;
+    std::string err;
+    CHECK(parse_users(text, db, err));
+    CHECK_EQ(db.users.size(), 2u);
+    CHECK(db.find("op1") && db.find("op1")->role == Role::Operator);
+    std::string tn;
+    CHECK(db.by_token(tok, &tn) == db.find("op1") && tn == "ext");
+    CHECK(!db.by_token("abc124"));
+    CHECK(!db.by_token(""));
+    // 다시 쓰고 읽어도 같다
+    UsersDb again;
+    CHECK(parse_users(dump_users(db), again, err));
+    CHECK_EQ(dump_users(again), dump_users(db));
+    CHECK(dump_users(db).find(tok) == std::string::npos);  // 토큰 원문은 파일에 없다
+    for (const char* bad : {"[]", R"({"users": {}})", R"({"users": [{"name": "a b", "role": "viewer"}]})",
+                            R"({"users": [{"name": "a", "role": "admin"}]})",
+                            R"({"users": [{"name": "a", "role": "viewer"}, {"name": "a", "role": "viewer"}]})",
+                            R"({"users": [{"name": "a", "role": "viewer", "password_hash": "x"}]})",
+                            R"({"users": [{"name": "a", "role": "viewer", "tokens": [{"name": "t", "hash": "ABC"}]}]})",
+                            "{not json"}) {
+        UsersDb x;
+        CHECK(!parse_users(bad, x, err));
+    }
+    CHECK(valid_user_name("op1") && valid_user_name("a.b-c_d") && !valid_user_name("") && !valid_user_name("-a") &&
+          !valid_user_name("a/b") && !valid_user_name(std::string(65, 'a')));
+}
+
+// 역할 표: 경로 종류마다 viewer·operator·maintainer 허용·거절
+void test_roles() {
+    struct Case {
+        const char* method;
+        const char* path;
+        Need need;
+    };
+    const Case cases[] = {
+        {"GET", "/health", Need::Open},
+        {"GET", "/api/board/health/", Need::Open},
+        {"GET", "/", Need::Open},
+        {"GET", "/kit.js", Need::Open},
+        {"GET", "/panels/board/panel.js", Need::Open},
+        {"POST", "/api/auth/login", Need::Open},
+        {"POST", "/api/board/auth/logout", Need::Open},
+        {"GET", "/api/auth/me", Need::Open},
+        {"GET", "/workers", Need::Read},
+        {"GET", "/api/board/workers/w1", Need::Read},
+        {"GET", "/system", Need::Read},
+        {"GET", "/workers/w1/stream", Need::Read},
+        {"GET", "/workers/w1/io", Need::Read},
+        {"GET", "/logs/workers/w1", Need::Read},
+        {"GET", "/api/remote/commands", Need::Read},
+        {"GET", "/api/panels", Need::Read},
+        {"GET", "/api/ui", Need::Read},
+        {"GET", "/api/mode", Need::Read},
+        {"GET", "/workers/w1/panel.js", Need::Read},  // 워커 경로 아래는 화면 파일로 보지 않음
+        {"POST", "/workers/w1/command", Need::Operate},
+        {"POST", "/api/board/workers/w1/command/", Need::Operate},
+        {"POST", "/workers/w1/start", Need::Maintain},
+        {"POST", "/workers/w1/stop", Need::Maintain},
+        {"PUT", "/workers/w1/config", Need::Maintain},
+        {"POST", "/workers/w1/config/apply", Need::Maintain},
+        {"POST", "/workers/w1/presets", Need::Maintain},
+        {"DELETE", "/workers/w1/presets/a", Need::Maintain},
+        {"PUT", "/workers/w1/autostart", Need::Maintain},
+        {"GET", "/system/product-build", Need::Maintain},
+        {"POST", "/api/board/system/product-build", Need::Maintain},
+        {"GET", "/system/product-build/download", Need::Maintain},
+        {"PUT", "/api/mode", Need::Maintain},
+        {"PUT", "/api/board/mode", Need::Maintain},
+        {"POST", "/workers/w1/command/x", Need::Maintain},  // 명령 경로가 아님(없는 경로, 쓰기로 봄)
+        {"POST", "/kit.js", Need::Maintain},
+    };
+    for (const auto& c : cases) {
+        const Need n = classify(c.method, c.path, true);
+        if (n != c.need) std::cerr << "  classify " << c.method << " " << c.path << " -> " << need_name(n) << "\n";
+        CHECK(n == c.need);
+    }
+    CHECK(classify("GET", "/kit.js", false) == Need::Read);  // 화면 끔이면 화면 파일도 열지 않음
+    const Role roles[] = {Role::None, Role::Viewer, Role::Operator, Role::Maintainer};
+    const bool expect[4][4] = {  // [역할][Open, Read, Operate, Maintain]
+        {true, false, false, false},
+        {true, true, false, false},
+        {true, true, true, false},
+        {true, true, true, true}};
+    const Need needs[] = {Need::Open, Need::Read, Need::Operate, Need::Maintain};
+    for (int r = 0; r < 4; ++r)
+        for (int n = 0; n < 4; ++n) CHECK(allows(roles[r], needs[n]) == expect[r][n]);
+    Role role;
+    CHECK(parse_role("operator", role) && role == Role::Operator && !parse_role("admin", role));
+    CHECK_EQ(std::string(role_name(Role::Maintainer)), std::string("maintainer"));
+    // 게이트웨이가 직접 답하는 경로
+    CHECK(own_route("POST", "/api/auth/login") == Own::Login);
+    CHECK(own_route("POST", "/api/board/auth/login") == Own::Login);
+    CHECK(own_route("GET", "/api/auth/login") == Own::MethodNotAllowed);
+    CHECK(own_route("GET", "/api/auth/me/") == Own::Me);
+    CHECK(own_route("POST", "/auth/logout") == Own::Logout);
+    CHECK(own_route("GET", "/api/mode") == Own::ModeGet);
+    CHECK(own_route("PUT", "/api/board/mode") == Own::ModeSet);
+    CHECK(own_route("DELETE", "/api/mode") == Own::MethodNotAllowed);
+    CHECK(own_route("GET", "/workers") == Own::None);
+    CHECK(own_route("GET", "/api/board/workers") == Own::None);
+}
+
+void test_sessions() {
+    Sessions s(100, 1000, 3);  // 쉼 100 s, 절대 1000 s, 최대 3개(가짜 시계: 시각을 넘김)
+    s.add("a", "u1", "h1", 0);
+    CHECK(s.touch("a", 50).has_value());
+    CHECK(s.touch("a", 149).has_value());   // 마지막 사용(50) 뒤 99 s
+    CHECK(!s.touch("a", 249).has_value());  // 마지막 사용(149) 뒤 100 s: 쉼 만료
+    CHECK(!s.touch("a", 250).has_value());  // 지워짐
+    s.add("b", "u2", "h2", 0);
+    for (double t = 90; t < 1000; t += 90) CHECK(s.touch("b", t).has_value());
+    CHECK(!s.touch("b", 1000).has_value());  // 계속 써도 절대 만료(7일 꼴)
+    auto x = Sessions(100, 1000, 3);
+    x.add("1", "u", "h", 0);
+    x.add("2", "u", "h", 1);
+    x.add("3", "u", "h", 2);
+    CHECK(x.touch("1", 3).has_value());  // 1이 가장 최근에 씀
+    x.add("4", "u", "h", 4);             // 넘침: 가장 오래 안 쓴 2가 빠짐
+    CHECK(x.size(5) == 3u);
+    CHECK(!x.touch("2", 5).has_value());
+    CHECK(x.touch("1", 5).has_value() && x.touch("4", 5).has_value());
+    const auto info = x.touch("4", 6);
+    CHECK(info && info->user == "u" && info->stamp == "h" && info->created == 4);
+    x.remove("4");
+    CHECK(!x.touch("4", 7).has_value());
+    CHECK(x.size(500) == 0u);  // 모두 쉼 만료
+}
+
+void test_limiter() {
+    LoginLimiter l(5, 30, 4);
+    for (int i = 0; i < 4; ++i) l.failure("a", 10);
+    CHECK(l.locked_for("a", 10) == 0);
+    l.failure("a", 11);  // 다섯 번째
+    CHECK(l.locked_for("a", 11) > 29.9);
+    CHECK(l.locked_for("b", 11) == 0);  // 다른 주소는 그대로
+    CHECK(l.locked_for("a", 40.9) > 0);
+    CHECK(l.locked_for("a", 41.1) == 0);  // 30 s 뒤 풀림
+    for (int i = 0; i < 4; ++i) l.failure("c", 50);
+    l.success("c");  // 성공하면 셈을 지움
+    l.failure("c", 51);
+    CHECK(l.locked_for("c", 51) == 0);
+    for (int i = 0; i < 4; ++i) l.failure("d", 100);
+    l.failure("d", 100 + 11 * 60);  // 10분 넘게 지난 실패는 잊음
+    CHECK(l.locked_for("d", 100 + 11 * 60) == 0);
+    // 표가 차도(주소를 바꿔 가며) 막힌 주소는 남는다
+    for (int i = 0; i < 5; ++i) l.failure("z", 2000);
+    for (int i = 0; i < 20; ++i) l.failure("x" + std::to_string(i), 2001);
+    CHECK(l.locked_for("z", 2002) > 0);
+}
+
+void test_record_line() {
+    RecordFields f;
+    f.t = "2026-11-23T10:00:00.123+09:00";
+    f.user = "op1";
+    f.role = "operator";
+    f.mode = "operation";
+    f.remote = "10.0.0.1";
+    f.method = "POST";
+    f.path = "/workers/w1/command";
+    f.cmd = "source.set_rate";
+    f.code = 200;
+    f.ms = 1.234;
+    CHECK_EQ(record_line(f), std::string(R"({"t":"2026-11-23T10:00:00.123+09:00","user":"op1","role":"operator",)"
+                                         R"("mode":"operation","remote":"10.0.0.1","method":"POST","path":"/workers/w1/command",)"
+                                         R"("cmd":"source.set_rate","code":200,"ms":1.2})" "\n"));
+    f.cmd.clear();
+    f.path = std::string(2000, 'p');
+    const std::string l = record_line(f);
+    CHECK(l.find("\"cmd\":null") != std::string::npos);
+    CHECK(l.size() < 1000);  // 긴 칸은 자름
+    CHECK(l.back() == '\n' && std::count(l.begin(), l.end(), '\n') == 1);
+    // 기록 줄에는 본문·쿼리·헤더 칸이 없다(비밀번호·토큰이 들어갈 자리가 없음)
+    CHECK(Json::parse(l).size() == 10u);
+    CHECK_EQ(redact_query("a=1&token=s3cret&x=&password=pw&TOKEN=z"), std::string("a=1&token=***&x=&password=***&TOKEN=***"));
+    CHECK_EQ(redact_query(""), std::string(""));
+    CHECK_EQ(cookie_value("a=1; workspace_session=abc; b=2", "workspace_session"), std::string("abc"));
+    CHECK_EQ(cookie_value("workspace_session=a; workspace_session=b", "workspace_session"), std::string("b"));
+    CHECK_EQ(cookie_value("x_workspace_session=a", "workspace_session"), std::string(""));
+    CHECK_EQ(bearer_token("Bearer  abc "), std::string("abc"));
+    CHECK_EQ(bearer_token("Basic abc"), std::string(""));
 }
 
 }  // namespace
@@ -338,6 +622,13 @@ int main() {
     test_profile_rules();
     test_board_parse();
     test_auth();
+    test_crypto();
+    test_password_hash();
+    test_users_file();
+    test_roles();
+    test_sessions();
+    test_limiter();
+    test_record_line();
     std::cout << (g_fail ? "FAILED " : "OK ") << g_checks - g_fail << "/" << g_checks << " checks\n";
     return g_fail ? 1 : 0;
 }

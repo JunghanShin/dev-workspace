@@ -21,9 +21,96 @@ let refreshMs = 1000;
 
 // ---- 공용 도구 (패널이 ctx로 받는다) --------------------------------------------------
 
-// 보드가 토큰을 요구하면(제품 모드 WORKSPACE_REST_TOKEN) 한 번 묻고 쿠키에 둔다. 스트림(EventSource)도 쿠키로 간다
+// 신분 확인(게이트웨이 GET /api/auth/me, docs/gateway.md 3장): {auth: "on"|"off", name, role, mode}.
+// auth on인데 세션이 없으면 로그인 창을 먼저 띄운다. 이 엔드포인트가 없는 REST(Python 판)면 auth "none"
+let auth = null;
+const ROLE_KO = { viewer: "보기", operator: "조작", maintainer: "관리" };
+
+async function loadAuth() {
+  let r;
+  try { r = await fetch("/api/auth/me"); } catch { return "down"; }
+  if (r.status === 404) { auth = { auth: "none" }; return "ok"; }
+  let data = null;
+  try { data = await r.json(); } catch { /* 빈 답 */ }
+  if (r.status === 401 && data && data.auth === "on") { auth = { auth: "on" }; return "login"; }
+  if (r.status === 401) { auth = { auth: "none" }; return "ok"; }  // 토큰 판(WORKSPACE_REST_TOKEN): 아래 needToken이 묻는다
+  if (r.status === 503) return "unavailable";  // 제품 모드인데 사용자가 없음
+  if (!r.ok || !data) { auth = { auth: "none" }; return "ok"; }
+  auth = data;
+  return "ok";
+}
+
+// 세션이 끝났으면(12시간 쉼, 비밀번호 바꿈 등) 다시 불러와 로그인 창으로
+function sessionLost(r) {
+  if (r.status !== 401 || !auth || auth.auth !== "on") return false;
+  location.reload();
+  return true;
+}
+
+function showLogin(message) {
+  nav.textContent = "";
+  const name = h("input", { type: "text", autocomplete: "username", placeholder: "이름" });
+  const pass = h("input", { type: "password", autocomplete: "current-password", placeholder: "비밀번호" });
+  const note = h("div", { class: "hint", style: "margin-top:8px" }, message || "이 보드는 로그인해야 쓸 수 있습니다");
+  const submit = async () => {
+    if (!name.value || !pass.value) { note.textContent = "이름과 비밀번호를 넣으세요"; return; }
+    let r;
+    try {
+      r = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.value.trim(), password: pass.value }) });
+    } catch { note.textContent = "보드 응답 없음"; return; }
+    if (r.ok) { location.reload(); return; }
+    pass.value = "";
+    note.textContent = r.status === 429 ? "여러 번 틀려 잠시 막혔습니다. 30초 뒤에 다시 하세요"
+      : r.status === 401 ? "이름 또는 비밀번호가 틀립니다" : `로그인 실패 (${r.status})`;
+  };
+  for (const i of [name, pass]) i.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+  main.replaceChildren(h("div", { style: "max-width:380px; margin:60px auto" },
+    ui.card("로그인", ui.formRows([["이름", name], ["비밀번호", pass]]), note,
+      h("div", { class: "btnrow", style: "margin-top:12px; justify-content:flex-end" },
+        ui.iconButton({ icon: "lock", label: "로그인", kind: "primary", onClick: submit })))));
+  name.focus();
+}
+
+async function logout() {
+  try { await fetch("/api/auth/logout", { method: "POST" }); } catch { /* 그래도 다시 불러옴 */ }
+  location.reload();
+}
+
+// 머리: 운용/정비 모드 배지, 사용자(역할)·로그아웃 또는 "인증 꺼짐"
+let whoSig = "";
+function renderWho() {
+  const sig = JSON.stringify(auth);
+  if (sig === whoSig) return;
+  whoSig = sig;
+  const modeEl = document.getElementById("mode"), whoEl = document.getElementById("who");
+  modeEl.replaceChildren();
+  whoEl.replaceChildren();
+  if (!auth || auth.auth === "none") return;
+  if (auth.mode) {
+    const maint = auth.mode === "maintenance";
+    modeEl.appendChild(ui.pill(maint ? "wrench" : "check", maint ? "정비" : "운용", maint ? "warn" : "ok"));
+  }
+  if (auth.auth === "on" && auth.name) {
+    whoEl.append(ui.pill("lock", `${auth.name} · ${ROLE_KO[auth.role] || auth.role}`, "info"),
+      ui.iconButton({ icon: "power", title: "로그아웃", onClick: logout }));
+  } else if (auth.auth === "off") {
+    whoEl.appendChild(ui.pill("lock", "인증 꺼짐", "idle"));
+  }
+}
+
+async function refreshAuth() {
+  const prev = auth && auth.auth;
+  const res = await loadAuth();
+  if (res === "login" && prev === "on") { location.reload(); return; }  // 세션 끝남
+  state.auth = auth;
+  renderWho();
+}
+
+// 보드가 토큰을 요구하면(신분 확인 꺼짐 + WORKSPACE_REST_TOKEN) 한 번 묻고 쿠키에 둔다. 스트림(EventSource)도 쿠키로 간다
 let askedToken = false;
 function needToken(r) {
+  if (sessionLost(r)) return true;
   if (r.status !== 401 || askedToken) return false;
   askedToken = true;
   const t = window.prompt("이 보드는 접근 토큰이 필요합니다. 토큰을 입력하세요");
@@ -94,7 +181,7 @@ function toast(msg, kind = "") {
 
 // 명령 실행 + 결과 알림. 성공하면 바로 상태를 다시 읽는다
 async function act(label, fn) {
-  try { await fn(); toast(label + " 완료", "ok"); poll(); }
+  try { await fn(); toast(label + " 완료", "ok"); poll(); refreshAuth(); }
   catch (e) { toast(label + " 실패: " + e.message, "bad"); }
 }
 
@@ -173,6 +260,7 @@ async function poll() {
 
 async function pollUi() {
   try { state.ui = await (await fetch("/api/ui")).json(); } catch { /* 로컬 서버 꺼짐 */ }
+  if (auth && auth.auth !== "none") refreshAuth();  // 모드(다른 사람이 바꿨을 수도)·세션
   // 화면 제목: 보드 REST의 WORKSPACE_UI_TITLE (기본 Workspace)
   const title = (state.ui && state.ui.title) || "Workspace";
   if (document.title !== title) {
@@ -273,6 +361,15 @@ async function route() {
 }
 
 async function start() {
+  const a = await loadAuth();
+  if (a === "login") { showLogin(); return; }
+  if (a === "unavailable") {
+    main.replaceChildren(h("div", { class: "empty err" },
+      "이 보드에는 사용자가 없어 접속할 수 없습니다. 보드에서 gateway user add로 사용자를 만드세요"));
+    return;
+  }
+  state.auth = auth;
+  renderWho();
   await pollUi();
   ui.setProduct(state.ui && state.ui.product);  // 제품 모드: 패널을 띄우기 전에(kit.js 제품 모드)
   refreshMs = (state.ui && state.ui.refresh_ms) || 1000;

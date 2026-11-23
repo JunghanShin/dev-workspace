@@ -91,7 +91,7 @@ core는 워커의 모듈 코어처럼 시스템 호출을 모른다(시계·spaw
 | 명령 소유 | `connections.json`에 `"owners": {"<워커>.<역할>": "<매니저 id>"}`. 검사: 소유 매니저가 있는지, 그 역할의 명령을 쓴다고 `uses`에 적었는지, 한 역할에 하나뿐인지(겹치면 거절). 상태·`list`에 보임 |
 | 소켓 접근 허용 목록 | `<데이터>/run/peers.json`: 프로세스 그룹 → 워커 id, 워커마다 명령을 보내도 되는 id(소유 매니저, 정비 모드면 게이트웨이). process-manager가 spawn 설정 파일의 호스트 키 `peers_file`로 위치를 넘긴다. 워커(libworker)는 `peers_file`이 있을 때만 접속한 상대를 `SO_PEERCRED` pid → 프로세스 그룹으로 알아보고 이 목록으로 판단한다. 없으면(단독 실행) 막지 않음 |
 | 막기 단계 | 설정 `command_guard`: `off`(지금, 기본) → `warn`(어긋난 명령을 기록만) → `enforce`(6단계, 매니저가 생긴 뒤). 읽기 명령(`get_status`, 정의에 `"read": true`인 명령)은 늘 허용 |
-| 운용·정비 모드 | 게이트웨이가 바꾸고(원칙 17) process-manager가 `peers.json`에 반영. 재시작하면 운용 |
+| 운용·정비 모드 | 게이트웨이가 바꾸고(원칙 17) op `set_access_mode {"mode": "operation"\|"maintenance"}`(쓰기, `manager-rest.sock`만, 0.52)로 알린다. process-manager는 메모리에만 두고 `system` 답·구독에 `access_mode`로 보이며 바꿀 때 기록(로그 한 줄 + `commands` 주제). 재시작하면 운용. `peers.json` 반영은 5단계 |
 
 ## 4. 끊겼을 때
 

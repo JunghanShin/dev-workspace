@@ -2,6 +2,9 @@
 //   - Hub/Upstream/Subscriber: 기준 상태, 합치기, 위쪽 연결 하나, 워커 재시작(down → up), 화면이 떠나면 정리
 //   - SseSession: hz 간격, ping, 쓰기 실패면 끝(구독 해제)
 //   - Gateway(HTTP 끝까지): 여러 스레드가 동시에 요청·SSE, 동시 요청 상한 → 503, 상한 안 끝내기
+//   - FileRecorder(gw.log): 큐 상한·이어 쓰기·여러 스레드·파일 회전과 전체 상한
+//   - UsersFile: 읽는 중 바꿔 써도 깨진 값 없음, 깨진 파일은 마지막 값, 지우면 사용자 없음
+//   - ManagerCache(gw.mgr): list 순서, 구독 값, Manager가 멈추면 새롭지 않음 → 직접 묻게
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -20,8 +23,11 @@
 #include <thread>
 #include <vector>
 
+#include "auth.hpp"
 #include "httplib/httplib.h"
 #include "hub.hpp"
+#include "mgr_cache.hpp"
+#include "recorder.hpp"
 #include "server.hpp"
 #include "sys.hpp"
 
@@ -393,6 +399,227 @@ void test_gateway() {
     cmd.close();
 }
 
+// ---- 4단계: 명령 기록(gw.log)·사용자 파일 다시 읽기·Manager 캐시(gw.mgr) ----
+
+RecordFields sample(int i) {
+    RecordFields f;
+    f.t = iso_now();
+    f.user = "u" + std::to_string(i % 3);
+    f.role = "operator";
+    f.mode = "operation";
+    f.remote = "127.0.0.1";
+    f.method = "POST";
+    f.path = "/workers/w" + std::to_string(i) + "/command";
+    f.cmd = "c" + std::to_string(i);
+    f.code = 200;
+    f.ms = 1.5;
+    return f;
+}
+
+std::vector<std::string> log_files(const std::string& dir) {
+    std::vector<std::string> out;
+    for (const auto& n : list_dir(dir))
+        if (starts_with(n, "gateway-") && ends_with(n, ".jsonl")) out.push_back(dir + "/" + n);
+    return out;
+}
+
+void test_recorder() {
+    const std::string base = tmpdir();
+    {
+        // 큐 상한: 스레드가 돌기 전에 6개 → 4개만 들어가고 2개는 버리고 셈
+        FileRecorder r(base + "/a", "boot0001", RecorderLimits{1 << 20, 1 << 22, 4});
+        for (int i = 0; i < 6; ++i) r.record(sample(i));
+        CHECK(r.stats()["dropped"] == 2);
+        r.start();
+        CHECK(wait_for([&] { return r.stats()["written"] == 4; }, 5));
+        r.stop(2.0);
+        auto text = read_file(base + "/a/gateway-boot0001.jsonl");
+        CHECK(text && std::count(text->begin(), text->end(), '\n') == 4);
+        // 같은 부팅에서 다시 뜨면 이어 쓴다
+        FileRecorder r2(base + "/a", "boot0001");
+        r2.start();
+        r2.record(sample(9));
+        r2.stop(2.0);
+        text = read_file(base + "/a/gateway-boot0001.jsonl");
+        CHECK(text && std::count(text->begin(), text->end(), '\n') == 5);
+    }
+    {
+        // 여러 요청 스레드 + 파일 상한(2000 B)·전체 상한(6000 B): 넘기면 이름을 바꾸고 오래된 것부터 지움
+        const std::string dir = base + "/b";
+        FileRecorder r(dir, "boot0002", RecorderLimits{2000, 6000, 1024});
+        r.start();
+        std::vector<std::thread> ts;
+        for (int k = 0; k < 4; ++k)
+            ts.emplace_back([&r, k] {
+                for (int i = 0; i < 100; ++i) r.record(sample(k * 100 + i));
+            });
+        for (auto& t : ts) t.join();
+        CHECK(wait_for([&] {
+            const Json s = r.stats();
+            return s["written"].get<unsigned long long>() + s["dropped"].get<unsigned long long>() == 400;
+        }, 5));
+        r.stop(2.0);
+        long long total = 0;
+        size_t lines = 0;
+        bool parsed = true;
+        for (const auto& f : log_files(dir)) {
+            total += size_of(f);
+            for_each_line(f, [&](const std::string& l) {
+                auto j = parse_json(l);
+                parsed = parsed && j && j->size() == 10;
+                ++lines;
+                return true;
+            });
+        }
+        CHECK(log_files(dir).size() >= 2);
+        CHECK(total <= 6000 + 2000 + 400);  // 전체 상한 + 쓰는 중인 파일 하나
+        CHECK(parsed && lines > 0);
+    }
+}
+
+void test_users_reload() {
+    const std::string dir = tmpdir();
+    const std::string path = dir + "/users.json";
+    UsersFile uf(path, 0.02);
+    CHECK(uf.get()->users.empty());  // 없는 파일 = 사용자 없음
+    auto make = [](int n) {
+        UsersDb db;
+        for (int i = 0; i < n; ++i) {
+            User u;
+            u.name = "u" + std::to_string(i);
+            u.role = Role::Viewer;
+            db.users.push_back(u);
+        }
+        return dump_users(db);
+    };
+    std::string err;
+    CHECK(write_file_atomic(path, make(1), 0600, err));
+    struct stat st{};
+    CHECK(::stat(path.c_str(), &st) == 0 && (st.st_mode & 0777) == 0600);
+    CHECK(wait_for([&] { return uf.get()->users.size() == 1; }, 3));
+    // 여러 스레드가 읽는 중에 파일을 계속 바꿔 써도(원자적 바꿔 끼우기) 깨진 값을 보지 않는다
+    std::atomic<bool> stop{false};
+    std::atomic<int> bad{0};
+    std::vector<std::thread> ts;
+    for (int k = 0; k < 4; ++k)
+        ts.emplace_back([&] {
+            while (!stop.load()) {
+                const size_t n = uf.get()->users.size();
+                if (n < 1 || n > 3) bad.fetch_add(1);
+            }
+        });
+    for (int i = 0; i < 12; ++i) {
+        CHECK(write_file_atomic(path, make(1 + i % 3), 0600, err));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(write_file_atomic(path, make(3), 0600, err));
+    CHECK(wait_for([&] { return uf.get()->users.size() == 3; }, 3));
+    stop.store(true);
+    for (auto& t : ts) t.join();
+    CHECK(bad.load() == 0);
+    // 깨진 파일: 마지막으로 읽은 목록을 그대로
+    CHECK(write_file_atomic(path, "{broken", 0600, err));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CHECK(uf.get()->users.size() == 3);
+    CHECK(::unlink(path.c_str()) == 0);
+    CHECK(wait_for([&] { return uf.get()->users.empty(); }, 3));  // 지우면 사용자 없음
+}
+
+// 구독을 아는 가짜 Manager: 주기마다 워커 전체 + system, list는 w2·w1 순서(구독 순서와 다르게)
+struct FakeSubManager {
+    std::atomic<bool> stall{false};
+    std::atomic<int> lists{0}, modes{0};
+    std::mutex mu;
+    std::string last_mode;
+    std::unique_ptr<FakeServer> srv;
+    static Json status(const std::string& id, int n) { return Json{{"id", id}, {"actual_state", "running"}, {"n", n}}; }
+    explicit FakeSubManager(const std::string& path) {
+        srv.reset(new FakeServer(path, [this](int fd) {
+            std::string buf;
+            int err;
+            if (read_line(fd, buf, 65536, mono_now() + 2, err) != Io::Ok) return;
+            const Json req = Json::parse(buf.substr(0, buf.find('\n')));
+            const std::string op = req.value("op", "");
+            if (op == "list") {
+                lists.fetch_add(1);
+                send_line(fd, Json{{"ok", true}, {"data", Json::array({status("w2", 0), status("w1", 0)})}});
+                return;
+            }
+            if (op == "set_access_mode") {
+                modes.fetch_add(1);
+                std::lock_guard<std::mutex> lock(mu);
+                last_mode = req.value("mode", "");
+                send_line(fd, Json{{"ok", true}, {"data", {{"access_mode", last_mode}}}});
+                return;
+            }
+            if (op != "subscribe") {
+                send_line(fd, Json{{"ok", true}, {"data", {{"op", op}}}});
+                return;
+            }
+            send_line(fd, Json{{"ok", true}, {"data", {{"subscribed", {"system", "workers"}}}}});
+            int n = 0;
+            while (!srv->stopping()) {
+                if (!stall.load()) {
+                    ++n;
+                    send_line(fd, Json{{"event", "worker_status"}, {"data", status("w1", n)}});
+                    send_line(fd, Json{{"event", "worker_status"}, {"data", status("w2", n)}});
+                    send_line(fd, Json{{"event", "system"}, {"data", {{"clients", Json::object()}, {"access_mode", "operation"}}}});
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        }));
+    }
+};
+
+void test_manager_cache() {
+    const std::string dir = tmpdir();
+    FakeSubManager fake(dir + "/mgr.sock");
+    ManagerCache c(dir + "/mgr.sock", 1.0, 2.0, 0.5, 100);
+    std::atomic<int> systems{0};
+    c.on_system = [&](const Json& s) {
+        if (s.value("access_mode", "") == "operation") systems.fetch_add(1);
+    };
+    worker::ThreadWatch watch(std::chrono::milliseconds(3000));
+    Json out;
+    CHECK(!c.workers(out));  // 시작 전: 새롭지 않음 → 부르는 쪽이 직접
+    c.start(&watch);
+    CHECK(wait_for([&] { return c.workers(out); }, 5));
+    CHECK(out.is_array() && out.size() == 2 && out[0]["id"] == "w2" && out[1]["id"] == "w1");  // list 순서 그대로
+    CHECK(fake.lists.load() == 1);  // 순서는 처음 한 번만 배움
+    // 요청 스레드 여럿이 읽는 동안 값이 계속 바뀜
+    std::vector<std::thread> ts;
+    std::atomic<int> hits{0};
+    for (int k = 0; k < 4; ++k)
+        ts.emplace_back([&] {
+            for (int i = 0; i < 200; ++i) {
+                Json a, b, s;
+                if (c.workers(a) && c.worker("w1", b) && c.system(s)) hits.fetch_add(1);
+            }
+        });
+    for (auto& t : ts) t.join();
+    CHECK(hits.load() > 700);
+    CHECK(!c.worker("nope", out));  // 없는 워커는 Manager가 not_found로
+    CHECK(wait_for([&] { return c.worker("w1", out) && out["n"].get<int>() > 2; }, 3));  // 구독으로 계속 새 값
+    CHECK(systems.load() > 0);
+    CHECK(fake.lists.load() == 1);
+    // Manager가 멈추면(구독이 조용함) fresh_s(0.5 s) 뒤에는 캐시를 쓰지 않는다
+    fake.stall.store(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(700));
+    CHECK(!c.workers(out) && !c.system(out));
+    CHECK(c.state()["fresh"] == false && c.state()["connected"] == true);
+    fake.stall.store(false);
+    CHECK(wait_for([&] { return c.workers(out); }, 3));
+    CHECK(watch.all_alive(worker::ThreadWatch::Clock::now()));
+    c.stop();
+    // Manager가 없으면 연결만 다시 시도(멈추지 않음)
+    ManagerCache none(dir + "/nothing.sock", 0.2, 0.2, 0.5, 100);
+    none.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    CHECK(!none.workers(out) && none.state()["connected"] == false);
+    none.stop();
+    fake.srv->close();
+}
+
 }  // namespace
 
 int main() {
@@ -400,6 +627,9 @@ int main() {
     test_hub();
     test_sse_session();
     test_gateway();
+    test_recorder();
+    test_users_reload();
+    test_manager_cache();
     std::cout << (g_fail ? "FAILED " : "OK ") << g_checks - g_fail << "/" << g_checks << " checks\n";
     return g_fail ? 1 : 0;
 }

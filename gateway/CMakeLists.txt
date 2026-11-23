@@ -1,5 +1,5 @@
-# gateway: 워크스페이스 REST의 C++ 판 (docs/gateway.md 6장 1~2단계). Python 판(rest/workspace_rest)과 같은
-# 경로·응답·상태 코드·SSE 모양·인자·환경 변수. 신분 확인은 WORKSPACE_AUTH=off만(지금 REST와 같음).
+# gateway: 워크스페이스 REST의 C++ 판 (docs/gateway.md). Python 판(rest/workspace_rest)과 같은
+# 경로·응답·상태 코드·SSE 모양·인자·환경 변수. 4단계: 신분 확인(WORKSPACE_AUTH=on)·역할·운용/정비 모드·명령 기록·Manager 캐시.
 #
 #   cmake -S gateway -B ~/gw-build -DCMAKE_BUILD_TYPE=Release && cmake --build ~/gw-build -j
 #   ctest --test-dir ~/gw-build --output-on-failure                          # core·스레드 단위 시험
@@ -8,7 +8,7 @@
 #   TSan: cmake -S gateway -B ~/gw-build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGW_TSAN=ON && cmake --build ~/gw-build-tsan -j
 #         TSAN_OPTIONS=halt_on_error=1 setarch $(uname -m) -R ~/gw-build-tsan/test_threads
 #
-# 구성: core/ 규칙(경로 표·SSE 합치기·지난 지표·비밀값 가림, 시스템 호출 없음) · src/ HTTP·소켓·스레드·파일
+# 구성: core/ 규칙(경로 표·SSE 합치기·지난 지표·비밀값 가림·SHA-256/PBKDF2·역할·세션, 시스템 호출 없음) · src/ HTTP·소켓·스레드·파일
 #       · lib/ 사본(libworker 스레드 감시·큐, nlohmann/json v3.11.3, cpp-httplib v0.18.3 — 모두 MIT)
 cmake_minimum_required(VERSION 3.16)
 project(gateway LANGUAGES CXX)
@@ -44,6 +44,8 @@ add_library(gw_core STATIC
     core/profile_rules.cpp
     core/board_parse.cpp
     core/pipeline.cpp
+    core/crypto.cpp
+    core/access.cpp
 )
 target_include_directories(gw_core PUBLIC core lib/third_party)
 target_compile_options(gw_core PRIVATE -Wall -Wextra -Wpedantic)
@@ -57,6 +59,10 @@ add_library(gw_src STATIC
     src/ui.cpp
     src/productbuild.cpp
     src/server.cpp
+    src/auth.cpp
+    src/recorder.cpp
+    src/mgr_cache.cpp
+    src/users_cli.cpp
 )
 target_include_directories(gw_src PUBLIC src)
 target_link_libraries(gw_src PUBLIC gw_core gw_lib)
