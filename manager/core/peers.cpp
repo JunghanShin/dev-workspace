@@ -8,13 +8,15 @@ namespace {
 
 const std::regex kId("^[a-z0-9][a-z0-9_-]{0,63}$");
 
-void add_commands(const Json& def, std::set<std::string>* all, std::set<std::string>* read) {
+void add_commands(const Json& def, std::set<std::string>* all, std::set<std::string>* read,
+                  std::set<std::string>* operate = nullptr) {
     if (!def.is_object()) return;
     auto it = def.find("commands");
     if (it == def.end() || !it->is_object()) return;
     for (auto c = it->begin(); c != it->end(); ++c) {
         if (all) all->insert(c.key());
         if (read && c->is_object() && c->value("read", false) == true) read->insert(c.key());
+        if (operate && c->is_object() && c->value("operate", false) == true) operate->insert(c.key());
     }
 }
 
@@ -31,11 +33,11 @@ WorkerCommands commands_from_io(const Json& io) {
     WorkerCommands w;
     w.read.insert("get_status");
     if (!io.is_object()) return w;
-    for (const char* k : {"common", "self"}) add_commands(io.value(k, Json()), nullptr, &w.read);
+    for (const char* k : {"common", "self"}) add_commands(io.value(k, Json()), nullptr, &w.read, &w.operate);
     if (io.contains("includes") && io["includes"].is_object())
-        for (const auto& [path, def] : io["includes"].items()) add_commands(def, nullptr, &w.read);
+        for (const auto& [path, def] : io["includes"].items()) add_commands(def, nullptr, &w.read, &w.operate);
     if (io.contains("provides") && io["provides"].is_object())
-        for (const auto& [role, def] : io["provides"].items()) add_commands(def, &w.roles[role], &w.read);
+        for (const auto& [role, def] : io["provides"].items()) add_commands(def, &w.roles[role], &w.read, &w.operate);
     if (io.contains("uses") && io["uses"].is_object())
         for (const auto& [input, u] : io["uses"].items())
             if (u.is_object() && u.contains("from") && u["from"].is_string()) w.uses.insert(u["from"].get<std::string>());
@@ -148,6 +150,7 @@ Json build_peers(const Json& commanders, const std::map<std::string, WorkerComma
                     auto& set = allow[who];
                     for (const auto& [r, rc] : cmds.roles)
                         if (role.empty() || r == role) set.insert(rc.begin(), rc.end());
+                    if (role.empty()) set.insert(cmds.operate.begin(), cmds.operate.end());  // 워커 전체: 운용 조작도
                 }
             }
         Json a = Json::object();  // 순서 있는 객체: 게이트웨이를 먼저, 나머지는 이름순

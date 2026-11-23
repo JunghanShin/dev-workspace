@@ -262,13 +262,14 @@ Need classify(const std::string& method, const std::string& path, bool ui_enable
 bool is_worker_command(const std::string& path) { return is_command(path); }
 
 namespace {
-void collect(const Json& def, std::set<std::string>* all, std::set<std::string>& read) {
+void collect(const Json& def, std::set<std::string>* all, std::set<std::string>& read, std::set<std::string>& operate) {
     if (!def.is_object()) return;
     auto it = def.find("commands");
     if (it == def.end() || !it->is_object()) return;
     for (auto c = it->begin(); c != it->end(); ++c) {
         if (all) all->insert(c.key());
         if (c->is_object() && c->value("read", false) == true) read.insert(c.key());
+        if (c->is_object() && c->value("operate", false) == true) operate.insert(c.key());
     }
 }
 }  // namespace
@@ -277,11 +278,11 @@ CommandKinds command_kinds(const Json& io) {
     CommandKinds k;
     if (!io.is_object()) return k;
     for (const char* key : {"common", "self"})
-        if (io.contains(key)) collect(io[key], nullptr, k.read);
+        if (io.contains(key)) collect(io[key], nullptr, k.read, k.operate);
     if (io.contains("includes") && io["includes"].is_object())
-        for (const auto& [path, def] : io["includes"].items()) collect(def, nullptr, k.read);
+        for (const auto& [path, def] : io["includes"].items()) collect(def, nullptr, k.read, k.operate);
     if (io.contains("provides") && io["provides"].is_object())
-        for (const auto& [role, def] : io["provides"].items()) collect(def, &k.role, k.read);
+        for (const auto& [role, def] : io["provides"].items()) collect(def, &k.role, k.read, k.operate);
     return k;
 }
 

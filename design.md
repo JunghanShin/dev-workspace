@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.55 |
+| 문서 버전 | 0.56 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -696,7 +696,7 @@ workers/<이름>/
 | 항목 | 뜻 |
 |---|---|
 | 정의 `name`, `version` | 정의 이름(역할, `[a-z][a-z0-9_]*`)과 버전(`큰.작은`). 파일 이름과 `name`이 같다 |
-| 정의 `commands` | 받는 명령(9.6): `args`(인자, JSON Schema), `reply`(응답 `data`, JSON Schema), `errors`(9.6 code 중 쓰는 것), `description` |
+| 정의 `commands` | 받는 명령(9.6): `args`(인자, JSON Schema), `reply`(응답 `data`, JSON Schema), `errors`(9.6 code 중 쓰는 것), `description`. 표시(0.56, `docs/command-path.md` 3장): `"read": true` 읽기(늘 됨), `"operate": true` 워커 정의·조각의 명령이지만 운용 모드에서도 되는 조작(예: 영상 송출 켜기·끄기). 둘 다 없으면 역할 정의의 명령만 운용 모드에서 됨 |
 | 정의 `definitions` | 여러 곳에서 쓰는 모양(예: 명령 결과). `{"$ref": "#/definitions/<이름>"}`로 가리킨다(JSON Schema 표준, 같은 파일 안만) |
 | 정의 `topics` | 발행 주제(9.7): `every_ms`(최소 간격), `schema`(주제 값, JSON Schema), `description` |
 | 정의 `data` | 데이터 버스(6.7): 이름(= 기본 소켓 이름 `default_socket(id, "<이름>")`), `format`, `description` |
@@ -1544,6 +1544,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.53 | **자동 상태 화면**(6.11): 자기 패널이 없는 워커를 워커 계약(`io/self.json` metrics·status)대로 그리는 `ui/web/panels/auto`. 화면 틀(머리·왼쪽 메뉴·본문) 위에 패널만 바뀌는 구조 그대로 |
 | 0.54 | **게이트웨이 5단계**(`docs/gateway.md` 6.3): 시작 셸 기본·유일 C++ 게이트웨이, Python REST(`rest/workspace_rest`) 삭제, PC 개발 실행이 process-manager·게이트웨이를 PC용으로 빌드해 씀, 제품 묶음에 C++ Manager·게이트웨이·nginx 틀(Python Manager·REST 컴파일 뺌), 제품 설치가 첫 계정 `admin`·원격 화면 토큰을 만듦 |
 | 0.55 | **명령 길**(`docs/command-path.md`, 그림 `docs/command-path.svg`): 명령하는 곳은 허용 목록(`connections.json` `commanders`, 화면은 늘 허용)으로, 동시 명령은 조정하지 않고 보낸 곳(`from`)을 남김(조정은 매니저 규칙). 정비 모드 → **개발 모드**(`development`): 운용 모드에서는 읽기·역할 명령만, 워커 전용·계약에 없는 명령·설정·시작/정지·연결 선언은 개발 모드에서만. 검사 세 곳: 게이트웨이(모드 × 역할 × 명령 종류), 워커 명령 소켓(libworker, `SO_PEERCRED` + `run/peers.json`, `command_guard` warn → enforce), process-manager(Manager API 쓰기 × 모드). `get_status` 공통 칸 `last_command`. 원칙 13·17 고침 |
+| 0.56 | **명령 표시 `operate`**(6.6.7.1, `docs/command-path.md` 3장): 워커 정의·조각의 명령 중 운용 중에도 쓰는 조작을 계약에 표시하면 운용 모드에서도 통과(게이트웨이), 연결 선언에 워커 전체로 적은 명령하는 곳에도 열림(process-manager). libvideo `stream.start`·`stop`에 표시(조각 1.1). 점검이 명령 칸 `read`·`operate`를 받음(true만, 같이 쓰지 않음) |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

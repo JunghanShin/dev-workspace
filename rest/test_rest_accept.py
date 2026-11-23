@@ -197,7 +197,7 @@ class FakeManager(UnixServer):
             return {"ok": True, "data": {"config": WORKERS[wid] or {}, "preset": "default"}}
         if op == "get_io" and wid == "w2":  # 명령 종류(docs/command-path.md 3장)
             return {"ok": True, "data": {"id": "w2", "common": {"commands": {"get_status": {}}},
-                                         "self": {"commands": {"diag.dump": {}}}, "includes": {},
+                                         "self": {"commands": {"diag.dump": {}, "stream.start": {"operate": True}}}, "includes": {},
                                          "provides": {"example": {"commands": {"source.set_rate": {},
                                                                                "source.get": {"read": True}}}},
                                          "uses": {}}}
@@ -1977,6 +1977,7 @@ class CommandPathModes(unittest.TestCase):
             self.assertEqual(cmd("source.set_rate")[0], 200)
             self.assertEqual(T["w2"].requests[-1]["from"], "screen")
             self.assertEqual(cmd("source.get")[0], 200)
+            self.assertEqual(cmd("stream.start")[0], 200)  # 워커 전용이지만 operate
             self.assertEqual(cmd("get_status")[0], 200)
             self.assertEqual(cmd("diag.dump"), need)       # 워커 전용
             self.assertEqual(cmd("no.such.cmd"), need)     # 계약에 없음

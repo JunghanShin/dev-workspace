@@ -213,7 +213,7 @@ void App::refresh_commands() {
     if (next.size() != cmds_.size() ||
         !std::equal(next.begin(), next.end(), cmds_.begin(), [](const auto& a, const auto& b) {
             return a.first == b.first && a.second.read == b.second.read && a.second.roles == b.second.roles &&
-                   a.second.uses == b.second.uses;
+                   a.second.uses == b.second.uses && a.second.operate == b.second.operate;
         })) {
         cmds_ = std::move(next);
         peers_dirty_ = true;

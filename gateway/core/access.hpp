@@ -73,13 +73,14 @@ bool allows(Role role, Need need);
 
 // ---- 운용/개발 모드(docs/command-path.md 3장) ----
 bool is_worker_command(const std::string& path);  // POST /workers/<id>/command 경로
-// 워커 명령의 종류: 계약(get_io 답)으로. 읽기(get_status, "read": true) · 역할 명령(provides) · 그 밖(워커 전용·계약에 없음)
+// 워커 명령의 종류: 계약(get_io 답)으로. 읽기(get_status, "read": true) · 역할 명령(provides)과 "operate": true인 명령 ·
+// 그 밖(워커 전용·계약에 없음). 운용 모드에서는 그 밖만 막힌다
 enum class CmdKind { Read, Role, Other };
 struct CommandKinds {
-    std::set<std::string> read, role;
+    std::set<std::string> read, role, operate;
     CmdKind of(const std::string& cmd) const {
         if (cmd == "get_status" || read.count(cmd)) return CmdKind::Read;
-        return role.count(cmd) ? CmdKind::Role : CmdKind::Other;
+        return role.count(cmd) || operate.count(cmd) ? CmdKind::Role : CmdKind::Other;
     }
 };
 CommandKinds command_kinds(const Json& io);  // io가 null(계약 없음)이면 get_status만 읽기

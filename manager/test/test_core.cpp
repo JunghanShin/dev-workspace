@@ -746,7 +746,7 @@ std::map<std::string, pm::WorkerCommands> peer_workers() {
     std::map<std::string, pm::WorkerCommands> w;
     w["siyi"] = pm::commands_from_io(J(R"({
         "common": {"commands": {"get_status": {}, "__fault": {}}},
-        "self": {"commands": {"stream.start": {}, "diag.dump": {"read": true}}},
+        "self": {"commands": {"stream.start": {"operate": true}, "diag.dump": {"read": true}}},
         "includes": {"lib/x.json": {"commands": {"tap.info": {"read": true}}}},
         "provides": {"gimbal": {"commands": {"gimbal.angle": {}, "gimbal.get": {"read": true}}},
                      "camera": {"commands": {"camera.zoom": {}}}},
@@ -762,6 +762,7 @@ TEST(peers_commands_from_io) {
     CHECK_EQ(w.at("siyi").roles.size(), size_t(2));
     CHECK_EQ(w.at("siyi").roles.at("gimbal"), (std::set<std::string>{"gimbal.angle", "gimbal.get"}));
     CHECK_EQ(w.at("siyi").uses, (std::set<std::string>{"vehicle"}));
+    CHECK_EQ(w.at("siyi").operate, (std::set<std::string>{"stream.start"}));
     CHECK_EQ(w.at("bare").read, (std::set<std::string>{"get_status"}));
     CHECK(w.at("bare").roles.empty());
 }
@@ -806,7 +807,7 @@ TEST(peers_build_operation_and_development) {
     CHECK_EQ(p["workers"]["bare"]["allow"], J(R"({"gateway": "*"})"));
     // 워커 이름만(모든 역할)
     p = pm::build_peers(J(R"({"siyi": ["ext-ops"]})"), w, procs, "operation", "warn", Json());
-    CHECK_EQ(p["workers"]["siyi"]["allow"]["ext-ops"], J(R"(["camera.zoom", "gimbal.angle", "gimbal.get"])"));
+    CHECK_EQ(p["workers"]["siyi"]["allow"]["ext-ops"], J(R"(["camera.zoom", "gimbal.angle", "gimbal.get", "stream.start"])"));  // 워커 전체: operate도
     // 선언 없음: 화면만
     p = pm::build_peers(Json(), w, {}, "operation", "off", Json());
     CHECK_EQ(p["peers"], Json::object());

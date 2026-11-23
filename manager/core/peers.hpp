@@ -18,6 +18,7 @@ namespace pm {
 // 워커 하나의 명령 표(계약에서)
 struct WorkerCommands {
     std::set<std::string> read;                          // get_status + "read": true
+    std::set<std::string> operate;                       // "operate": true(워커 전용이지만 운용 중에도 쓰는 조작)
     std::map<std::string, std::set<std::string>> roles;  // 역할 → 그 역할 정의의 명령
     std::set<std::string> uses;                          // 이 워커가 쓰는 역할(io.json uses의 from) — 명령하는 곳 검사용
 };

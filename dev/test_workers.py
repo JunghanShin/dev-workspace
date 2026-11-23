@@ -143,6 +143,8 @@ class Compliance(unittest.TestCase):
 
 IO_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 IO_VERSION = re.compile(r"^(\d+)\.(\d+)$")
+# 명령 정의의 칸(design.md 6.6.7.1, docs/command-path.md 3장)
+CMD_KEYS = {"description", "args", "reply", "errors", "read", "operate"}
 IO_ERRORS = {"bad_request", "unavailable", "timeout", "busy", "forbidden", "internal"}  # 9.6
 SCHEMA_TYPES = {"object", "array", "string", "number", "integer", "boolean", "null"}
 
@@ -208,7 +210,8 @@ class IoDefinitions(unittest.TestCase):
         self.assertIsNotNone(version_tuple(d.get("version")), rel + ": version은 '큰.작은'")
         for name, c in d.get("commands", {}).items():
             where = "%s: commands.%s" % (rel, name)
-            self.assertEqual(sorted(set(c) - {"description", "args", "reply", "errors"}), [], where + ": 모르는 항목")
+            self.assertEqual(sorted(set(c) - CMD_KEYS), [], where + ": 모르는 항목")
+            self.check_cmd_flags(c, where)
             self.check_schema(c.get("args"), where + ".args", defs)
             self.check_schema(c.get("reply"), where + ".reply", defs)
             self.assertEqual(sorted(set(c.get("errors", [])) - IO_ERRORS), [], where + ".errors는 9.6 code만")
@@ -253,6 +256,13 @@ class IoDefinitions(unittest.TestCase):
                         for item in u.get(kind, []):
                             self.assertIn(item, d.get(kind, {}), "%s: %s %s가 정의 %s에 없음" % (where, kind, item, u.get("from")))
 
+    def check_cmd_flags(self, c, where):
+        """명령 표시(docs/command-path.md 3장): read(읽기, 늘 됨)·operate(워커 전용이지만 운용 모드에서도 됨)는 true만, 둘을 같이 쓰지 않음"""
+        for k in ("read", "operate"):
+            if k in c:
+                self.assertIs(c[k], True, where + "." + k + "는 true만(없으면 아님)")
+        self.assertFalse(c.get("read") and c.get("operate"), where + ": read와 operate를 같이 쓰지 않음")
+
     def check_parts(self, d, where, defs, allowed):
         """워커 정의·조각·공통 정의의 status·metrics·commands·topics 형식"""
         self.assertEqual(sorted(set(d) - allowed), [], where + ": 모르는 항목")
@@ -261,6 +271,8 @@ class IoDefinitions(unittest.TestCase):
         for k, m in d.get("metrics", {}).items():
             self.assertTrue(m.get("type") in ("integer", "number", "string"), "%s: metrics.%s.type은 integer·number·string" % (where, k))
         for name, c in d.get("commands", {}).items():
+            self.assertEqual(sorted(set(c) - CMD_KEYS), [], "%s: commands.%s: 모르는 항목" % (where, name))
+            self.check_cmd_flags(c, "%s: commands.%s" % (where, name))
             self.check_schema(c.get("args"), "%s: commands.%s.args" % (where, name), defs)
             self.check_schema(c.get("reply"), "%s: commands.%s.reply" % (where, name), defs)
             self.assertEqual(sorted(set(c.get("errors", [])) - IO_ERRORS), [], "%s: commands.%s.errors는 9.6 code만" % (where, name))
