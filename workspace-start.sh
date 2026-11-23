@@ -208,8 +208,9 @@ stop_pid() {  # stop_pid <pid> <이름> <timeout s>
   wait "$pid" 2>/dev/null
 }
 
-MGR="${MGR:-}" REST="${REST:-}" LOGGER="${LOGGER:-}"
+MGR="${MGR:-}" REST="${REST:-}" LOGGER="${LOGGER:-}" NGINX="${NGINX:-}"
 shutdown() {
+  stop_pid "$NGINX" nginx 5
   stop_pid "$REST" rest 5
   stop_pid "$MGR" manager 20      # Manager가 워커를 정리한다(워커 stop_timeout 포함)
   stop_pid "$LOGGER" logger 5     # Manager 종료까지 기록
@@ -257,16 +258,63 @@ log "manager started (pid $MGR)"
 #   개발 빌드는 WORKSPACE_GATEWAY_BIN). 그 밖(기본) → Python REST. C++ 실행 파일이 없으면 Python
 REST_IMPL="${WORKSPACE_REST_IMPL:-$(cat "$DATA/config/rest_impl" 2>/dev/null || true)}"
 GW_BIN="${WORKSPACE_GATEWAY_BIN:-$ROOT/gateway/bin/gateway}"
+# 앞단 웹서버 nginx(docs/gateway.md 2장): C++ 게이트웨이이고 nginx가 깔려 있으면 nginx가 포트를 갖고(화면 파일 직접, 요청 제한)
+# 게이트웨이는 Unix 소켓만 연다. 끄려면 WORKSPACE_NGINX=off. 설정은 gateway/nginx/nginx.conf.in으로 데이터 폴더에 만든다
+# (시스템 nginx 설정·서비스는 쓰지 않음). 설정 점검(nginx -t)에 실패하면 게이트웨이가 지금처럼 TCP로 직접 받는다
+NGINX_BIN="$(command -v nginx 2>/dev/null || true)"
+NG_DIR="$DATA/run/nginx"
+GW_SOCK="$DATA/run/gateway.sock"
+use_nginx=0
+if [[ "$REST_IMPL" == cpp && -x "$GW_BIN" && -n "$NGINX_BIN" && "${WORKSPACE_NGINX:-on}" != off ]]; then
+  mkdir -p "$NG_DIR/tmp" && chown -R "$OWNER_UID:$OWNER_GID" "$NG_DIR"
+  mime=/etc/nginx/mime.types
+  [[ -f "$mime" ]] || { mime="$NG_DIR/mime.types"; echo 'types { text/html html; text/css css; text/javascript js; application/json json; image/svg+xml svg; image/png png; }' > "$mime"; }
+  if [[ "${WORKSPACE_UI:-1}" == 0 ]]; then
+    ui_loc='        location / { proxy_pass http://gateway; }'
+  else
+    ui_loc="        location / {
+            root $ROOT/ui/web;
+            index shell.html;
+            try_files \$uri \$uri/ @gateway;
+        }"
+  fi
+  listen="${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080}"
+  awk -v prefix="$NG_DIR" -v sock="$GW_SOCK" -v listen="$listen" -v mime="$mime" -v uiloc="$ui_loc" \
+    '{ gsub(/@PREFIX@/, prefix); gsub(/@SOCK@/, sock); gsub(/@LISTEN@/, listen); gsub(/@MIME@/, mime);
+       if ($0 == "@UI_LOCATION@") print uiloc; else print }' \
+    "$ROOT/gateway/nginx/nginx.conf.in" > "$NG_DIR/nginx.conf"
+  chown "$OWNER_UID:$OWNER_GID" "$NG_DIR/nginx.conf"
+  if setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups \
+       "$NGINX_BIN" -t -q -p "$NG_DIR" -c "$NG_DIR/nginx.conf" -g 'daemon off;' 2>&1 | sed 's/^/workspace-start: nginx -t: /'; [[ ${PIPESTATUS[0]} -eq 0 ]]; then
+    use_nginx=1
+  else
+    log "nginx: config test failed, gateway listens on TCP itself"
+  fi
+fi
 if [[ "$REST_IMPL" == cpp && -x "$GW_BIN" ]]; then
-  log "rest: C++ gateway ($GW_BIN)"
-  env HOME="$OWNER_HOME" USER="$OWNER" LOGNAME="$OWNER" \
-    setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups "$GW_BIN" &
+  if (( use_nginx )); then
+    log "rest: C++ gateway behind nginx ($GW_BIN, $GW_SOCK)"
+    rm -f "$GW_SOCK"
+    env HOME="$OWNER_HOME" USER="$OWNER" LOGNAME="$OWNER" WORKSPACE_GATEWAY_SOCKET="$GW_SOCK" WORKSPACE_GATEWAY_TCP=0 \
+      setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups "$GW_BIN" &
+  else
+    log "rest: C++ gateway ($GW_BIN)"
+    env HOME="$OWNER_HOME" USER="$OWNER" LOGNAME="$OWNER" \
+      setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups "$GW_BIN" &
+  fi
 else
   [[ "$REST_IMPL" == cpp ]] && log "rest: $GW_BIN not found, using Python"
   run_as_owner "$ROOT/rest" workspace_rest
 fi
 REST=$!
 log "rest started (pid $REST)"
+if (( use_nginx )); then
+  for (( i = 0; i < 50; i++ )); do [[ -S "$GW_SOCK" ]] && break; alive "$REST" || break; sleep 0.1; done
+  setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups \
+    "$NGINX_BIN" -p "$NG_DIR" -c "$NG_DIR/nginx.conf" -g 'daemon off;' &
+  NGINX=$!
+  log "nginx started (pid $NGINX, listen ${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080})"
+fi
 run_as_owner "$ROOT/logger" workspace_logger
 LOGGER=$!
 log "logger started (pid $LOGGER)"
@@ -283,6 +331,10 @@ while (( ! STOPPING )); do
   if [[ -n "$REST" ]] && ! alive "$REST"; then
     log "rest exited; manager keeps running (start again with workspace-stop.sh / workspace-start.sh)"
     REST=""
+  fi
+  if [[ -n "$NGINX" ]] && ! alive "$NGINX"; then
+    log "nginx exited; gateway keeps running on its socket only (start again with workspace-stop.sh / workspace-start.sh)"
+    NGINX=""
   fi
   if [[ -n "$LOGGER" ]] && ! alive "$LOGGER"; then
     log "logger exited; manager keeps running (no records until restart)"

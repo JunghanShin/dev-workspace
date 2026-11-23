@@ -1,0 +1,65 @@
+# 워크스페이스 앞단 웹서버(docs/gateway.md 2장). 시작 셸이 이 틀로 <데이터>/run/nginx/nginx.conf를 만들어
+# 워크스페이스 계정으로 띄운다(시스템 nginx 설정·서비스는 쓰지 않음). 만들어진 파일은 손으로 고치지 않는다.
+#   @PREFIX@ 이 nginx의 실행 폴더(<데이터>/run/nginx)   @SOCK@ 게이트웨이 Unix 소켓   @LISTEN@ 받는 주소:포트
+#   @MIME@ mime.types 경로   @UI_LOCATION@ 화면 파일을 직접 줄지(화면 끔이면 전부 게이트웨이로)
+worker_processes 1;
+pid @PREFIX@/nginx.pid;
+error_log stderr warn;          # 시작 셸 로그(journal)로
+
+events {
+    worker_connections 256;
+}
+
+http {
+    include @MIME@;
+    default_type application/octet-stream;
+    access_log off;             # 요청 기록은 게이트웨이가(명령 기록 포함)
+    server_tokens off;
+
+    # 워크스페이스 계정으로 돌므로 임시 폴더도 데이터 폴더 안
+    client_body_temp_path @PREFIX@/tmp/body;
+    proxy_temp_path @PREFIX@/tmp/proxy;
+    fastcgi_temp_path @PREFIX@/tmp/fastcgi;
+    uwsgi_temp_path @PREFIX@/tmp/uwsgi;
+    scgi_temp_path @PREFIX@/tmp/scgi;
+
+    # 바깥 요청 제한: 본문은 게이트웨이 상한(64 KiB)과 같게, 느린 클라이언트가 붙잡지 못하게
+    client_max_body_size 64k;
+    client_header_timeout 10s;
+    client_body_timeout 10s;
+    send_timeout 30s;
+    keepalive_timeout 15s;
+    limit_conn_zone $binary_remote_addr zone=perip:1m;
+
+    gzip on;
+    gzip_types text/css text/javascript application/javascript application/json image/svg+xml;
+
+    upstream gateway {
+        server unix:@SOCK@;
+    }
+
+    server {
+        listen @LISTEN@;
+        limit_conn perip 64;    # 주소 하나가 연결을 다 쓰지 못하게(화면 여러 개 + 스트림은 넉넉히)
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;               # 게이트웨이가 영상 주소에 이 보드 주소를 씀
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 60s;
+
+        # 화면 파일은 nginx가 바로 준다. 없는 경로(API, 워커 패널 파일)는 게이트웨이로
+@UI_LOCATION@
+
+        # 스트림(SSE): 버퍼링하면 화면에 늦게 도착하므로 끈다. 오래 열려 있다
+        location ~ /stream/?$ {
+            proxy_pass http://gateway;
+            proxy_buffering off;
+            proxy_cache off;
+            proxy_read_timeout 1h;
+        }
+
+        location @gateway {
+            proxy_pass http://gateway;
+        }
+    }
+}

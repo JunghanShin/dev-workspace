@@ -311,6 +311,26 @@ void Gateway::setup(httplib::Server& svr, int watch_slot) {
 }
 
 bool Gateway::start(std::string& err) {
+    if (!cfg_.tcp && cfg_.unix_socket.empty()) {
+        err = "WORKSPACE_GATEWAY_TCP=0 needs WORKSPACE_GATEWAY_SOCKET";
+        return false;
+    }
+    if (cfg_.tcp && !start_tcp(err)) return false;
+    if (!cfg_.unix_socket.empty() && !start_unix(err)) return false;
+    if (tcp_)
+        listeners_.emplace_back([this] {
+            pthread_setname_np(pthread_self(), "gw.listen");
+            tcp_->listen_after_bind();
+        });
+    if (unix_)
+        listeners_.emplace_back([this] {
+            pthread_setname_np(pthread_self(), "gw.listen");
+            unix_->listen_after_bind();
+        });
+    return true;
+}
+
+bool Gateway::start_tcp(std::string& err) {
     tcp_.reset(new httplib::Server());
     setup(*tcp_, watch_.add("gw.listen.tcp"));
     // cpp-httplib 기본은 Linux에서 SO_REUSEPORT만 켠다. 그러면 ① 앞 서버(지난 실행, Python REST)의 연결이
@@ -333,7 +353,11 @@ bool Gateway::start(std::string& err) {
         }
         bound_port_ = cfg_.port;
     }
-    if (!cfg_.unix_socket.empty()) {
+    return true;
+}
+
+bool Gateway::start_unix(std::string& err) {
+    {
         struct stat st{};
         if (::lstat(cfg_.unix_socket.c_str(), &st) == 0) {
             if (!S_ISSOCK(st.st_mode)) {
@@ -351,15 +375,6 @@ bool Gateway::start(std::string& err) {
         }
         ::chmod(cfg_.unix_socket.c_str(), 0660);  // 같은 그룹(nginx)만
     }
-    listeners_.emplace_back([this] {
-        pthread_setname_np(pthread_self(), "gw.listen");
-        tcp_->listen_after_bind();
-    });
-    if (unix_)
-        listeners_.emplace_back([this] {
-            pthread_setname_np(pthread_self(), "gw.listen");
-            unix_->listen_after_bind();
-        });
     return true;
 }
 

@@ -306,7 +306,8 @@ class FakeStreamWorker:
 class Server:
     """REST 서버 프로세스(REST_BIN이면 그 실행 파일, 아니면 python -m workspace_rest)"""
 
-    def __init__(self, env=None, args=None, name="rest", python=False):
+    def __init__(self, env=None, args=None, name="rest", python=False, unix_only=None):
+        self.unix_only = unix_only  # TCP 없이 Unix 소켓만 여는 서버면 그 경로(뜬 것을 소켓 파일로 봄)
         self.port = int((env or {}).get("WORKSPACE_REST_PORT") or free_port())
         e = dict(os.environ)
         e.update({
@@ -315,7 +316,7 @@ class Server:
             "WORKSPACE_LOG_LEVEL": "WARNING", "WORKSPACE_UI_TITLE": "Test WS", "PYTHONPATH": HERE,
         })
         for k in ("WORKSPACE_REST_TOKEN", "WORKSPACE_UI", "WORKSPACE_PRODUCT", "WORKSPACE_UI_DIR",
-                  "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_GATEWAY_SOCKET", "WORKSPACE_GATEWAY_THREADS"):
+                  "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_GATEWAY_SOCKET", "WORKSPACE_GATEWAY_THREADS", "WORKSPACE_GATEWAY_TCP"):
             e.pop(k, None)
         e.update(env or {})
         cmd = [REST_BIN] if REST_BIN and not python else [sys.executable, "-m", "workspace_rest"]
@@ -329,6 +330,8 @@ class Server:
     def _up(self):
         if self.proc.poll() is not None:
             raise RuntimeError("server exited %s: %s" % (self.proc.returncode, open(self.log_path, errors="replace").read()[-2000:]))
+        if self.unix_only:
+            return os.path.exists(self.unix_only)
         try:
             socket.create_connection(("127.0.0.1", self.port), 0.2).close()
             return True
@@ -1459,6 +1462,30 @@ class GatewayOnly(unittest.TestCase):
             self.assertEqual(srv.json("GET", "/health")[0], 200)  # TCP도 그대로
         finally:
             srv.stop()
+
+    def test_unix_only(self):
+        """WORKSPACE_GATEWAY_TCP=0(nginx 뒤): TCP 포트는 열지 않고 Unix 소켓으로만 답한다. 소켓 없이 0이면 시작 실패"""
+        path = os.path.join(T["tmp"], "gw-only.sock")
+        srv = Server({"WORKSPACE_GATEWAY_SOCKET": path, "WORKSPACE_GATEWAY_TCP": "0"}, name="unixonly", unix_only=path)
+        try:
+            with self.assertRaises(OSError):
+                socket.create_connection(("127.0.0.1", srv.port), 0.5).close()
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(5)
+            s.connect(path)
+            s.sendall(b"GET /health HTTP/1.1\r\nHost: x\r\n\r\n")
+            buf = b""
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            s.close()
+            self.assertTrue(buf.startswith(b"HTTP/1.1 200"))
+        finally:
+            srv.stop()
+        with self.assertRaises(RuntimeError):
+            Server({"WORKSPACE_GATEWAY_TCP": "0"}, name="unixonly-bad", unix_only=os.path.join(T["tmp"], "never.sock"))
 
 
 if __name__ == "__main__":

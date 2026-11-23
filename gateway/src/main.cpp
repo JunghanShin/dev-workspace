@@ -7,7 +7,7 @@
 //   WORKSPACE_REST_PORT, WORKSPACE_REST_CONNECT_TIMEOUT, WORKSPACE_REST_COMMAND_TIMEOUT, WORKSPACE_REST_RESPONSE_TIMEOUT,
 //   WORKSPACE_LOG_LEVEL, WORKSPACE_REST_TOKEN, WORKSPACE_UI, WORKSPACE_PRODUCT, WORKSPACE_UI_DIR, WORKSPACE_UI_MEDIA_URL,
 //   WORKSPACE_UI_REFRESH_MS, WORKSPACE_UI_TITLE
-// 게이트웨이에만: WORKSPACE_GATEWAY_SOCKET(Unix 소켓도 엶, nginx용), WORKSPACE_GATEWAY_THREADS(동시 요청 상한, 기본 48: SSE도 연결마다 하나를 차지해 화면 여러 개를 넉넉히),
+// 게이트웨이에만: WORKSPACE_GATEWAY_SOCKET(Unix 소켓도 엶, nginx용), WORKSPACE_GATEWAY_TCP=0(TCP를 열지 않음, nginx 뒤), WORKSPACE_GATEWAY_THREADS(동시 요청 상한, 기본 48: SSE도 연결마다 하나를 차지해 화면 여러 개를 넉넉히),
 //   WORKSPACE_AUTH(off만 구현, on은 4단계)
 //
 // 주 스레드: 신호(SIGTERM·SIGINT)를 기다리며 0.5 s마다 스레드 멈춤을 본다. 멈추면 기록하고 exit 4(시작 셸이 다시 띄움).
@@ -119,6 +119,7 @@ int main(int argc, char** argv) {
     cfg.ui_enabled = env_or("WORKSPACE_UI", "1") != "0";
     cfg.product = env_or("WORKSPACE_PRODUCT", "0") == "1";
     cfg.unix_socket = env_or("WORKSPACE_GATEWAY_SOCKET", "");
+    cfg.tcp = env_or("WORKSPACE_GATEWAY_TCP", "1") != "0";  // 0: nginx가 앞에 있어 TCP를 열지 않음
     const long long threads = to_int("WORKSPACE_GATEWAY_THREADS", env_or("WORKSPACE_GATEWAY_THREADS", "48"));
     cfg.threads = static_cast<size_t>(threads < 1 ? 1 : threads);
     const std::string auth = env_or("WORKSPACE_AUTH", "off");
@@ -153,8 +154,9 @@ int main(int argc, char** argv) {
         GW_ERROR("%s", err.c_str());
         return 1;
     }
-    GW_INFO("listening on %s:%d%s%s, manager %s%s%s%s", cfg.bind.c_str(), gateway->port(),
-            cfg.unix_socket.empty() ? "" : " and ", cfg.unix_socket.c_str(), cfg.manager_socket.c_str(),
+    GW_INFO("listening on %s%s%s%s, manager %s%s%s%s",
+            cfg.tcp ? (cfg.bind + ":" + std::to_string(gateway->port())).c_str() : "(no tcp)",
+            cfg.unix_socket.empty() ? "" : " and ", cfg.unix_socket.c_str(), "", cfg.manager_socket.c_str(),
             cfg.token.empty() ? "" : ", token required", cfg.ui_enabled ? "" : ", UI off",
             cfg.product ? ", product mode" : "");
 

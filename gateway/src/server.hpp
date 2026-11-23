@@ -41,6 +41,7 @@ struct GatewayConfig {
     std::string bind = "0.0.0.0";
     int port = 8080;
     std::string unix_socket;     // WORKSPACE_GATEWAY_SOCKET(비어 있으면 TCP만)
+    bool tcp = true;             // WORKSPACE_GATEWAY_TCP=0이면 TCP를 열지 않음(nginx가 포트를 가질 때, Unix 소켓 필수)
     double connect_timeout = 1.0, response_timeout = 2.0, command_timeout = 3.0;
     size_t threads = 16;         // 동시 요청 상한(SSE 포함)
     std::string token;           // WORKSPACE_REST_TOKEN
@@ -107,6 +108,8 @@ public:
     Reply handle(const RequestView& rq, const std::function<Body()>& body, const std::string& remote);
 
 private:
+    bool start_tcp(std::string& err);
+    bool start_unix(std::string& err);
     Reply forward(const RequestView& rq, const std::function<Body()>& body);
     Reply manager_op(const Route& r, const std::function<Body()>& body);
     Reply manager_reply(const Json& resp, int ok_status);
