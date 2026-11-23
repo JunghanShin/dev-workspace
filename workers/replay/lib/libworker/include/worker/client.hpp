@@ -20,7 +20,7 @@ nlohmann::json send_request(const std::string& socket_path, const nlohmann::json
 
 // Manager API 호출(워커 선언 "manager_api": true인 워커만, design.md 6.5). 소켓은 Manager가 넘긴 환경 변수
 // WORKSPACE_MANAGER_SOCKET(그 워커에게만 있다). 없으면 {"ok": false, "error": {"code": "no_manager_api"}}.
-// 예: manager_call({{"op", "start"}, {"id", "siyi"}}), manager_call({{"op", "list"}})
+// 예: manager_call({{"op", "start"}, {"id", "cam1"}}), manager_call({{"op", "list"}})
 // 읽기·쓰기 op 모두 된다. 자기 자신(자기 워커)은 제어할 수 없다(forbidden)
 nlohmann::json manager_call(const nlohmann::json& request,
                             std::chrono::milliseconds timeout = std::chrono::seconds(2));

@@ -1,6 +1,6 @@
 # libvideo: 장치 워커 안의 영상 송출과 프레임 탭
 
-장치 워커(siyi, ximea 등)가 설정 `streams`의 송출마다 **자식 프로세스**(gst-launch·ffmpeg)를 띄우고 감시하는 모듈. 탭(`tap`)은 카메라 RTSP를 풀어 원본 프레임을 같은 보드의 **프레임 버스**로 낸다(인식 같은 영상 처리 워커가 받아 감). 워크스페이스에 의존하지 않는다. 쓰는 워커마다 `lib/libvideo/`에 사본을 두고, 원본은 `workers/_template/lib/libvideo`.
+영상 장치 워커가 설정 `streams`의 송출마다 **자식 프로세스**(gst-launch·ffmpeg)를 띄우고 감시하는 모듈. 탭(`tap`)은 카메라 RTSP를 풀어 원본 프레임을 같은 보드의 **프레임 버스**로 낸다(인식 같은 영상 처리 워커가 받아 감). 워크스페이스에 의존하지 않는다. 쓰는 워커마다 `lib/libvideo/`에 사본을 두고, 원본은 `workers/_template/lib/libvideo`.
 
 | 파일 | 내용 |
 |---|---|

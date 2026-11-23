@@ -243,7 +243,7 @@ class FakeStreamWorker:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.conns = []
         self.seq = 0
-        self.state = {"vehicle": {"mode": "POSCTL", "roll": 0}}
+        self.state = {"device": {"mode": "RUN", "roll": 0}}
         self.events = [{"seq": 1, "text": "device found"}]
         self.lock = threading.Lock()
         self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -1297,15 +1297,15 @@ class Streams(unittest.TestCase):
         self.assertEqual(first["seq"], 1)
         kf = first if first.get("stream") == "up" else a.wait_msg(lambda m: m.get("stream") == "up")
         self.assertTrue(kf["kf"])
-        self.assertEqual(kf["topics"], {"vehicle": {"mode": "POSCTL", "roll": 0}})
+        self.assertEqual(kf["topics"], {"device": {"mode": "RUN", "roll": 0}})
         self.assertEqual(kf["events"], [{"seq": 1, "text": "device found"}])
         self.assertEqual(kf["events_next"], 2)
         self.assertIn("t", kf)
         self.assertEqual(list(kf)[:3], ["seq", "kf", "topics"])
 
         # 변경분: 주제는 최신 값, 이벤트는 모두
-        w.send({"vehicle": {"mode": "POSCTL", "roll": 1}})
-        w.send({"vehicle": {"mode": "HOLD", "roll": 2}}, [{"seq": 2, "text": "POSCTL -> HOLD"}])
+        w.send({"device": {"mode": "RUN", "roll": 1}})
+        w.send({"device": {"mode": "IDLE", "roll": 2}}, [{"seq": 2, "text": "RUN -> IDLE"}])
         w.send({"link": {"loss_pct": 1.5}})
         topics, events = {}, []
         while "link" not in topics:
@@ -1314,7 +1314,7 @@ class Streams(unittest.TestCase):
             self.assertFalse(m["kf"])
             topics.update(m["topics"])
             events += m.get("events", [])
-        self.assertEqual(topics["vehicle"], {"mode": "HOLD", "roll": 2})
+        self.assertEqual(topics["device"], {"mode": "IDLE", "roll": 2})
         self.assertEqual([e["seq"] for e in events], [2])
 
         # 두 번째 화면: 위쪽 연결은 하나, 바로 최신 기준 상태
@@ -1323,7 +1323,7 @@ class Streams(unittest.TestCase):
         kb = b.msg()
         self.assertTrue(kb["kf"])
         self.assertEqual(kb["stream"], "up")
-        self.assertEqual(kb["topics"]["vehicle"]["mode"], "HOLD")
+        self.assertEqual(kb["topics"]["device"]["mode"], "IDLE")
         self.assertEqual(kb["topics"]["link"], {"loss_pct": 1.5})
         self.assertEqual([e["seq"] for e in kb["events"]], [1, 2])
         self.assertEqual(kb["events_next"], 3)
@@ -1340,7 +1340,7 @@ class Streams(unittest.TestCase):
         up = a.wait_msg(lambda m: m.get("stream") == "up", 6)
         self.assertTrue(up["kf"])
         self.assertEqual([e["seq"] for e in up["events"]], [1])
-        self.assertEqual(up["topics"], {"vehicle": {"mode": "POSCTL", "roll": 0}})
+        self.assertEqual(up["topics"], {"device": {"mode": "RUN", "roll": 0}})
 
         # 화면이 모두 떠나면 위쪽 연결을 닫는다(5 s 뒤). 끊긴 화면은 쓰기에 실패해야 알므로 변경분을 몇 번 보낸다
         a.close()
@@ -1355,7 +1355,7 @@ class Streams(unittest.TestCase):
         a = self.open("s2", hz=2)
         self.assertIsNotNone(a.wait_msg(lambda m: m.get("stream") == "up", 5))
         for i in range(1, 31):
-            w.send({"vehicle": {"mode": "M", "roll": i}}, [{"seq": i + 1, "text": "e%d" % i}])
+            w.send({"device": {"mode": "M", "roll": i}}, [{"seq": i + 1, "text": "e%d" % i}])
             time.sleep(0.01)
         msgs = []
         end = time.monotonic() + 2.2
@@ -1364,7 +1364,7 @@ class Streams(unittest.TestCase):
             if m:
                 msgs.append(m)
         self.assertTrue(1 <= len(msgs) <= 4, len(msgs))
-        self.assertEqual(msgs[-1]["topics"]["vehicle"]["roll"], 30)
+        self.assertEqual(msgs[-1]["topics"]["device"]["roll"], 30)
         self.assertEqual([e["seq"] for m in msgs for e in m.get("events", [])], list(range(2, 32)))
         self.assertEqual(msgs[-1]["events_next"], 32)
         seqs = [m["seq"] for m in msgs]

@@ -70,7 +70,7 @@ export default {
     els.consumers = ui.tile("재생 받는 워커");
     els.state = ui.kvList();
 
-    const source = h("input", { type: "text", placeholder: "워커 id(예: ximea)", style: "width:150px" });
+    const source = h("input", { type: "text", placeholder: "워커 id(예: cam1)", style: "width:150px" });
     const name = h("input", { type: "text", placeholder: "이름(비우면 시각)", style: "width:170px" });
     const seconds = h("input", { type: "text", inputmode: "decimal", placeholder: "초(선택)", style: "width:80px" });
     const recStart = ui.iconButton({ icon: "record", label: "녹화", title: "replay.record_start: 그 워커의 데이터 버스를 녹화",

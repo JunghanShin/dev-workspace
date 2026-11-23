@@ -594,8 +594,8 @@ void test_record_line() {
     CHECK_EQ(record_line(f), std::string(R"({"t":"2026-11-23T10:00:00.123+09:00","user":"op1","role":"operator",)"
                                          R"("mode":"operation","remote":"10.0.0.1","method":"POST","path":"/workers/w1/command",)"
                                          R"("cmd":"source.set_rate","from":null,"code":200,"ms":1.2})" "\n"));
-    f.from = "remote:duru-ui";
-    CHECK(record_line(f).find("\"from\":\"remote:duru-ui\"") != std::string::npos);  // 워커 명령의 보낸 곳
+    f.from = "remote:ops-ui";
+    CHECK(record_line(f).find("\"from\":\"remote:ops-ui\"") != std::string::npos);  // 워커 명령의 보낸 곳
     f.from.clear();
     f.cmd.clear();
     f.path = std::string(2000, 'p');

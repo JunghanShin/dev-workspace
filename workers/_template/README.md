@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
 
 ## 모듈 만들기·붙이기
 
-이미 있는 워커에 모듈을 더할 때. 나중에 기억이 안 나도 이 순서대로 하면 된다. 아래 예는 모듈 `motion`, 워커 `siyi`. 본보기: 틀의 `lib/source`(스레드·발행·자식 프로세스), `lib/processor`(포트 받기, 가짜 포트 시험), `lib/peer`(다른 워커와 통신).
+이미 있는 워커에 모듈을 더할 때. 나중에 기억이 안 나도 이 순서대로 하면 된다. 아래 예는 모듈 `motion`, 워커 `cam`. 본보기: 틀의 `lib/source`(스레드·발행·자식 프로세스), `lib/processor`(포트 받기, 가짜 포트 시험), `lib/peer`(다른 워커와 통신).
 
 ### 1. 모듈 폴더
 
@@ -154,7 +154,7 @@ lib/motion/
 ```cpp
 class Module : public worker::Module {
 public:
-    explicit Module(GimbalPort& gimbal) : gimbal_(gimbal) {}       // 다른 모듈의 포트는 생성자로 받는다
+    explicit Module(DrivePort& drive) : drive_(drive) {}          // 다른 모듈의 포트는 생성자로 받는다
     std::string name() const override { return "motion"; }        // 설정 칸·명령·지표·스레드 앞부분
     void configure(const worker::Json& c) override {               // 자기 칸만 온다. 잘못되면 worker::ConfigError
         worker::check_keys(c, {"accel_dps2", "control_period_ms"});
@@ -238,7 +238,7 @@ lib/libworker/io/common.json  공통 정의(libworker 사본에 같이): get_sta
 io/uses/example.json     쓰는 정의(사본). 여기서는 peer가 같은 종류의 다른 워커를 받아서 자기 정의의 사본
 ```
 
-- 역할에 넣을지 워커 정의에 넣을지: "다른 회사 장비로 바꿔도 같은 값이 나와야 하나"(기체 자세는 역할, 장비별 링크 통계는 워커)
+- 역할에 넣을지 워커 정의에 넣을지: "다른 회사 장비로 바꿔도 같은 값이 나와야 하나"(카메라 프레임 정보는 역할, 장비별 링크 통계는 워커)
 - 정의의 `object`는 적힌 칸만 허용(정의 밖 칸은 실패). 이름이 바뀌는 칸은 `"additionalProperties": {<값 모양>}`, 지표·주제 이름의 바뀌는 부분은 `<이름>` 자리
 - 주제 값마다 `t_mono_ns`(그 값을 재거나 만든 시각, CLOCK_MONOTONIC)
 - 라이브러리 모듈(libvideo 등)은 자기 조각 `lib/<라이브러리>/io/<모듈>.json`을 갖고, `self.json`의 `include`로 가져온다

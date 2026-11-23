@@ -123,11 +123,11 @@ class NginxFront(unittest.TestCase):
             first = sse.msg(3)
             self.assertTrue(first and first.get("kf"), first)
             t0 = time.time()
-            self.stream.send({"vehicle": {"mode": "HOLD", "roll": 1}})
+            self.stream.send({"device": {"mode": "IDLE", "roll": 1}})
             got = None
             while time.time() - t0 < 3:
                 m = sse.msg(3)
-                if m and m.get("topics", {}).get("vehicle", {}).get("mode") == "HOLD":
+                if m and m.get("topics", {}).get("device", {}).get("mode") == "IDLE":
                     got = time.time() - t0
                     break
             self.assertIsNotNone(got, "update did not arrive")

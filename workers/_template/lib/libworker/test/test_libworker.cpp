@@ -798,8 +798,8 @@ static void guard_table() {
     write_text(path, R"({"guard": "warn", "peers": {"gateway": {"pid": )" + std::to_string(me) +
                          R"(, "trusted_from": true}}, "workers": {"w1": {"read": ["get_status", "x.get"],
                          "allow": {"gateway": "*", "ext": ["alpha.echo"]}}}})");
-    d = g.check(me, "beta.echo", "remote:duru-ui");
-    CHECK(d.run && !d.violation && d.from == "remote:duru-ui");
+    d = g.check(me, "beta.echo", "remote:ops-ui");
+    CHECK(d.run && !d.violation && d.from == "remote:ops-ui");
     CHECK(g.check(me, "beta.echo", "").from == "gateway");
     // 이 프로세스 그룹 = 연동 워커 ext(믿지 않는 곳): 적힌 from은 무시, 역할 명령만
     write_text(path, R"({"guard": "warn", "peers": {"gateway": {"pid": 1}, "ext": {"pgid": )" + std::to_string(pg) +

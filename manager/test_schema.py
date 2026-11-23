@@ -90,10 +90,10 @@ class SchemaFiles(unittest.TestCase):
         self.assertTrue(found)
 
 
-# 값 검사용 예시 스키마(장치 워커의 칸 모양: 카메라 짐벌, 영상 카메라, 네트워크 장치). 특정 워커에 기대지 않는다
+# 값 검사용 예시 스키마(장치 워커의 칸 모양: 카메라 구동기, 영상 카메라, 네트워크 장치). 특정 워커에 기대지 않는다
 STREAM_FIELDS = load(os.path.join(ROOT, "workers/_template/lib/libvideo/stream-schema.json"))["fields"]
-GIMBAL = {"groups": [
-    {"title": "카메라", "section": "siyi", "fields": [
+MOUNT = {"groups": [
+    {"title": "카메라", "section": "cam1", "fields": [
         {"key": "camera_ip", "type": "string", "format": "ipv4", "default": "192.168.144.25"},
         {"key": "center_pitch", "type": "number", "min": -90, "max": 90, "default": 0},
         {"key": "video_bitrate_kbps", "type": "int", "min": 256, "max": 20000},
@@ -110,22 +110,22 @@ LINK = {"groups": [{"title": "장치 링크", "section": "link", "fields": [
 
 class Values(unittest.TestCase):
     def setUp(self):
-        for sch in (GIMBAL, CAMERA, LINK):
+        for sch in (MOUNT, CAMERA, LINK):
             self.assertEqual(check_schema(sch), [])
-        self.gimbal, self.camera, self.link = GIMBAL, CAMERA, LINK
+        self.mount, self.camera, self.link = MOUNT, CAMERA, LINK
 
     def test_empty_config_is_ok(self):
-        self.assertEqual(check_config(self.gimbal, {}), {})
+        self.assertEqual(check_config(self.mount, {}), {})
 
     def test_unknown_keys_are_kept_unchecked(self):
-        self.assertEqual(check_config(self.gimbal, {"command_socket": "/tmp/x.sock"}), {})
+        self.assertEqual(check_config(self.mount, {"command_socket": "/tmp/x.sock"}), {})
 
     def test_scalar_errors(self):
-        errs = check_config(self.gimbal, {"siyi": {"camera_ip": "192.168.1", "center_pitch": 120,
+        errs = check_config(self.mount, {"cam1": {"camera_ip": "192.168.1", "center_pitch": 120,
                                                  "video_bitrate_kbps": 1.5, "time_sync": "yes",
                                                  "video_codec": "mjpeg"}})
-        self.assertEqual(set(errs), {"siyi.camera_ip", "siyi.center_pitch", "siyi.video_bitrate_kbps",
-                                     "siyi.time_sync", "siyi.video_codec"})
+        self.assertEqual(set(errs), {"cam1.camera_ip", "cam1.center_pitch", "cam1.video_bitrate_kbps",
+                                     "cam1.time_sync", "cam1.video_codec"})
 
     def test_enum_numeric_and_bool(self):
         self.assertEqual(check_config(self.camera, {"camera": {"downsampling": 2}}), {})
@@ -133,8 +133,8 @@ class Values(unittest.TestCase):
         self.assertIn("camera.downsampling", check_config(self.camera, {"camera": {"downsampling": 3}}))
 
     def test_list_items(self):
-        errs = check_config(self.gimbal, {"stream": {"streams": [
-            {"name": "main", "url": "rtsp://127.0.0.1:8554/siyi"},
+        errs = check_config(self.mount, {"stream": {"streams": [
+            {"name": "main", "url": "rtsp://127.0.0.1:8554/cam1"},
             {"name": "main", "url": "http://x"},
             {"url": "rtsp://a:1/b", "bitrate_kbps": 10},
         ]}})
@@ -168,12 +168,12 @@ class Values(unittest.TestCase):
             {"section": "peer", "fields": [{"key": "peer", "type": "string", "format": "worker_id"}]},
             {"section": "multi", "fields": [{"key": "links", "type": "list", "item_key": "to", "fields": [
                 {"key": "to", "type": "string", "format": "worker_id"}]}]}]}
-        self.assertEqual(check_config(schema, {"peer": {"peer": "siyi"}}), {})
+        self.assertEqual(check_config(schema, {"peer": {"peer": "cam1"}}), {})
         self.assertEqual(check_config(schema, {"peer": {"peer": ""}}), {})
-        for bad in ("Siyi", "a b", "../x"):
+        for bad in ("Cam1", "a b", "../x"):
             self.assertIn("peer.peer", check_config(schema, {"peer": {"peer": bad}}), bad)
-        cfg = {"peer": {"peer": "siyi"}, "multi": {"links": [{"to": "ximea"}, {"to": ""}]}}
-        self.assertEqual(worker_refs(schema, cfg), {"peer.peer": "siyi", "multi.links[0].to": "ximea"})
+        cfg = {"peer": {"peer": "cam1"}, "multi": {"links": [{"to": "cam2"}, {"to": ""}]}}
+        self.assertEqual(worker_refs(schema, cfg), {"peer.peer": "cam1", "multi.links[0].to": "cam2"})
         self.assertEqual(worker_refs(schema, {"peer": {"peer": ""}}), {})
 
 

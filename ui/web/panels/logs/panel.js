@@ -59,7 +59,7 @@ export default {
         ui.iconButton({ icon: "refresh", title: "새로 읽기", onClick: () => load(ctx) })] }),
       els.pre);
     syncSources(ctx.state());
-    const first = ctx.state().workers.find((w) => w.type === "ximea_camera" || w.type === "siyi_gimbal");
+    const first = ctx.state().workers.find((w) => !w.builtin);  // 처음 보이는 것: 첫 워커
     if (first) els.source.value = first.id;
     load(ctx);
     schedule(ctx);

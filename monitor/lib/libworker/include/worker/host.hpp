@@ -9,11 +9,11 @@
 // 워커의 main은 모듈을 만들어 잇기만 한다:
 //
 //     int main(int argc, char** argv) {
-//         worker::Host host("siyi-worker");
-//         auto& link = host.add<SiyiLink>();
+//         worker::Host host("cam-worker");
+//         auto& link = host.add<DeviceLink>();
 //         host.add<Motion>(link);                    // 모듈끼리는 포트(작은 인터페이스)로만 잇는다
 //         host.add<video::StreamsModule>();
-//         host.alias("gimbal_angle", "motion.move_to");  // 예전 명령 이름(바꾸는 동안)
+//         host.alias("move_angle", "motion.move_to");  // 예전 명령 이름(바꾸는 동안)
 //         return host.run(argc, argv);
 //     }
 //

@@ -154,7 +154,7 @@ async function remote(name, params = {}) {
 }
 
 // 보드는 설정 전체를 바꾼다(PUT). 지금 설정을 읽어 바꾼 값만 합쳐 보낸다. null이면 그 키를 지움(기본값)
-// 키는 맨 위 키("watchdog_sec") 또는 모듈 칸 경로("gimbal.center_yaw" → config.gimbal.center_yaw). 모듈 칸 설정은
+// 키는 맨 위 키("watchdog_sec") 또는 모듈 칸 경로("motion.center_yaw" → config.motion.center_yaw). 모듈 칸 설정은
 // 경로로 써야 한다: 맨 위에 쓰면 워커가 읽지 않는다(design.md 6.10 묶음 section)
 function mergeChanges(config, changes) {
   const cfg = { ...config };

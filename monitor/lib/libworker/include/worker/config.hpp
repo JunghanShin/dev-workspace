@@ -1,7 +1,7 @@
 // 워커 설정 파일 읽기 (design.md 9.1, 6.6 독립 실행).
 //
 // 형식은 Manager가 넘기는 파일과 같다. 단독 실행할 때도 같은 형식으로 쓴다:
-//     {"id": "siyi", "config_version": 3, "config": {...워커 설정...}}
+//     {"id": "cam1", "config_version": 3, "config": {...워커 설정...}}
 // - id가 없으면 (워크스페이스 연동) WORKSPACE_WORKER_ID, 그것도 없으면 설정 파일 이름(확장자 제외)
 // - config_version은 선택(바로 적용 확인용)
 #pragma once

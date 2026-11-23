@@ -5,7 +5,7 @@
 - 코드: 워크스페이스 폴더(받은 폴더, 예: `~/dev-workspace`). 여기서 바로 실행한다
 - 데이터: 옆 폴더 **`<워크스페이스 폴더>_data`**(예: `~/dev-workspace_data`). 설정·상태·기록·SDK. 워크스페이스를 통째로 바꿔도 유지되고, 지워지면 시작할 때 다시 만든다. 워크스페이스 폴더 이름을 바꾸면 새 데이터 폴더로 시작한다. 설정 파일(`config/`)별 키·바꾸는 순서: [docs/config.md](../docs/config.md)
 - 프로필: 프로젝트·현장의 워크스페이스 설정(망, 포트, 미디어 서버, 워커가 쓰는 설정)을 모은 폴더 `install/profiles/<이름>/`. `install_workspace.sh`가 실행할 때 이름을 묻고(Enter = `default`) 데이터 폴더에 넣는다
-- 시스템에 남기는 것: 서비스 파일 2개(`/etc/systemd/system/workspace.service`, `workspace-mediamtx.service`), 의존 패키지(ffmpeg 포함), 장비별 설치(XIMEA udev 규칙)
+- 시스템에 남기는 것: 서비스 파일 2개(`/etc/systemd/system/workspace.service`, `workspace-mediamtx.service`), 의존 패키지(ffmpeg 포함), 장비별 설치(카메라 udev 규칙 등, 프로젝트 워커가 넣는 것)
 - 워커별 설치·준비 파일은 각 워커 폴더(`workers/<워커>/`)에 있다. 이 폴더는 공통 부분만 갖는다
 - **워커는 등록하지 않는다.** 워커 = 워커 폴더. 설치는 모든 워커 폴더의 시스템 설치(`workspace/install.sh`)만 하고, 워크스페이스가 시작할 때 워커 폴더를 보고 붙인다. 빼려면 폴더를 지우고 다시 시작
 - **워커 설정은 워커 폴더의 `workspace/config.json`(사용 중 프리셋, 자동 시작)과 `workspace/presets/<이름>.json`(설정 묶음)이다. 화면에서 적용·저장하고 깃으로 공유한다(design.md 6.3.1)**
