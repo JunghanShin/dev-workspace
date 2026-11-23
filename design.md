@@ -1414,7 +1414,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | 데이터 버스 녹화·재생 | 구현(`workers/replay`, 녹화 → 재생 왕복 시험) |
 | 계약 규칙(6.6.7.1~6.6.7.2: 세 정의, 정의 밖 칸 금지, 출력 대조, REST `/io`) | **구현 완료(0.45).** 템플릿(0.43), REST `/io`·libvideo 조각(0.44), 모든 워커에 역할·워커 정의와 출력 대조: replay(역할 `recorder`, 이 저장소), 장치 워커(프로젝트 저장소). 공통 이벤트에 `seq`·`detail`. 미준수 목록 없음 |
 | process-manager C++ 판(6.3, `docs/process-manager.md`) | 구현(0.47), 보드 확인: 메모리 25.6 → 6.7 MB, CPU 3.48 → 1.92%. 시작 셸 기본 C++(0.48, 되돌리기 `manager_impl` = `python`), pm.res는 기억한 pid만 읽고 전체 훑기 5초마다. 보드 재측정 CPU 0.98%. 남은 것: Python 판 삭제 → 연결 선언·명령 소유·권한 표 |
-| 게이트웨이 C++ 판(6.4, `docs/gateway.md`) | 구현(0.50): 지금 REST와 같은 경로·응답, HTTP 수락 시험·단위 시험·TSan 통과, 메모리 20.8 → 6.8 MB(PC). 시작 셸에서 고름(기본 Python). 보드 확인됨. nginx 앞단(0.51, nginx가 깔린 보드에서 시작 셸이 띄움). 남은 것: 보드에 nginx 설치·확인 → 신분 확인·모드·기록·캐시 → 기본 C++, Python 삭제 |
+| 게이트웨이 C++ 판(6.4, `docs/gateway.md`) | 구현(0.50): 지금 REST와 같은 경로·응답, HTTP 수락 시험·단위 시험·TSan 통과, 메모리 20.8 → 6.8 MB(PC). 시작 셸에서 고름(기본 Python). 보드 확인됨. nginx 앞단(0.51, 보드 확인: nginx가 포트 8080, 게이트웨이는 Unix 소켓만). 남은 것: 신분 확인·모드·기록·캐시 → 기본 C++, Python 삭제 |
 | 계층과 매니저(4.1, `docs/layers.md`) | 설계 확정(0.40), 구현 전. 언어(원칙 10, 0.42): 매니저는 C++(libworker 위), 지금 Python인 REST·Manager·logger는 게이트웨이·process-manager·record-manager로 재구성하면서 C++로 다시 짬. 순서: 계약 규칙(상태·화면용 주제도 정의에, 실제 출력 대조) → 게이트웨이 → record → status → fault → mission·payload → config → 명령 경로 강제 |
 | 워커 | 세 워커 모두 템플릿 규칙 충족(유닛·모듈·워커 시험, 설계서 3장 ICD, 미준수 목록 없음). 워커별 구조 설계(모듈 나누기, 워커 간 통신 적용)는 다음 단계 |
 
