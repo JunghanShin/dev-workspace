@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.52 |
+| 문서 버전 | 0.53 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1006,6 +1006,7 @@ workers/<워커>/workspace/panel/       워커 패널(id = panel.json "id")
 | 패널이 쓰는 경로 | `ctx.api(method, path)` → `/api/board/<REST 경로>`, `/api/remote/<이름>`(보드 읽기), `/api/ui`(제목·갱신 주기·영상 주소 틀) |
 | 워커 패널 | 머리에 `workerControls`(시작/정지), 설정은 `workerSettings`(자동 시작 + 스키마 폼) 하나. 실시간 값은 스트림(SSE) 또는 `get_status` |
 | 워커 없이 | 패널이 없는 워커도 시스템 모니터 워커 목록에서 시작·정지·설정·내부(프로세스·스레드)를 본다 |
+| 자동 상태 화면 | 자기 패널(`worker_types`로 덮이지 않는)이 없는 워커는 왼쪽 메뉴 "워커(자동 화면)"에 항목이 생기고, 본문은 `panels/auto`(panel.json 없음, 틀이 붙임)가 워커 계약으로 그린다: 머리(상태·시작/정지·설정), 지표(heartbeat 값 + `io/self.json` metrics의 단위·설명), 상태(`get_status` 1초, 모듈 칸마다 카드, status 스키마의 설명·단위). 계약이 없으면 값만 이름 그대로. 읽기 전용, 서버 기능 추가 없음. 워커가 자기 패널을 가지면 그것이 대신 나온다 |
 
 **시스템 모니터 보기 구성:** 패널 머리 제목 옆에 드롭다운 `보기: [보드 전체 ▾]`(공통 부품 `ui.select`, 항목이 많아도 한 줄). 목록은 맨 위 `보드 전체`, 그 아래 워커(상태 점, 오류·재시작 중인 워커 먼저, 나머지 이름순). 고른 보기는 주소에 남긴다(`?view=<워커 id>`, 새로고침·공유해도 같음). 보드 전체의 워커 목록에서 워커를 누르면 그 워커 보기로 간다.
 
@@ -1534,6 +1535,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 버전 | 내용 |
 |---|---|
 | 0.52 | **게이트웨이 4단계**(`docs/gateway.md` 3장·6.2): 신분 확인 `WORKSPACE_AUTH=on`(제품 모드는 늘), 사용자 파일 `config/users.json`(PBKDF2-HMAC-SHA256, 토큰은 sha256)·설정 명령 `gateway user`·`token`, 로그인 세션·Bearer 토큰·역할(viewer·operator·maintainer), 운용/정비 모드 `GET·PUT /api/mode` + Manager op `set_access_mode`(6.2, Python·C++ 판 둘 다), 명령 기록 `records/gateway/`, Manager 구독 캐시, 화면 로그인·머리 배지·워크스페이스 패널 모드 토글 |
+| 0.53 | **자동 상태 화면**(6.11): 자기 패널이 없는 워커를 워커 계약(`io/self.json` metrics·status)대로 그리는 `ui/web/panels/auto`. 화면 틀(머리·왼쪽 메뉴·본문) 위에 패널만 바뀌는 구조 그대로 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

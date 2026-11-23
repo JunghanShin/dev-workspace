@@ -285,17 +285,28 @@ function renderTop() {
 
 // ---- 왼쪽 목록 ---------------------------------------------------------------------------
 
+// 자동 상태 화면(panels/auto): 자기 화면이 없는 워커를 워커 계약(io/self.json)대로 그린다. panel.json이 없어
+// 공용 목록에는 안 나오고, 여기서 그런 워커마다 항목을 만든다. 기본 탑재 워커(시스템 모니터 등)는 뺀다
+const AUTO_PANEL = { id: "auto", title: "상태(자동)", group: "워커(자동 화면)", icon: "list" };
+
 function navItems() {
   const items = [];
+  const covered = new Set();
   for (const p of panels) {
     if (p.worker_types) {
       for (const w of state.workers.filter((w) => p.worker_types.includes(w.type))) {
+        covered.add(w.id);
         items.push({ key: `${p.id}/${w.id}`, panel: p, workerId: w.id, label: w.id, sub: p.title,
                      dot: w.actual_state, icon: p.icon });
       }
     } else {
       items.push({ key: p.id, panel: p, label: p.title, icon: p.icon });
     }
+  }
+  for (const w of state.workers) {
+    if (covered.has(w.id) || w.builtin) continue;
+    items.push({ key: `auto/${w.id}`, panel: AUTO_PANEL, workerId: w.id, label: w.id, sub: AUTO_PANEL.title,
+                 dot: w.actual_state, icon: AUTO_PANEL.icon });
   }
   return items;
 }
