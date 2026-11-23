@@ -65,6 +65,10 @@ if (( ! QUICK )); then
     out="$(cd "$ROOT/rest" && REST_BIN="$b/gateway" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_rest_accept 2>&1)"; rc=$?
     echo "gateway-cpp accept: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)"
     ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:" | head -10; fail+=("gateway-cpp accept"); }
+    # nginx 앞단(docs/gateway.md 2장): nginx가 깔려 있을 때만(없으면 시험이 건너뜀)
+    out="$(cd "$ROOT/rest" && REST_BIN="$b/gateway" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_nginx_front 2>&1)"; rc=$?
+    echo "gateway-cpp nginx front: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)$(echo "$out" | grep -q "skipped" && echo " (skipped: no nginx)")"
+    ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:" | head -10; fail+=("gateway-cpp nginx"); }
   else
     echo "build failed: $b.build.log"
     grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null

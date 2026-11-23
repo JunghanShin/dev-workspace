@@ -266,24 +266,8 @@ NG_DIR="$DATA/run/nginx"
 GW_SOCK="$DATA/run/gateway.sock"
 use_nginx=0
 if [[ "$REST_IMPL" == cpp && -x "$GW_BIN" && -n "$NGINX_BIN" && "${WORKSPACE_NGINX:-on}" != off ]]; then
-  mkdir -p "$NG_DIR/tmp" && chown -R "$OWNER_UID:$OWNER_GID" "$NG_DIR"
-  mime=/etc/nginx/mime.types
-  [[ -f "$mime" ]] || { mime="$NG_DIR/mime.types"; echo 'types { text/html html; text/css css; text/javascript js; application/json json; image/svg+xml svg; image/png png; }' > "$mime"; }
-  if [[ "${WORKSPACE_UI:-1}" == 0 ]]; then
-    ui_loc='        location / { proxy_pass http://gateway; }'
-  else
-    ui_loc="        location / {
-            root $ROOT/ui/web;
-            index shell.html;
-            try_files \$uri \$uri/ @gateway;
-        }"
-  fi
-  listen="${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080}"
-  awk -v prefix="$NG_DIR" -v sock="$GW_SOCK" -v listen="$listen" -v mime="$mime" -v uiloc="$ui_loc" \
-    '{ gsub(/@PREFIX@/, prefix); gsub(/@SOCK@/, sock); gsub(/@LISTEN@/, listen); gsub(/@MIME@/, mime);
-       if ($0 == "@UI_LOCATION@") print uiloc; else print }' \
-    "$ROOT/gateway/nginx/nginx.conf.in" > "$NG_DIR/nginx.conf"
-  chown "$OWNER_UID:$OWNER_GID" "$NG_DIR/nginx.conf"
+  bash "$ROOT/gateway/nginx/render.sh" "$NG_DIR/nginx.conf" "$NG_DIR" "$GW_SOCK"     "${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080}" "$ROOT" "${WORKSPACE_UI:-1}"
+  chown -R "$OWNER_UID:$OWNER_GID" "$NG_DIR"
   if setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups \
        "$NGINX_BIN" -t -q -p "$NG_DIR" -c "$NG_DIR/nginx.conf" -g 'daemon off;' 2>&1 | sed 's/^/workspace-start: nginx -t: /'; [[ ${PIPESTATUS[0]} -eq 0 ]]; then
     use_nginx=1

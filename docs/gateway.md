@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | 확정(2026-11-20, design.md 0.49 6.4). 6장 1~2 구현(0.50): C++ 판이 HTTP 수락 시험 36개·단위 시험·TSan 통과, 시작 셸에서 고름(기본 Python). 3~5 남음 |
+| 상태 | 확정(2026-11-20, design.md 0.49 6.4). 6장 1~2 구현(0.50), 3 nginx 앞단(0.51): 시작 셸이 띄움, PC에서 실제 nginx로 수락 시험 통과. 보드 설치·확인과 4~5 남음 |
 | 대상 | 플랫폼 블록 게이트웨이(design.md 4.1): 바깥(화면·외부 운용·도구)이 워크스페이스로 들어오는 단 하나의 문 |
 | 바꾸는 것 | Python REST(`rest/workspace_rest`, 약 1,600줄)를 **nginx(웹서버) + C++ 게이트웨이**로 나눈다(원칙 10: 상주 블록은 C++). 지금 REST 경로는 그대로 두고 4.1의 새 역할을 더한다 |
 | 바탕 | design.md 6.4(REST), 6.11(화면 제공), 9.6·9.7(명령·스트림), 10.3(접근 제어), 원칙 11~17 |
@@ -120,6 +120,8 @@
 | 보드 실측 | 메모리 20.4 → 6.1~7.6 MB, 화면 열린 상태(요청 약 5.5개/s) CPU 0.63%. 고친 것: 재시작 직후 bind 실패(SO_REUSEADDR만), 쉬는 요청 스레드 48개가 1초마다 깨던 것(쉴 때 CPU 0.5%) |
 | 실행 | `dev/release-worker.sh gateway` → `gateway/bin/gateway`. 시작 셸: `WORKSPACE_REST_IMPL=cpp` 또는 `<데이터>/config/rest_impl`에 `cpp`(기본 Python). `WORKSPACE_GATEWAY_SOCKET`(Unix 소켓, nginx용), `WORKSPACE_GATEWAY_THREADS`(동시 요청 상한, 기본 48, SSE 포함). 신분 확인은 아직 `off`만 |
 | 라이브러리 | cpp-httplib v0.18.3(MIT, 사본) |
+
+**nginx 앞단(0.51):** `gateway/nginx/nginx.conf.in`(틀)·`render.sh`(시작 셸과 시험이 같이 씀). 시작 셸은 C++ 게이트웨이 + nginx가 있으면 `<데이터>/run/nginx/`에 설정을 만들고 `nginx -t`가 통과할 때만 워크스페이스 계정으로 띄운다(게이트웨이는 `WORKSPACE_GATEWAY_TCP=0`, `run/gateway.sock`). 없거나 실패하면 게이트웨이가 TCP로 직접. 끄기 `WORKSPACE_NGINX=off`. 설치: `sudo apt install nginx-light`, 시스템 nginx 서비스는 끔(`systemctl disable --now nginx`). 시험 `rest/test_nginx_front.py`(화면 파일 직접·게이트웨이가 꺼져도 나옴, API·워커 패널은 게이트웨이로, Host 전달, 스트림 버퍼링 없음 1 s 안, 본문 64 KiB 넘으면 413).
 
 Python 판과 다른 점: HEAD·PATCH·OPTIONS는 JSON 501, Range 요청은 206, 워커 명령 시간 상한은 전체 시간으로 셈, Python이 예외로 답 없이 끊던 경우는 500·503으로 답함, 제품 빌드는 취소 중인 자식이 끝나기 전 새 시작을 막음(Python은 옛 상태가 섞였음), SSE 기준 상태를 잠금 안에서 넣어 드문 경합이 없어짐, 새로: 동시 요청 상한(넘으면 503), 받기·스트림 스레드 10 s 멈춤 → exit 4.
 
