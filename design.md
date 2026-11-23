@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.58 |
+| 문서 버전 | 0.59 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1417,7 +1417,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | 워커 템플릿(호스트 + 모듈 셋 source·processor·peer, 포트, 스레드, 자식 프로세스, 워커 간 통신, 단계별 시험, ICD 틀, 패널, Python 도우미), new/release/check/system-check 도구, 구조 검사 | 구현 |
 | 워커 간 통신(명령·스트림 구독·데이터 버스, worker_id·peers) | 구현(템플릿 시험). 기존 워커는 아직 안 씀 |
 | 입출력 정의(6.6.7.1~6.6.7.2: `io.json`·`io/`·사본) | 0.38 형식·템플릿 예시·점검(`dev/test_workers.py`) 구현. 기존 워커는 고도화할 때 붙임 |
-| 입력 주소·연결 선언(6.6.7.3~6.6.7.5: `inputs`, `connections.json`, libworker `host.uses`·칸 검사·`--io`, Manager 수집·자동 연결·검사·주입, 화면 연결 그림) | 구현(0.57): libworker 0.11 `host.uses`·`input_link`·지표·상태, process-manager 연결 풀기·검사·주입(`run/inputs/`)·바뀌면 그 워커만 다시 시작·상태, 템플릿 `peer` 모듈이 입력 `upstream`(없으면 예전 `peer.peer`), 자동 상태 화면에 입력 연결. 남은 것: 받은 칸 검사(`Subscriber`·`CommandClient`에 정의), `--io`, 연결 그림·편집 화면, 프로젝트 워커 옮기기 |
+| 입력 주소·연결 선언(6.6.7.3~6.6.7.5: `inputs`, `connections.json`, libworker `host.uses`·칸 검사·`--io`, Manager 수집·자동 연결·검사·주입, 화면 연결 그림) | 구현(0.57): libworker 0.11 `host.uses`·`input_link`·지표·상태, process-manager 연결 풀기·검사·주입(`run/inputs/`)·바뀌면 그 워커만 다시 시작·상태, 템플릿 `peer` 모듈이 입력 `upstream`(없으면 예전 `peer.peer`), 자동 상태 화면에 입력 연결. 연결 그림·편집 화면(공용 패널 `connections`, 0.59), siyi 기체 자세를 입력 `vehicle`로. 남은 것: 받은 칸을 실행 중에 검사할지(`Subscriber`·`CommandClient`에 정의, 지금은 출력 대조로 확인), `--io` |
 | Manager API를 쓰는 워커 | 구현(`test_manager_api.py`) |
 | 워커 설정 = 워커 폴더 프리셋(임시 적용·저장·전환, 커밋은 사용자) | 구현 |
 | 프레임 버스(데이터 버스) | CPU 공유 메모리, 영상·원시 레코드, Latest·InOrder. NvBufSurface는 미결 |
@@ -1548,6 +1548,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.56 | **명령 표시 `operate`**(6.6.7.1, `docs/command-path.md` 3장): 워커 정의·조각의 명령 중 운용 중에도 쓰는 조작을 계약에 표시하면 운용 모드에서도 통과(게이트웨이), 연결 선언에 워커 전체로 적은 명령하는 곳에도 열림(process-manager). libvideo `stream.start`·`stop`에 표시(조각 1.1). 점검이 명령 칸 `read`·`operate`를 받음(true만, 같이 쓰지 않음) |
 | 0.57 | **입력 연결 구현**(6.6.7.3~6.6.7.5): process-manager가 계약(uses·provides)·연결 선언(`connections`)·프리셋 `inputs`로 입력을 풀고(선언 → 자동 → 설정), 검사(역할·버전·주제·명령·데이터)한 결과를 `run/inputs/<id>.json` + `WORKSPACE_INPUTS_FILE`로 넣음, 바뀌면 그 워커만 다시 시작, 워커 상태 `inputs`. libworker 0.11 `host.uses`·`input_link`(지표 `inputs_<입력>_link`, 공통 정의 1.2 `inputs`). 템플릿 `peer` 모듈이 입력 `upstream`으로. 자동 상태 화면에 입력 연결 |
 | 0.58 | **Python 판 process-manager 삭제**: 시작 셸은 C++ 실행 파일만(없으면 끝냄, `manager_impl` 없어짐), `manager/workspace_manager/`·`test_notify_race.py` 삭제, 수락 시험은 C++ 전용(`MANAGER_BIN` 없으면 건너뜀), 저장소 설정 점검 `test_schema.py`는 기준 코드 `manager/reference_schema.py`로 |
+| 0.59 | **연결 화면**(6.6.7.4): 공용 패널 `connections`(설정 묶음): 연결 그림, 입력마다 상대 고르기(자동·내보내는 워커, 저장은 `PUT /connections`, 개발 모드에서만), 명령하는 곳 보기. 서버 기능은 더하지 않음(있는 경로만) |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |
