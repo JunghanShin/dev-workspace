@@ -117,10 +117,14 @@ export default {
     els.metrics = h("div");
     els.status = h("div", { class: "stack" });
     els.last = ui.kvList([["마지막 명령", "—"]]);  // 누가 무엇을 보냈나(docs/command-path.md 5장)
+    els.inputs = ui.kvList([]);  // 입력 연결(워크스페이스 design.md 6.6.7.4): 쓰는 정의가 있을 때만
+    els.inputsCard = ui.card("입력 연결", els.inputs);
+    els.inputsCard.hidden = true;
     el.appendChild(h("div", { class: "stack" },
       ui.panelHead({ title: id, badges: [els.pill], actions: [ui.settingsButton(els.settings, `${id} 설정`), h("span", { class: "ph-sep" }), els.controls] }),
       els.note,
       els.last,
+      els.inputsCard,
       ui.card("지표 (heartbeat, 1초)", els.metrics),
       ui.card("상태 (get_status, 모듈별)", els.status)));
     try {
@@ -144,6 +148,9 @@ export default {
     els.controls.update(w);
     els.settings.update(w);
     renderMetrics(ctx, w);
+    const rows = ctx.ui.inputRows(w);
+    els.inputsCard.hidden = !rows.length;
+    if (rows.length) els.inputs.set(rows);
   },
 
   unmount() {

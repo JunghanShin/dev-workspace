@@ -91,6 +91,12 @@ App::App(AppConfig cfg, Supervisor& sup, StoreThread& store, Publisher& pub, Res
     client_names_ = {"rest", "logger"};
     for (const auto& w : cfg_.api_workers) client_names_.push_back(w);  // std::set이라 이름순
     sup_.listener = [this](const std::string& e, const std::string& k, const Json& d) { on_event(e, k, d); };
+    sup_.inputs_for = [this](const std::string& id) {
+        return inputs_res_.inject.contains(id) ? inputs_res_.inject[id] : Json::object();
+    };
+    sup_.inputs_status = [this](const std::string& id) {
+        return inputs_res_.status.contains(id) ? inputs_res_.status[id] : Json::object();
+    };
 }
 
 App::~App() {
@@ -174,9 +180,10 @@ void App::load_connections(bool force) {
     if (!force && mtime == connections_mtime_) return;
     connections_mtime_ = mtime;
     peers_dirty_ = true;
-    if (mtime == 0) {  // 파일 없음: 선언 없음(화면만)
+    if (mtime == 0) {  // 파일 없음: 선언 없음(화면만, 입력은 자동 연결·프리셋)
         connections_ = Json::object();
         connections_error_.clear();
+        if (!ios_.empty()) resolve_inputs();
         return;
     }
     std::string text, err;
@@ -190,6 +197,7 @@ void App::load_connections(bool force) {
     std::string shape;
     if (!j || !j->is_object()) shape = j ? "connections.json must be an object" : err;
     else shape = commanders_shape_error(j->value("commanders", Json()));
+    if (shape.empty() && j && j->is_object()) shape = connections_shape_error(j->value("connections", Json()));
     if (!shape.empty()) {
         connections_error_ = shape;
         PM_WARN("connections: %s: %s (keeping last)", cfg_.connections_path.c_str(), shape.c_str());
@@ -198,17 +206,24 @@ void App::load_connections(bool force) {
     connections_ = *j;
     connections_error_.clear();
     PM_INFO("connections: loaded %s", cfg_.connections_path.c_str());
+    if (!ios_.empty()) resolve_inputs();
 }
 
 void App::refresh_commands() {
     std::map<std::string, WorkerCommands> next;
+    std::map<std::string, WorkerIo> ios;
     for (const auto& id : sup_.ids()) {
+        Json io;
         try {
-            next[id] = commands_from_io(sup_.get_io(Json(id)));
+            io = sup_.get_io(Json(id));
         } catch (...) {
-            next[id] = commands_from_io(Json());  // 계약 없음: 읽기(get_status)만, 역할 명령 없음
+            io = Json();  // 계약 없음: 읽기(get_status)만, 역할 명령 없음, 입력 없음
         }
+        next[id] = commands_from_io(io);
+        ios[id] = worker_io_from(io, sup_.config_of(id));
     }
+    ios_ = std::move(ios);
+    resolve_inputs();
     cmds_at_ = now();
     if (next.size() != cmds_.size() ||
         !std::equal(next.begin(), next.end(), cmds_.begin(), [](const auto& a, const auto& b) {
@@ -245,12 +260,23 @@ void App::write_peers(bool force) {
     });
 }
 
+void App::resolve_inputs() {
+    InputResolution r = resolve_connections(connections_.value("connections", Json()), ios_);
+    const bool changed = r.inject != inputs_res_.inject || r.status != inputs_res_.status;
+    inputs_res_ = std::move(r);
+    if (!changed) return;
+    for (const auto& e : inputs_res_.errors) PM_WARN("connections: %s", py_str(e).c_str());
+    sup_.restart_changed_inputs();  // 넣어 줄 주소가 바뀐 워커만(설정 바뀜과 같음, 6.6.7.4)
+}
+
 Json App::connections_view() {
     Json out = Json::object();
     out["path"] = cfg_.connections_path;
     out["connections"] = connections_;
     out["error"] = connections_error_.empty() ? Json(nullptr) : Json(connections_error_);
     out["check"] = check_commanders(connections_.value("commanders", Json()), cmds_);
+    out["inputs"] = inputs_res_.status;  // 워커 → 입력 → {from, how, ok, error, required}
+    out["errors"] = inputs_res_.errors;
     out["guard"] = cfg_.command_guard;
     out["access_mode"] = access_mode_;
     return out;
@@ -260,7 +286,8 @@ Json App::connections_view() {
 std::optional<Json> App::plan_set_connections(int fd, const Json& req) {
     const Json c = jget(req, "connections");
     if (!c.is_object()) return error("bad_request", "connections must be an object (the whole connections.json)");
-    const std::string shape = commanders_shape_error(c.value("commanders", Json()));
+    std::string shape = commanders_shape_error(c.value("commanders", Json()));
+    if (shape.empty()) shape = connections_shape_error(c.value("connections", Json()));
     if (!shape.empty()) return error("bad_request", shape);
     if (cfg_.connections_path.empty()) return error("unavailable", "no connections file path");
     write_busy_ = true;

@@ -375,6 +375,7 @@ Json Supervisor::status(const Worker& w, double now) const {
     s["sim"] = w.sim;
     s["exec"] = w.exec_path;
     s["peers"] = w.peers;
+    s["inputs"] = inputs_status ? inputs_status(w.id) : Json::object();
     s["desired_state"] = w.desired_state;
     s["actual_state"] = w.actual;
     s["pid"] = w.has_proc() ? Json(w.pid) : Json(nullptr);
@@ -913,6 +914,26 @@ std::vector<std::string> Supervisor::ids() const {
     return out;
 }
 
+Json Supervisor::config_of(const std::string& id) const {
+    const auto it = by_id_.find(id);
+    return it == by_id_.end() ? Json::object() : it->second->config;
+}
+
+std::vector<std::string> Supervisor::restart_changed_inputs() {
+    std::vector<std::string> out;
+    if (!inputs_for || cfg_.inputs_dir.empty()) return out;
+    for (auto& w : workers_) {
+        if (!w->has_proc() || w->stop_reason || w->actual != "running") continue;
+        Json now = inputs_for(w->id);
+        if (!now.is_object()) now = Json::object();
+        if (now == w->inputs_injected) continue;
+        PM_INFO("%s: inputs changed, restarting", w->id.c_str());
+        terminate(*w, "restart");
+        out.push_back(w->id);
+    }
+    return out;
+}
+
 void Supervisor::apply_resources(const std::map<int, Json>& by_pgid) {
     for (auto& w : workers_) {
         if (!w->has_proc()) continue;
@@ -984,7 +1005,19 @@ void Supervisor::spawn(Worker& w, const Json& /*t*/) {
     Worker* wp = &w;
     const long long version = w.config_version;
     const std::string tname = w.type;
-    store_.submit({worker_config_op(w)}, [this, wp, version, tname](bool ok, const std::string& err) {
+    std::vector<FileOp> ops = {worker_config_op(w)};
+    // 입력 주소 파일(design.md 6.6.7.4): 설정 파일이 아니라 따로(예전 libworker가 모르는 설정 키에 멈추지 않게)
+    if (!cfg_.inputs_dir.empty()) {
+        w.inputs_injected = inputs_for ? inputs_for(w.id) : Json::object();
+        if (!w.inputs_injected.is_object()) w.inputs_injected = Json::object();
+        FileOp in;
+        in.path = cfg_.inputs_dir + "/" + w.id + ".json";
+        Json doc = Json::object();
+        doc["inputs"] = w.inputs_injected;
+        in.text = dump_file(doc);
+        ops.push_back(in);
+    }
+    store_.submit(std::move(ops), [this, wp, version, tname](bool ok, const std::string& err) {
         wp->spawning = false;
         if (!ok) {
             wp->last_error = "spawn failed: " + err;
@@ -1018,7 +1051,8 @@ void Supervisor::do_spawn(Worker& w, const Json& t) {
     const std::string mgr_sock = "WORKSPACE_MANAGER_SOCKET=";
     for (const auto& e : cfg_.base_env) {
         if (e.rfind("WORKSPACE_WORKER_ID=", 0) == 0 || e.rfind("WORKSPACE_NOTIFY_SOCKET=", 0) == 0 ||
-            e.rfind(mgr_sock, 0) == 0 || e.rfind("WORKSPACE_PEERS_FILE=", 0) == 0)
+            e.rfind(mgr_sock, 0) == 0 || e.rfind("WORKSPACE_PEERS_FILE=", 0) == 0 ||
+            e.rfind("WORKSPACE_INPUTS_FILE=", 0) == 0)
             continue;
         spec.env.push_back(e);
     }
@@ -1026,6 +1060,7 @@ void Supervisor::do_spawn(Worker& w, const Json& t) {
     spec.env.push_back("WORKSPACE_NOTIFY_SOCKET=" + cfg_.notify_path);
     // 명령하는 곳 허용 목록(docs/command-path.md 4.2). 설정 파일이 아니라 환경 변수로: 예전 libworker는 모르는 값을 무시
     if (!cfg_.peers_file.empty()) spec.env.push_back("WORKSPACE_PEERS_FILE=" + cfg_.peers_file);
+    if (!cfg_.inputs_dir.empty()) spec.env.push_back("WORKSPACE_INPUTS_FILE=" + cfg_.inputs_dir + "/" + w.id + ".json");
     // Manager API를 쓰는 워커에게만 전용 Manager 소켓을 알려 준다(design.md 6.5)
     if (cfg_.manager_api_workers.count(w.id))
         spec.env.push_back(mgr_sock + cfg_.paths.run_dir + "/manager-" + w.id + ".sock");

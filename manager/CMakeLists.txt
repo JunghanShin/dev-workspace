@@ -32,6 +32,7 @@ add_library(pm_core STATIC
     core/worker_files.cpp
     core/supervisor.cpp
     core/peers.cpp
+    core/connections.cpp
 )
 target_include_directories(pm_core PUBLIC core lib/third_party)
 target_compile_options(pm_core PRIVATE -Wall -Wextra -Wpedantic)

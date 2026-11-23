@@ -152,6 +152,8 @@ int main(int argc, char** argv) {
     sc.boot_id = read_boot_id();
     sc.manager_api_workers = api_workers;
     sc.peers_file = paths.run_dir + "/peers.json";
+    sc.inputs_dir = paths.run_dir + "/inputs";
+    pm::mkdir_p(sc.inputs_dir);
     pm::Supervisor sup(sc, clock, spawner, store, fs);
     sup.load();
     // 시작 때 쓴 파일(옮긴 설정, desired.json 등)이 다 써진 뒤 API를 연다(Python 판처럼 시작 상태가 파일에 먼저)

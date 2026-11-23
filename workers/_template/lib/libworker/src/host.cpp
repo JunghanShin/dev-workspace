@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include <climits>
+#include <fstream>
 #include <sstream>
 
 #include "worker/child.hpp"
@@ -30,7 +31,7 @@ constexpr auto kReportPeriod = std::chrono::seconds(1);
 constexpr auto kMaxSleep = std::chrono::milliseconds(100);
 
 const std::set<std::string> kHostKeys = {"watchdog_sec", "stop_timeout_sec", "thread_stall_sec", "command_socket",
-                                         "stream_socket", "sim", "stages", "loop_budget_ms"};
+                                         "stream_socket", "sim", "stages", "loop_budget_ms", "inputs"};
 constexpr int kMaxConsecutiveErrors = 3;  // on_timer·on_poll 연속 예외가 이만큼이면 상태가 깨졌다고 본다
 constexpr size_t kMaxWarnings = 10;
 constexpr auto kSimRestart = std::chrono::seconds(2);
@@ -187,6 +188,20 @@ bool Host::configure_file(const std::string& path, std::string* error) {
             m->configure(sec);
             sections_[m->name()] = sec;
         }
+        // 입력 주소: 설정 inputs(단독 실행) 위에 워크스페이스가 푼 결과 파일(WORKSPACE_INPUTS_FILE)을 덮는다
+        inputs_ = resolve_inputs(cfg.contains("inputs") ? cfg["inputs"] : Json(), "config");
+        if (const char* f = std::getenv("WORKSPACE_INPUTS_FILE"); f && *f) {
+            try {
+                std::ifstream in(f);
+                if (in) {
+                    const Json doc = Json::parse(in);
+                    for (auto& [n, x] : resolve_inputs(doc.value("inputs", Json::object()), "workspace")) inputs_[n] = x;
+                }
+            } catch (const std::exception& e) {  // 워크스페이스 파일이 틀려도 워커는 뜬다(설정 inputs만으로)
+                std::fprintf(stderr, "%s: inputs file %s ignored: %s\n", program_.c_str(), f, e.what());
+            }
+        }
+        input_up_.clear();
         config_path_ = path;
         host_cfg_ = host_keys(cfg);
     } catch (const std::exception& e) {
@@ -237,6 +252,13 @@ bool Host::reload_file(const std::string& path, std::string* error) {
 }
 
 void Host::set_peers_file(const std::string& path) { cmd_guard_ = std::make_unique<CommandGuard>(id_, path); }
+
+const InputAddress* Host::uses(const std::string& name) const {
+    const auto it = inputs_.find(name);
+    return it != inputs_.end() && it->second.connected() ? &it->second : nullptr;
+}
+
+void Host::input_link(const std::string& name, bool up) { input_up_[name] = up; }
 
 void Host::dispatch(const std::string& line, Reply reply, int peer_pid) {
     Json req;
@@ -341,6 +363,15 @@ Json Host::status() const {
     }
     if (watch_) out["threads"] = watch_->ages_ms(Clock::now());
     out["last_command"] = last_command_.is_object() ? last_command_ : Json(nullptr);
+    if (!inputs_.empty()) {  // 입력 주소와 연결 상태(design.md 6.6.7.5)
+        Json ins = Json::object();
+        for (const auto& [n, in] : inputs_) {
+            const auto up = input_up_.find(n);
+            ins[n] = {{"worker", in.worker.empty() ? Json(nullptr) : Json(in.worker)}, {"from", in.from},
+                      {"link", up != input_up_.end() && up->second}};
+        }
+        out["inputs"] = ins;
+    }
     out["runtime"] = runtime_status();
     return out;
 }
@@ -456,6 +487,10 @@ std::string Host::host_metrics() {
     std::string out = buf;
     for (const auto& s : stages_)
         if (s) out += " " + s->metrics();
+    for (const auto& [n, in] : inputs_) {  // 입력마다 연결(0/1)
+        const auto up = input_up_.find(n);
+        out += " inputs_" + n + "_link=" + std::string(up != input_up_.end() && up->second ? "1" : "0");
+    }
     return out;
 }
 

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "json_util.hpp"
+#include "connections.hpp"
 #include "peers.hpp"
 #include "posix_fs.hpp"
 #include "schema.hpp"
@@ -754,6 +755,63 @@ std::map<std::string, pm::WorkerCommands> peer_workers() {
     w["ext-ops"] = pm::commands_from_io(J(R"({"uses": {"g": {"from": "gimbal"}}})"));
     w["bare"] = pm::commands_from_io(Json());  // 계약 없는 워커
     return w;
+}
+
+// ---- 입력 연결(design.md 6.6.7.4) ----
+
+std::map<std::string, pm::WorkerIo> conn_workers() {
+    std::map<std::string, pm::WorkerIo> w;
+    // fc: vehicle 1.3 내보냄. fc2: vehicle 2.0. cam: vehicle 1.1을 씀(주제 pose), 필수 아님
+    w["fc"] = pm::worker_io_from(J(R"({"provides": {"vehicle": {"version": "1.3", "topics": {"pose": {}, "rates": {}},
+                                                                "commands": {"command.arm": {}}}}})"), Json::object());
+    w["cam"] = pm::worker_io_from(J(R"({"uses": {"veh": {"from": "vehicle", "version": "1.1", "topics": ["pose"]},
+                                                  "need": {"from": "radar", "version": "1.0", "required": true}}})"),
+                                  J(R"({"inputs": {"need": {"worker": "far-away"}}})"));
+    return w;
+}
+
+TEST(connections_resolve) {
+    CHECK(pm::version_compatible("1.1", "1.3"));
+    CHECK(!pm::version_compatible("1.4", "1.3"));
+    CHECK(!pm::version_compatible("1.0", "2.0"));
+    CHECK(!pm::version_compatible("x", "1.0"));
+    auto w = conn_workers();
+    // 자동: vehicle을 내보내는 워커가 하나(fc). 필수 입력 need는 프리셋 주소(config)
+    auto r = pm::resolve_connections(Json(), w);
+    CHECK_EQ(r.status["cam"]["veh"], J(R"({"required": false, "from": "fc", "how": "auto", "ok": true, "error": null})"));
+    CHECK_EQ(r.status["cam"]["need"]["how"], Json("config"));
+    CHECK_EQ(r.status["cam"]["need"]["from"], Json("far-away"));
+    CHECK_EQ(r.inject["cam"], J(R"({"veh": {"worker": "fc"}})"));  // config는 넣지 않음(워커가 설정에서 읽음)
+    CHECK_EQ(r.inject["fc"], Json::object());
+    // 둘이 내보내면 선언이 필요
+    w["fc2"] = pm::worker_io_from(J(R"({"provides": {"vehicle": {"version": "2.0", "topics": {"pose": {}}}}})"), Json::object());
+    r = pm::resolve_connections(Json(), w);
+    CHECK_EQ(r.status["cam"]["veh"]["how"], Json(nullptr));
+    CHECK(r.status["cam"]["veh"]["error"].get<std::string>().find("several workers") != std::string::npos);
+    CHECK_EQ(r.status["cam"]["veh"]["ok"], Json(false));
+    // 선언: fc2는 큰 버전이 달라 오류(주소 안 넣음), fc는 됨
+    r = pm::resolve_connections(J(R"([{"to": "cam.veh", "from": "fc2"}])"), w);
+    CHECK_EQ(r.status["cam"]["veh"]["how"], Json("declared"));
+    CHECK_EQ(r.status["cam"]["veh"]["ok"], Json(false));
+    CHECK(!r.inject["cam"].contains("veh"));
+    r = pm::resolve_connections(J(R"([{"to": "cam.veh", "from": "fc"}])"), w);
+    CHECK_EQ(r.inject["cam"], J(R"({"veh": {"worker": "fc"}})"));
+    // 쓰는 주제가 상대 정의에 없음
+    w["cam"].uses["veh"].topics.insert("wind");
+    r = pm::resolve_connections(J(R"([{"to": "cam.veh", "from": "fc"}])"), w);
+    CHECK(r.status["cam"]["veh"]["error"].get<std::string>().find("topic wind") != std::string::npos);
+    // 선언 자체의 오류
+    r = pm::resolve_connections(J(R"([{"to": "nobody.x", "from": "fc"}, {"to": "cam.nope", "from": "fc"},
+                                       {"to": "cam.need", "from": "fc"}, {"to": "cam.need", "from": "fc2"}])"), w);
+    CHECK_EQ(r.errors.size(), size_t(3));
+    CHECK_EQ(pm::connections_shape_error(J(R"([{"to": "a.b", "from": "c"}])")), std::string(""));
+    CHECK(!pm::connections_shape_error(J(R"([{"to": "ab", "from": "c"}])")).empty());
+    CHECK(!pm::connections_shape_error(J(R"({"to": "a.b"})")).empty());
+    // 필수 입력이 아무것도 없으면 ok false
+    w["cam"].config_inputs = Json::object();
+    r = pm::resolve_connections(Json(), w);
+    CHECK_EQ(r.status["cam"]["need"]["ok"], Json(false));
+    CHECK_EQ(r.status["cam"]["need"]["error"], Json("required input not connected"));
 }
 
 TEST(peers_commands_from_io) {

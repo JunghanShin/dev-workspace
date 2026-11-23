@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "connections.hpp"
 #include "json_util.hpp"
 #include "peers.hpp"
 #include "publisher.hpp"
@@ -89,6 +90,7 @@ private:
     // 명령 길: 연결 선언 읽기, 워커 명령 표(계약), peers.json 쓰기
     void load_connections(bool force);
     void refresh_commands();
+    void resolve_inputs();  // 입력 연결(design.md 6.6.7.4): 바뀌면 그 워커를 다시 시작
     void write_peers(bool force = false);
     Json connections_view();
     std::optional<Json> plan_set_connections(int fd, const Json& req);
@@ -119,6 +121,8 @@ private:
     std::string connections_error_;          // 마지막 읽기 오류(깨진 파일이면 직전 값을 씀)
     long long connections_mtime_ = -1;
     std::map<std::string, WorkerCommands> cmds_;  // 워커 id → 명령 표(계약)
+    std::map<std::string, WorkerIo> ios_;         // 워커 id → 쓰는·내보내는 정의(계약) + 프리셋 inputs
+    InputResolution inputs_res_;                  // 입력 연결 결과(상태 inputs, 넣어 줄 주소)
     double cmds_at_ = -1e9;
     int gateway_pid_ = 0;                    // manager-rest.sock에 붙은 게이트웨이(SO_PEERCRED)
     std::string peers_text_;                 // 마지막으로 쓴 내용(시각 빼고, 바뀌었을 때만 씀)

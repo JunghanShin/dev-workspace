@@ -19,6 +19,8 @@
 
 #include "worker/command_server.hpp"
 #include "worker/guard.hpp"
+#include "worker/inputs.hpp"
+#include "worker/workspace.hpp"
 #include "worker/host.hpp"
 #include "worker/mutex.hpp"
 #include "worker/stage.hpp"
@@ -859,7 +861,57 @@ static void host_guard_and_last_command() {
     rmdir(dir);
 }
 
+// ---- 입력 주소(design.md 6.6.7.3·6.6.7.5) ----
+
+static void inputs_resolve_and_host() {
+    // 워커 id → 기본 소켓, 직접 준 경로는 그대로
+    auto a = worker::resolve_input("up", {{"worker", "cam-a"}});
+    CHECK(a.worker == "cam-a" && a.command == worker::default_command_socket("cam-a") &&
+          a.stream == worker::default_stream_socket("cam-a") && a.data.at("frames") == worker::default_socket("cam-a", "frames"));
+    auto b = worker::resolve_input("up", {{"command", "/x/c.sock"}, {"data", {{"raw", "/x/r.sock"}}}});
+    CHECK(b.worker.empty() && b.command == "/x/c.sock" && b.stream.empty() && b.data.at("raw") == "/x/r.sock" && b.connected());
+    CHECK(!worker::resolve_input("up", worker::Json::object()).connected());
+    bool threw = false;
+    try { worker::resolve_input("up", {{"wroker", "x"}}); } catch (const std::exception&) { threw = true; }
+    CHECK(threw);
+    threw = false;
+    try { worker::resolve_input("up", {{"worker", "../x"}}); } catch (const std::exception&) { threw = true; }
+    CHECK(threw);
+
+    char dir[] = "/tmp/lw-inputs-XXXXXX";
+    CHECK(mkdtemp(dir) != nullptr);
+    const std::string cfg = std::string(dir) + "/w1.json", file = std::string(dir) + "/inputs.json";
+    write_text(cfg, R"({"id": "w1", "config": {"inputs": {"up": {"worker": "from-config"}, "aux": {"stream": "/s.sock"}}}})");
+    write_text(file, R"({"inputs": {"up": {"worker": "from-ws"}}})");
+    setenv("WORKSPACE_INPUTS_FILE", file.c_str(), 1);
+    worker::Host host("test");
+    host.add<Echo>("alpha");
+    std::string err;
+    CHECK(host.configure_file(cfg, &err));
+    unsetenv("WORKSPACE_INPUTS_FILE");
+    // 워크스페이스 파일이 설정을 이긴다(같은 입력), 다른 입력은 설정 그대로
+    CHECK(host.uses("up") && host.uses("up")->worker == "from-ws" && host.uses("up")->from == "workspace");
+    CHECK(host.uses("aux") && host.uses("aux")->stream == "/s.sock" && host.uses("aux")->from == "config");
+    CHECK(host.uses("none") == nullptr);
+    host.input_link("up", true);
+    const auto st = host.status();
+    CHECK(st["inputs"]["up"]["link"] == true && st["inputs"]["up"]["worker"] == "from-ws");
+    CHECK(st["inputs"]["aux"]["link"] == false && st["inputs"]["aux"]["worker"].is_null());
+    // 깨진 워크스페이스 파일: 무시하고 설정만으로
+    write_text(file, "{broken");
+    setenv("WORKSPACE_INPUTS_FILE", file.c_str(), 1);
+    worker::Host h2("test");
+    h2.add<Echo>("alpha");
+    CHECK(h2.configure_file(cfg, &err));
+    unsetenv("WORKSPACE_INPUTS_FILE");
+    CHECK(h2.uses("up") && h2.uses("up")->worker == "from-config");
+    std::remove(cfg.c_str());
+    std::remove(file.c_str());
+    rmdir(dir);
+}
+
 int main() {
+    inputs_resolve_and_host();
     guard_table();
     host_guard_and_last_command();
     queue_drop_oldest();

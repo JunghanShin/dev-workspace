@@ -43,6 +43,7 @@
 
 #include "worker/config.hpp"
 #include "worker/guard.hpp"
+#include "worker/inputs.hpp"
 #include "worker/stage.hpp"
 #include "worker/thread.hpp"
 
@@ -197,6 +198,12 @@ public:
     void dispatch(const std::string& line, Reply reply, int peer_pid = 0);
     // 명령하는 곳 검사(시험·run이 씀). path가 비면 검사하지 않음(단독 실행)
     void set_peers_file(const std::string& path);
+
+    // 입력 주소(워크스페이스 design.md 6.6.7.3·6.6.7.5, inputs.hpp). 없거나 이어지지 않은 입력이면 nullptr.
+    // configure 뒤(start()에서) 쓴다. 모듈은 붙었는지를 input_link로 알린다(지표 inputs_<입력>_link, get_status "inputs")
+    const InputAddress* uses(const std::string& name) const;
+    void input_link(const std::string& name, bool up);
+    const std::map<std::string, InputAddress>& inputs() const { return inputs_; }
     Json status() const;
     std::string metrics() const;
 
@@ -227,6 +234,8 @@ private:
     long config_version_ = 0;
     // 명령 길: 허용 목록 검사, 마지막 명령, 위반 기록(같은 곳·명령은 60 s에 한 번)
     std::unique_ptr<CommandGuard> cmd_guard_;
+    std::map<std::string, InputAddress> inputs_;   // 입력 주소(설정 inputs + 워크스페이스 파일)
+    std::map<std::string, bool> input_up_;  // 모듈이 알린 연결 상태
     Json last_command_;
     std::map<std::string, TimePoint> guard_logged_;
     std::string command_socket_, stream_socket_;

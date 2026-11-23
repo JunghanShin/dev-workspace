@@ -43,6 +43,7 @@ private:
         float first;
     };
     std::string peer_;
+    bool uses_input_ = false;  // 상대 주소를 입력 upstream(host.uses)으로 받음
     std::string bus_socket_;  // 비우면 상대 id의 기본 데이터 버스 소켓
     std::unique_ptr<worker::BoundedQueue<Got>> got_;
     std::unique_ptr<worker::WorkerThread> data_;

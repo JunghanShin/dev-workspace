@@ -21,8 +21,19 @@ void Module::configure(const Json& c) {
 }
 
 void Module::start(worker::Host& host) {
+    // 상대 주소: 입력 upstream(워크스페이스 연결 선언·자동 연결, 또는 설정 inputs. 워크스페이스 design.md 6.6.7.5).
+    // 없으면 예전 방식(설정 peer.peer 워커 id, 6.6.7.6 옮기는 동안)
+    std::string cmd_sock, stream_sock, bus;
+    if (const worker::InputAddress* in = host.uses("upstream")) {
+        uses_input_ = true;
+        if (peer_.empty()) peer_ = in->worker.empty() ? in->command : in->worker;
+        cmd_sock = in->command;
+        stream_sock = in->stream;
+        const auto f = in->data.find("frames");
+        if (f != in->data.end()) bus = f->second;
+    }
     if (peer_.empty()) return;  // 상대가 없으면 꺼짐
-    const std::string bus = bus_socket_.empty() ? worker::default_socket(peer_, "frames") : bus_socket_;
+    if (bus.empty()) bus = bus_socket_.empty() ? worker::default_socket(peer_, "frames") : bus_socket_;
     got_ = std::make_unique<worker::BoundedQueue<Got>>(256, worker::Overflow::DropOldest);
     // 큰 데이터: 상대 데이터 버스를 순서대로 전부 받는다. 끊기면 기다렸다 다시 붙는다
     data_ = std::make_unique<worker::WorkerThread>("peer.data", host.watch(), [this, bus](worker::WorkerThread& t) {
@@ -56,11 +67,13 @@ void Module::start(worker::Host& host) {
     // 신호·상태: 상대 스트림 구독
     worker::Subscriber::Options so;
     so.thread_name = "peer.sub";
+    so.socket = stream_sock;
     sub_ = std::make_unique<worker::Subscriber>(host.watch(), peer_, so);
     sub_->start();
     // 요청·응답: 상대에 명령(비동기)
     worker::CommandClient::Options co;
     co.thread_name = "peer.cmd";
+    co.socket = cmd_sock;
     cmd_ = std::make_unique<worker::CommandClient>(host.watch(), peer_, co);
     cmd_->start();
     std::printf("peer: %s (data bus %s)\n", peer_.c_str(), bus.c_str());
@@ -75,6 +88,7 @@ void Module::add_pollfds(std::vector<pollfd>& fds) {
 
 void Module::on_timer(worker::TimePoint) {
     if (!got_) return;
+    if (uses_input_ && host()) host()->input_link("upstream", data_link_.load() && sub_->connected());  // 지표 inputs_upstream_link
     while (auto g = got_->try_pop()) {
         tracker_.on(g->seq);
         last_bytes_ = g->bytes;

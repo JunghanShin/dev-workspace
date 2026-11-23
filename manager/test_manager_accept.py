@@ -42,7 +42,7 @@ ver = d.get("config_version")
 log(ev="start", pid=os.getpid(), pgid=os.getpgid(0), ver=ver, config=cfg, argv=sys.argv, payload=d,
     nice=os.nice(0), env={k: os.environ.get(k) for k in ("WORKSPACE_WORKER_ID", "WORKSPACE_NOTIFY_SOCKET",
                                                           "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_DATA",
-                                                          "WORKSPACE_PEERS_FILE")})
+                                                          "WORKSPACE_PEERS_FILE", "WORKSPACE_INPUTS_FILE")})
 print("hello stdout from %s" % d.get("id"), flush=True)
 if b.get("log_bytes"):
     sys.stdout.write("x" * b["log_bytes"] + "\n")
@@ -99,6 +99,8 @@ STATUS_KEYS = {"id", "type", "builtin", "autostart", "preset", "temp", "libworke
                "desired_state", "actual_state", "pid", "last_exit_code", "last_signal", "last_error",
                "restart_count", "crash_loop", "restart_in_s", "process", "started_at", "last_heartbeat_ms_ago",
                "progress", "config_version", "applied_version", "metrics", "resources"}
+if os.environ.get("MANAGER_BIN"):  # C++ 판만: 입력 연결 상태(design.md 6.6.7.4, Python 판은 곧 지움)
+    STATUS_KEYS = STATUS_KEYS | {"inputs"}
 
 SCHEMA = {"groups": [
     {"title": "모듈", "section": "mod", "fields": [
@@ -1066,6 +1068,42 @@ class CommandPath(unittest.TestCase):
         self.assertTrue(wait_for(lambda: e.call("manager.sock", {"op": "get_connections"})["data"]["error"], 4))
         d = e.call("manager.sock", {"op": "get_connections"})["data"]
         self.assertEqual(d["connections"], {"connections": [], "commanders": {"gim": ["ext"]}})
+
+    def test_inputs(self):
+        """입력 연결(design.md 6.6.7.4): 둘이 내보내면 선언 필요 → 선언하면 그 워커만 다시 시작, 주소 파일·상태"""
+        e = Env({"fc": {"config": {}, "autostart": True}, "fc2": {"config": {}, "autostart": True},
+                 "cam": {"config": {}, "autostart": True}})
+        self.envs.append(e)
+        for n, ver in (("fc", "1.3"), ("fc2", "1.0")):
+            folder = os.path.dirname(e.ws[n])
+            write_json(os.path.join(folder, "io.json"), {"provides": ["vehicle"]})
+            write_json(os.path.join(folder, "io", "vehicle.json"),
+                       {"name": "vehicle", "version": ver, "topics": {"pose": {}}, "commands": {}})
+        write_json(os.path.join(os.path.dirname(e.ws["cam"]), "io.json"),
+                   {"provides": [], "uses": {"veh": {"from": "vehicle", "version": "1.1", "topics": ["pose"]}}})
+        e.start()
+        s = e.wait_state("cam", "running")
+        path = os.path.join(e.run_dir, "inputs", "cam.json")
+        self.assertEqual(e.starts("cam")[-1]["env"]["WORKSPACE_INPUTS_FILE"], path)
+        self.assertEqual(read_json(path), {"inputs": {}})  # 둘이 내보내서 자동 연결 안 함
+        self.assertEqual(s["inputs"]["veh"]["how"], None)
+        self.assertIn("several workers", s["inputs"]["veh"]["error"])
+        self.assertEqual(e.status("fc")["inputs"], {})
+        # 선언: fc2는 버전 1.0이라 사본 1.1과 안 맞음(주소 안 넣음, 다시 시작 안 함)
+        d = e.ok({"op": "set_connections", "connections": {"connections": [{"to": "cam.veh", "from": "fc2"}]}})
+        self.assertEqual((d["inputs"]["cam"]["veh"]["how"], d["inputs"]["cam"]["veh"]["ok"]), ("declared", False))
+        time.sleep(1)
+        self.assertEqual(e.status("cam")["pid"], s["pid"])
+        # fc로 선언: 주소가 바뀌어 cam만 다시 시작
+        d = e.ok({"op": "set_connections", "connections": {"connections": [{"to": "cam.veh", "from": "fc"}]}})
+        self.assertEqual(d["inputs"]["cam"]["veh"], {"required": False, "from": "fc", "how": "declared", "ok": True, "error": None})
+        s2 = wait_for(lambda: (lambda x: x if x and x["actual_state"] == "running" and x["pid"] != s["pid"] else None)(e.status("cam")), 10)
+        self.assertTrue(s2, e.status("cam"))
+        self.assertEqual(read_json(path), {"inputs": {"veh": {"worker": "fc"}}})
+        self.assertEqual(len(e.starts("fc")), 1)  # 다른 워커는 그대로
+        # 잘못된 선언은 오류 목록에
+        d = e.ok({"op": "set_connections", "connections": {"connections": [{"to": "ghost.x", "from": "fc"}]}})
+        self.assertEqual(len(d["errors"]), 1)
 
     def test_manager_api_writes_follow_mode(self):
         """외부 연동 워커(Manager API)의 관리 조작은 운용 모드에서 막힘, 개발 모드에서 됨. 읽기는 늘 됨"""

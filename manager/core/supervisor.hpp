@@ -59,6 +59,7 @@ struct SupervisorConfig {
     std::string boot_id;                   // 비어 있으면 null
     std::set<std::string> manager_api_workers;
     std::string peers_file;                // 허용 목록(docs/command-path.md 4.2). 워커에 WORKSPACE_PEERS_FILE로
+    std::string inputs_dir;                // 입력 주소 파일 폴더(design.md 6.6.7.4). 워커에 WORKSPACE_INPUTS_FILE로
 };
 
 struct Worker {
@@ -97,6 +98,7 @@ struct Worker {
     bool killed = false;
     Json metrics, resources;
     bool spawning = false;       // 설정 파일 쓰기를 기다리는 중(이 동안 다시 띄우지 않음)
+    Json inputs_injected = Json::object();  // 마지막으로 띄울 때 넣어 준 입력 주소(바뀌면 다시 시작)
 
     bool has_proc() const { return pid > 0; }
 };
@@ -115,6 +117,9 @@ public:
     // 워커 폴더를 보고 워커를 만든다(6.3.1). 같은 부팅이면 직전 실행 상태·임시 설정 복원
     void load();
     Listener listener;  // worker_status 이벤트(구독자에게)
+    // 입력 연결(design.md 6.6.7.4, App이 연결 선언·계약으로 푼 것): 띄울 때 넣어 줄 주소, 상태의 inputs
+    std::function<Json(const std::string& id)> inputs_for;
+    std::function<Json(const std::string& id)> inputs_status;
 
     // ---- 조회(ApiError) ----
     Json list();
@@ -141,6 +146,9 @@ public:
     std::vector<int> running_pids() const;
     std::map<std::string, int> pids_by_id() const;  // 떠 있는 워커 id → pid(= 프로세스 그룹)
     std::vector<std::string> ids() const;           // 등록된 워커 id(순서대로)
+    // 입력 주소가 띄울 때와 달라진 떠 있는 워커를 다시 시작한다(설정 바뀜과 같음). 다시 시작한 워커 id
+    std::vector<std::string> restart_changed_inputs();
+    Json config_of(const std::string& id) const;    // 지금 설정(없으면 빈 객체)
 
     // ---- 끝내기(desired_state는 그대로 두어 다시 시작하면 복원) ----
     double shutdown_begin();  // 모두 SIGTERM, 기다릴 최대 시간(초)

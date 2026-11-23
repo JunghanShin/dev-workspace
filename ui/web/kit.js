@@ -33,6 +33,7 @@
 //   setProduct(on), isProduct()    제품 모드(셸이 /api/ui "product"로 정함): 설정 창·프리셋·워커 시작/정지·자동 시작을 그리지 않음
 //   setMode(mode), isDevMode()     운용/개발 모드(셸이 /api/auth/me "mode"로): 운용 모드면 시작/정지·자동 시작·설정 저장 버튼을 흐리게
 //   lastCommand(st)                get_status의 last_command → "명령 · 보낸 곳 · 결과" 글(없으면 "—")
+//   inputRows(w)                   워커 상태 inputs(입력 연결, design.md 6.6.7.4) → kvList 줄 [[입력, "상대 · 방법 · 문제"], ...]
 
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -406,6 +407,18 @@ export function isDevMode() { return DEV; }
 
 // 마지막 명령(get_status 공통 칸 last_command, docs/command-path.md 5장): 누가 무엇을 보냈나
 const FROM_KO = { screen: "화면" };
+const HOW_KO = { declared: "선언", auto: "자동", config: "설정" };
+export function inputRows(w) {
+  const ins = (w && w.inputs) || {};
+  return Object.keys(ins).sort().map((name) => {
+    const x = ins[name];
+    const parts = [x.from || "이어지지 않음", HOW_KO[x.how] || (x.how ? x.how : "")].filter(Boolean);
+    if (x.error) parts.push("문제: " + x.error);
+    else if (!x.how && !x.required) parts.push("필수 아님");
+    return [name + (x.required ? " (필수)" : ""), parts.join(" · ")];
+  });
+}
+
 export function lastCommand(st) {
   const c = st && st.last_command;
   if (!c) return "—";
