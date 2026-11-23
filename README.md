@@ -80,7 +80,8 @@ dev-workspace/
 ├─ workspace-stop.sh         전체 종료
 ├─ .jetson-dev-env           필요한 빌드 환경 버전
 ├─ manager/                  Manager (workspace_manager)
-├─ rest/                     REST (workspace_rest: API + 화면 제공 + 제품 빌드)
+├─ gateway/                  게이트웨이(C++: REST + 화면 제공 + 스트림 중계 + 신분 확인 + 제품 빌드), nginx/ 설정 틀
+├─ rest/                     게이트웨이 수락 시험
 ├─ logger/                   workspace-logger, 지난 지표 조회(workspace_history.py)
 ├─ monitor/                  시스템 모니터 sysmon(기본 제공: Manager가 자동 등록)
 ├─ workers/                  워커 폴더. 각 폴더가 코드·라이브러리(lib/)·실행 준비·설치를 함께 갖는다(폴더 하나로 독립)

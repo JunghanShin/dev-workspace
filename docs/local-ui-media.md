@@ -96,7 +96,7 @@ paths:
 
 ## REST가 더 제공하는 경로
 
-화면 코드(ui/web)가 쓰는 경로를 REST가 제공합니다. 구현은 `rest/workspace_rest/ui.py`.
+화면 코드(ui/web)가 쓰는 경로를 REST가 제공합니다. 구현은 게이트웨이 `gateway/src/ui.cpp`(docs/gateway.md).
 
 | 경로 | 내용 |
 |---|---|

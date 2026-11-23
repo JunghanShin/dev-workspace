@@ -1,9 +1,9 @@
-# gateway: 워크스페이스 REST의 C++ 판 (docs/gateway.md). Python 판(rest/workspace_rest)과 같은
-# 경로·응답·상태 코드·SSE 모양·인자·환경 변수. 4단계: 신분 확인(WORKSPACE_AUTH=on)·역할·운용/정비 모드·명령 기록·Manager 캐시.
+# gateway: 워크스페이스 게이트웨이(REST·화면·스트림, docs/gateway.md). 0.53까지의 Python REST와 같은 경로·응답·상태 코드·
+# SSE 모양·인자·환경 변수(0.54에 Python 판 삭제). 4단계: 신분 확인(WORKSPACE_AUTH=on)·역할·운용/정비 모드·명령 기록·Manager 캐시.
 #
 #   cmake -S gateway -B ~/gw-build -DCMAKE_BUILD_TYPE=Release && cmake --build ~/gw-build -j
 #   ctest --test-dir ~/gw-build --output-on-failure                          # core·스레드 단위 시험
-#   cd rest && REST_BIN=~/gw-build/gateway python3 -m unittest test_rest_accept -v   # 수락 시험(Python 판은 REST_BIN 없이)
+#   cd rest && REST_BIN=~/gw-build/gateway python3 -m unittest test_rest_accept -v   # 수락 시험
 #
 #   TSan: cmake -S gateway -B ~/gw-build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGW_TSAN=ON && cmake --build ~/gw-build-tsan -j
 #         TSAN_OPTIONS=halt_on_error=1 setarch $(uname -m) -R ~/gw-build-tsan/test_threads

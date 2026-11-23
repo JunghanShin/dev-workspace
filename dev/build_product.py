@@ -36,12 +36,11 @@ import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 APPS = {  # app/<모듈>/<모듈>: 시작 셸이 python3 -m <모듈> 대신 쓴다(workspace-start.sh run_as_owner)
-    "workspace_manager": {"src": "manager", "pkg": "workspace_manager", "entry": "from workspace_manager.__main__ import main"},
-    "workspace_rest": {"src": "rest", "pkg": "workspace_rest", "entry": "from workspace_rest.__main__ import main",
-                       "extra_path": "logger", "include": ["workspace_history"]},
+    # Manager·게이트웨이는 C++ 확정 실행 파일(manager/bin, gateway/bin)을 그대로 넣는다(PLATFORM_BINS)
     "workspace_logger": {"src": "logger", "pkg": "workspace_logger", "entry": "from workspace_logger.__main__ import main"},
     "sysmon": {"src": "monitor", "pkg": None, "entry": "from sysmon import main"},
 }
+PLATFORM_BINS = {"manager/bin": ["process-manager", "BUILD"], "gateway/bin": ["gateway", "BUILD"]}  # C++ 확정 실행 파일(release-worker.sh)
 DEV_ONLY = ("-sim", "libfake_")  # 가짜 장치 부품(제품에서 뺌)
 DEPS = "$HOME/.cache/workspace-product/nuitka-deps"  # 컴파일 도구(Nuitka) 받아 두는 곳(컴파일하는 계정의 홈)
 MIN_FREE_GB = 1.5
@@ -189,6 +188,13 @@ def stage_tree(product, info, stage, version):
     for f in ("workspace-start.sh", "workspace-stop.sh"):
         cp(f)
     cp("install/config")
+    # Manager·게이트웨이(C++ 확정 실행 파일)와 nginx 설정 틀(시작 셸이 데이터 폴더에 설정을 만듦)
+    for d, names in PLATFORM_BINS.items():
+        for n in names:
+            if not os.path.exists(os.path.join(ROOT, d, n)):
+                raise BuildError("%s/%s 없음: dev/release-worker.sh %s 로 확정하세요" % (d, n, d.split("/")[0]))
+            cp(os.path.join(d, n))
+    cp("gateway/nginx")
     for f in ("workspace-network-apply", "workspace-tegrastats-collect", "workspace-power-mode"):
         cp("install/bin/" + f)
     # 프로필: 장비 config로 처음 한 번 들어간다(install.sh). product.json·문서는 넣지 않음
@@ -301,6 +307,11 @@ cd "$R/src"
                     os.makedirs(os.path.join(bins, "workers", w, "workspace", "bin"), exist_ok=True)
                     shutil.copy2(os.path.join(b, f), os.path.join(bins, "workers", w, "workspace", "bin", f))
         script += 'echo "##PROGRESS 85 심볼 제거"\n'
+        for d, names in PLATFORM_BINS.items():
+            for n in names:
+                if n != "BUILD":
+                    os.makedirs(os.path.join(bins, d), exist_ok=True)
+                    shutil.copy2(os.path.join(stage, d, n), os.path.join(bins, d, n))
         script += ('cd $R && for f in $(find bins -type f) %s; do strip --strip-unneeded "$f"; done\n'
                    % " ".join("app/%s/%s" % (a, a) for a in APPS))
         script += "cd $R && tar czf app.tgz app && tar czf bins.tgz -C bins .\n"

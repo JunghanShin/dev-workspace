@@ -1,10 +1,10 @@
-"""REST 수락 시험(HTTP 블랙박스, 표준 라이브러리만, Linux). Python REST와 C++ 게이트웨이가 같은 결과를 내는지 본다.
+"""게이트웨이 수락 시험(HTTP 블랙박스, 표준 라이브러리만, Linux). C++ 게이트웨이(docs/gateway.md)의 바깥 동작을 본다.
 
-    cd rest && python3 -m unittest test_rest_accept -v                       # 지금 Python REST
-    cd rest && REST_BIN=~/gw-build/gateway python3 -m unittest test_rest_accept -v   # C++ 게이트웨이
+    cd rest && REST_BIN=<게이트웨이 실행 파일> python3 -m unittest test_rest_accept -v
 
 가짜 Manager 소켓·가짜 워커(명령·스트림 소켓)·임시 워크스페이스/데이터 폴더를 만들고, 서버를 같은 인자·환경 변수로 띄운다.
-정답이 복잡한 읽기(워크스페이스 정보, 지난 지표, 로그 끝부분)는 Python 모듈을 직접 불러 비교한다(C++ 판의 기준).
+정답이 복잡한 읽기는 기준 코드와 비교한다: 워크스페이스 정보는 reference_profile.py(옛 Python REST의 것, 시험 기준으로만 남김),
+지난 지표는 logger의 workspace_history, 로그 끝부분은 아래 tail(). REST_BIN이 없으면 전부 건너뛴다(0.54부터 Python REST 없음).
 """
 import datetime
 import http.client
@@ -23,6 +23,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 REST_BIN = os.environ.get("REST_BIN")
+if not REST_BIN:
+    raise unittest.SkipTest("REST_BIN(C++ 게이트웨이 실행 파일)이 있어야 함")
 START_TIMEOUT = float(os.environ.get("REST_START_TIMEOUT", "20"))
 COMMAND_TIMEOUT = 0.5
 
@@ -226,7 +228,7 @@ class FakeCommandWorker(UnixServer):
 
 
 class FakeStreamWorker:
-    """워커 스트림 소켓 자리: 붙은 구독자에게 기준 상태를 먼저, send()로 변경분(test_stream.FakeWorker와 같은 모양)."""
+    """워커 스트림 소켓 자리: 붙은 구독자에게 기준 상태를 먼저, send()로 변경분."""
 
     def __init__(self, path):
         self.path = path
@@ -309,9 +311,9 @@ class FakeStreamWorker:
 
 
 class Server:
-    """REST 서버 프로세스(REST_BIN이면 그 실행 파일, 아니면 python -m workspace_rest)"""
+    """게이트웨이 프로세스(REST_BIN)"""
 
-    def __init__(self, env=None, args=None, name="rest", python=False, unix_only=None):
+    def __init__(self, env=None, args=None, name="rest", unix_only=None):
         self.unix_only = unix_only  # TCP 없이 Unix 소켓만 여는 서버면 그 경로(뜬 것을 소켓 파일로 봄)
         self.port = int((env or {}).get("WORKSPACE_REST_PORT") or free_port())
         e = dict(os.environ)
@@ -325,7 +327,7 @@ class Server:
                   "WORKSPACE_AUTH", "WORKSPACE_GATEWAY_CACHE"):
             e.pop(k, None)
         e.update(env or {})
-        cmd = [REST_BIN] if REST_BIN and not python else [sys.executable, "-m", "workspace_rest"]
+        cmd = [REST_BIN]
         self.log_path = os.path.join(T["tmp"], "%s-%d.log" % (name, self.port))
         self.log = open(self.log_path, "wb")
         self.proc = subprocess.Popen(cmd + list(args or []), cwd=HERE, env=e, stdout=self.log, stderr=self.log)
@@ -610,8 +612,18 @@ def tearDownModule():
     shutil.rmtree(T["tmp"], ignore_errors=True)
 
 
+def tail(path, n):
+    """파일 끝 n줄(잘못된 UTF-8은 대체 문자, 줄 끝 CR 제거). 게이트웨이 로그 읽기의 기준"""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except FileNotFoundError:
+        return []
+    return data.decode("utf-8", "replace").splitlines()[-n:]
+
+
 def oracle(module):
-    """Python 판 모듈(정답 기준). 서버와 같은 환경 변수로 불러온다"""
+    """기준 코드: profile(reference_profile.py), history(logger의 workspace_history)"""
     os.environ["WORKSPACE_ROOT"] = T["root"]
     if HERE not in sys.path:
         sys.path.insert(0, HERE)
@@ -622,8 +634,8 @@ def oracle(module):
         finally:
             sys.path.pop(0)
         return workspace_history
-    import importlib
-    return importlib.import_module("workspace_rest." + module)
+    import reference_profile
+    return reference_profile
 
 
 # ---- 신분 확인 도우미(C++ 게이트웨이 전용, docs/gateway.md 3장) ---------------------------------------
@@ -1051,12 +1063,11 @@ class Ui(unittest.TestCase):
         self.assertEqual(obj["media"]["url"], "http://127.0.0.1:8889/{path}")
 
     def test_remote(self):
-        reads = oracle("reads")
         log = os.path.join(T["data"], "state", "logs", "w1.log")
         st, obj, _ = self.srv.json("GET", "/api/remote/worker_log?id=w1&lines=4")
-        self.assertEqual((st, obj), (200, {"ok": True, "lines": reads._tail(log, 4)}))
+        self.assertEqual((st, obj), (200, {"ok": True, "lines": tail(log, 4)}))
         st, obj, _ = self.srv.json("GET", "/api/remote/worker_log?id=w1")
-        self.assertEqual(obj["lines"], reads._tail(log, 200))
+        self.assertEqual(obj["lines"], tail(log, 200))
         st, obj, _ = self.srv.json("GET", "/api/remote/commands?lines=2")
         self.assertEqual(obj["ok"], True)
         self.assertEqual([json.loads(x)["op"] for x in obj["lines"]], ["d1", "d2"])
@@ -1099,13 +1110,12 @@ class Reads(unittest.TestCase):
         self.srv = T["srv"]
 
     def test_worker_log(self):
-        reads = oracle("reads")
         log = os.path.join(T["data"], "state", "logs", "w1.log")
         for q, n in (("", 200), ("?lines=1", 1), ("?lines=0", 1), ("?lines=3", 3), ("?lines=99999", 5000),
                      ("?lines=", 200), ("?lines=7&lines=2", 2)):
             with self.subTest(q=q):
                 st, obj, _ = self.srv.json("GET", "/logs/workers/w1" + q)
-                self.assertEqual((st, obj), (200, {"lines": reads._tail(log, n)}))
+                self.assertEqual((st, obj), (200, {"lines": tail(log, n)}))
         self.assertEqual(self.srv.json("GET", "/logs/workers/w1?lines=2")[1]["lines"], ["CRLF end", "bad \ufffd byte"])
         st, obj, _ = self.srv.json("GET", "/logs/workers/none/")
         self.assertEqual((st, obj), (200, {"lines": []}))
@@ -1411,10 +1421,9 @@ class Modes(unittest.TestCase):
     """제품 모드·토큰·화면 끔·Manager 없음·화면 파일 없음(서버를 따로 띄움)"""
 
     def test_restart_same_port(self):
-        """Python REST가 요청을 받은 뒤 끝나고, 바로 같은 포트로 고른 서버(REST_BIN)를 띄운다. 앞 서버가 먼저 끊은
-        연결이 TIME-WAIT로 남아도 열려야 한다(SO_REUSEADDR. 보드에서 Python REST → C++ 게이트웨이로 바꿀 때
-        bind 실패로 드러남: cpp-httplib 기본은 SO_REUSEPORT만 켜서 Python 쪽 TIME-WAIT와 맞지 않았음)"""
-        first = Server(name="restart-a", python=True)
+        """게이트웨이가 요청을 받은 뒤 끝나고, 바로 같은 포트로 다시 띄운다. 앞 서버가 먼저 끊은 연결이 TIME-WAIT로
+        남아도 열려야 한다(SO_REUSEADDR. 보드에서 Python REST → C++ 게이트웨이로 바꿀 때 bind 실패로 드러났던 일)"""
+        first = Server(name="restart-a")
         port = first.port
         try:
             for _ in range(20):

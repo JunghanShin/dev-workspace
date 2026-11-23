@@ -6,7 +6,7 @@
 브라우저 ──▶ 보드 REST :8080 ── 화면 파일(ui/web) + /api/board·/api/remote·/api/ui·/api/panels ──▶ Manager·워커
 ```
 
-패널은 `/api/board`(REST 경로 그대로), `/api/remote`(보드 읽기: 로그·명령 이력 등, `rest/workspace_rest/reads.py`), `/api/ui`(제목·갱신 주기·영상 주소), `/api/panels`만 씁니다. 구현은 `rest/workspace_rest/ui.py`.
+패널은 `/api/board`(REST 경로 그대로), `/api/remote`(보드 읽기: 로그·명령 이력 등, 게이트웨이 `gateway/src/reads.cpp`), `/api/ui`(제목·갱신 주기·영상 주소), `/api/panels`만 씁니다. 구현은 게이트웨이 `gateway/src/ui.cpp`.
 
 - 화면 제목은 보드 `<데이터>/config/workspace.env`의 `WORKSPACE_UI_TITLE`, 영상 주소 틀은 `WORKSPACE_UI_MEDIA_URL`
 - 신분 확인(C++ 게이트웨이, `docs/gateway.md` 3장): 셸이 먼저 `/api/auth/me`를 본다. 켜져 있고 세션이 없으면 패널 대신 로그인 창, 세션이 끝나면(401) 다시 로그인 창. 머리에 운용/정비 모드 배지와 사용자·역할·로그아웃(꺼짐이면 "인증 꺼짐"). 패널은 `state.auth`(`{auth, name, role, mode}`)를 받는다. Python REST(엔드포인트 없음)면 배지 없이 지금처럼
@@ -69,7 +69,7 @@ export default {
 | `h`, `fmt`, `stateBadge`, `spark`, `toast` | 요소 만들기, 숫자 표시, 상태 표시, 작은 그래프, 알림 |
 | `ui` | 공통 부품(`web/kit.js`). 아래 "패널 디자인 규칙" |
 
-보드 파일을 새로 읽어야 하면 `rest/workspace_rest/reads.py`에 읽기 경로를, `ui.py`의 `_read_path()`에 이름을 하나 추가한다(정해진 읽기 전용만 유지).
+보드 파일을 새로 읽어야 하면 게이트웨이 `gateway/src/reads.cpp`에 읽기 경로를, `gateway/core/ui_rules.cpp`의 `remote_read_path()`에 이름을 하나 추가한다(정해진 읽기 전용만 유지).
 
 ## 패널 디자인 규칙
 

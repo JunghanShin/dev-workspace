@@ -8,7 +8,7 @@
 #
 # 놓는 곳(기본 PREFIX=/opt/<제품 이름>):
 #   PREFIX/releases/<버전>/   이 묶음(읽기 전용, root 소유)          PREFIX/current → 쓰는 버전(링크)
-#   PREFIX/data/              설정·상태·로그·기록(워커 실행 계정 소유). 처음 설치할 때 프로필로 채우고 장비별 토큰을 만든다
+#   PREFIX/data/              설정·상태·로그·기록(워커 실행 계정 소유). 처음 설치할 때 프로필로 채우고 첫 계정(admin)·원격 화면 토큰을 만든다
 #   /etc/systemd/system/<이름>.service   자동 시작·자동 재시작(Restart=always), 제품 모드 환경
 #   전원 모드: 제품 빌드에서 고른 모드(PRODUCT_POWER_MODE, keep이면 건드리지 않음)를 맞춘다
 set -euo pipefail
@@ -92,14 +92,25 @@ for f in "$REL"/profile/*; do
 done
 ENV_FILE="$DATA/config/workspace.env"
 touch "$ENV_FILE"
-if ! grep -q '^WORKSPACE_REST_TOKEN=' "$ENV_FILE"; then
-  TOKEN="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  printf 'WORKSPACE_REST_TOKEN=%s\n' "$TOKEN" >> "$ENV_FILE"
-  log "REST token created (keep it): $TOKEN"
-fi
 grep -q '^WORKSPACE_UI=' "$ENV_FILE" || printf 'WORKSPACE_UI=%s\n' "$(cat "$REL/PRODUCT_UI")" >> "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 chown -R "$(id -u "$OWNER"):$(id -g "$OWNER")" "$DATA"
+
+# 첫 계정(docs/gateway.md 3장): 제품 모드는 게이트웨이 신분 확인이 늘 켜져 사용자 파일(config/users.json)이 있어야 열린다.
+# 사용자가 하나도 없으면 관리 계정 admin(maintainer)과 원격 화면용 토큰 remote를 만들어 한 번만 보여 준다.
+# 나중에 바꾸기: sudo -u <계정> WORKSPACE_DATA=<데이터> <PREFIX>/current/gateway/bin/gateway user passwd admin / token add …
+GW="$REL/gateway/bin/gateway"
+gw_cli() { sudo -u "$OWNER" env WORKSPACE_DATA="$DATA" "$GW" "$@"; }
+if [[ -x "$GW" ]] && [[ -z "$(gw_cli user list 2>/dev/null)" ]]; then
+  PASS="$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  if printf '%s\n%s\n' "$PASS" "$PASS" | gw_cli user add admin maintainer >/dev/null \
+     && RTOKEN="$(gw_cli token add admin remote 2>/dev/null)"; then
+    log "first account created (shown once, keep it): user admin / password $PASS"
+    log "remote UI token (Authorization: Bearer): $RTOKEN"
+  else
+    log "warning: could not create the first account; add one: sudo -u $OWNER WORKSPACE_DATA=$DATA $GW user add <name> maintainer"
+  fi
+fi
 
 # 워커 시스템 설치(udev, SDK 등). 워커 폴더의 install.sh를 제품 경로로
 for inst in "$REL"/workers/*/workspace/install.sh; do

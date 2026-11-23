@@ -10,10 +10,10 @@
 #   1. 데이터 폴더(<워크스페이스>_data) 확인. 없거나 지워진 폴더·파일은 기본값으로 다시 만든다
 #   2. 보드 상태 수집(root tegrastats), 네트워크 적용(network.conf), 워커 준비(workers/*/workspace/prepare.sh, 예전 워커는 workers/*/prepare.sh).
 #      실패해도 경고만 하고 계속
-#   3. Manager → REST → logger 를 워크스페이스 소유자 계정으로 실행하고 감시
-#   4. 종료 요청(SIGTERM, workspace-stop.sh) 시 REST → Manager(워커 정리) → logger 순서로 종료
+#   3. Manager → 게이트웨이(+nginx) → logger 를 워크스페이스 소유자 계정으로 실행하고 감시
+#   4. 종료 요청(SIGTERM, workspace-stop.sh) 시 게이트웨이 → Manager(워커 정리) → logger 순서로 종료
 #
-# 자동 재실행은 없다. Manager가 죽으면 전체를 내리고 끝난다. REST·logger가 죽으면 기록만 하고 계속.
+# 자동 재실행은 없다. Manager가 죽으면 전체를 내리고 끝난다. 게이트웨이·logger가 죽으면 기록만 하고 계속.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -82,7 +82,7 @@ OWNER_GID="$(id -g "$OWNER")"
 if [[ "$OWNER_UID" -eq 0 ]]; then
   log "warning: workspace is owned by root; programs will run as root"
 fi
-# 제품 묶음은 Manager·REST·logger가 컴파일된 실행 파일(app/)이라 python3가 필요 없다
+# 제품 묶음은 Manager·게이트웨이가 C++ 실행 파일, logger·시스템 모니터가 컴파일된 실행 파일(app/)이라 python3가 필요 없다
 [[ -d "$ROOT/app" || -x "$PY" ]] || { log "python3 not found: $PY"; exit 1; }
 
 # ---- 1. 데이터 폴더 -----------------------------------------------------------------
@@ -252,46 +252,44 @@ if [[ ! -S "$DATA/run/manager.sock" ]]; then
 fi
 log "manager started (pid $MGR)"
 
-# REST(화면): 늘 띄운다(워커 개발 작업대, design.md 6.1)
-# 고르기(design.md 6.4, docs/gateway.md 6장): C++ 게이트웨이로 옮기는 동안 둘 다 둔다.
-#   WORKSPACE_REST_IMPL=cpp 또는 <데이터>/config/rest_impl 파일에 cpp → C++ 게이트웨이(확정 실행 파일 gateway/bin/gateway,
-#   개발 빌드는 WORKSPACE_GATEWAY_BIN). 그 밖(기본) → Python REST. C++ 실행 파일이 없으면 Python
-REST_IMPL="${WORKSPACE_REST_IMPL:-$(cat "$DATA/config/rest_impl" 2>/dev/null || true)}"
+# 게이트웨이(화면·REST): 늘 띄운다(워커 개발 작업대, design.md 6.1·6.4, docs/gateway.md). C++ 실행 파일 gateway/bin/gateway
+# (개발 빌드는 WORKSPACE_GATEWAY_BIN). 0.54부터 Python REST는 없다
 GW_BIN="${WORKSPACE_GATEWAY_BIN:-$ROOT/gateway/bin/gateway}"
-# 앞단 웹서버 nginx(docs/gateway.md 2장): C++ 게이트웨이이고 nginx가 깔려 있으면 nginx가 포트를 갖고(화면 파일 직접, 요청 제한)
+# 앞단 웹서버 nginx(docs/gateway.md 2장): nginx가 깔려 있으면 nginx가 포트를 갖고(화면 파일 직접, 요청 제한)
 # 게이트웨이는 Unix 소켓만 연다. 끄려면 WORKSPACE_NGINX=off. 설정은 gateway/nginx/nginx.conf.in으로 데이터 폴더에 만든다
-# (시스템 nginx 설정·서비스는 쓰지 않음). 설정 점검(nginx -t)에 실패하면 게이트웨이가 지금처럼 TCP로 직접 받는다
+# (시스템 nginx 설정·서비스는 쓰지 않음). 설정 점검(nginx -t)에 실패하면 게이트웨이가 TCP로 직접 받는다
 NGINX_BIN="$(command -v nginx 2>/dev/null || true)"
 NG_DIR="$DATA/run/nginx"
 GW_SOCK="$DATA/run/gateway.sock"
 use_nginx=0
-if [[ "$REST_IMPL" == cpp && -x "$GW_BIN" && -n "$NGINX_BIN" && "${WORKSPACE_NGINX:-on}" != off ]]; then
-  bash "$ROOT/gateway/nginx/render.sh" "$NG_DIR/nginx.conf" "$NG_DIR" "$GW_SOCK"     "${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080}" "$ROOT" "${WORKSPACE_UI:-1}"
-  chown -R "$OWNER_UID:$OWNER_GID" "$NG_DIR"
-  if setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups \
-       "$NGINX_BIN" -t -q -p "$NG_DIR" -c "$NG_DIR/nginx.conf" -g 'daemon off;' 2>&1 | sed 's/^/workspace-start: nginx -t: /'; [[ ${PIPESTATUS[0]} -eq 0 ]]; then
-    use_nginx=1
-  else
-    log "nginx: config test failed, gateway listens on TCP itself"
+REST=""
+if [[ ! -x "$GW_BIN" ]]; then
+  log "gateway: $GW_BIN not found; no REST/UI (manager keeps running). Release it: dev/release-worker.sh gateway"
+else
+  if [[ -n "$NGINX_BIN" && "${WORKSPACE_NGINX:-on}" != off ]]; then
+    bash "$ROOT/gateway/nginx/render.sh" "$NG_DIR/nginx.conf" "$NG_DIR" "$GW_SOCK" \
+      "${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080}" "$ROOT" "${WORKSPACE_UI:-1}"
+    chown -R "$OWNER_UID:$OWNER_GID" "$NG_DIR"
+    if setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups \
+         "$NGINX_BIN" -t -q -p "$NG_DIR" -c "$NG_DIR/nginx.conf" -g 'daemon off;' 2>&1 | sed 's/^/workspace-start: nginx -t: /'; [[ ${PIPESTATUS[0]} -eq 0 ]]; then
+      use_nginx=1
+    else
+      log "nginx: config test failed, gateway listens on TCP itself"
+    fi
   fi
-fi
-if [[ "$REST_IMPL" == cpp && -x "$GW_BIN" ]]; then
   if (( use_nginx )); then
-    log "rest: C++ gateway behind nginx ($GW_BIN, $GW_SOCK)"
+    log "gateway: behind nginx ($GW_BIN, $GW_SOCK)"
     rm -f "$GW_SOCK"
     env HOME="$OWNER_HOME" USER="$OWNER" LOGNAME="$OWNER" WORKSPACE_GATEWAY_SOCKET="$GW_SOCK" WORKSPACE_GATEWAY_TCP=0 \
       setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups "$GW_BIN" &
   else
-    log "rest: C++ gateway ($GW_BIN)"
+    log "gateway: $GW_BIN (TCP ${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080})"
     env HOME="$OWNER_HOME" USER="$OWNER" LOGNAME="$OWNER" \
       setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups "$GW_BIN" &
   fi
-else
-  [[ "$REST_IMPL" == cpp ]] && log "rest: $GW_BIN not found, using Python"
-  run_as_owner "$ROOT/rest" workspace_rest
+  REST=$!
 fi
-REST=$!
-log "rest started (pid $REST)"
+[[ -n "$REST" ]] && log "gateway started (pid $REST)"
 if (( use_nginx )); then
   for (( i = 0; i < 50; i++ )); do [[ -S "$GW_SOCK" ]] && break; alive "$REST" || break; sleep 0.1; done
   setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups \

@@ -119,7 +119,7 @@
 2. C++ 게이트웨이: 지금 기능 그대로(신분 확인 `off`) → 수락 시험 둘 다 통과
 3. nginx 앞단(시작 셸이 띄움, 화면 파일·`/api`) → 보드에서 C++로 실측
 4. 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시
-5. 기본을 C++로, Python REST 삭제
+5. 기본을 C++로, Python REST 삭제(0.54, 6.3)
 
 ### 6.1 구현 결과 (0.50)
 
@@ -154,11 +154,22 @@ Python 판과 다른 점(더한 것): 위 3장 경로 전부, `GET /health?detai
 
 남은 위험: 제품 묶음(`build_product.py`·`install.sh`)이 사용자 파일을 아직 만들지 않는다(지금 제품은 Python REST라 영향 없음, C++로 옮길 때 프로필 `users.json` 또는 설치 단계 필요). HTTPS 전에는 쿠키·토큰이 평문(정비망 전제). 세션 표·실패 제한 표는 메모리 상한(4096)만.
 
+### 6.3 구현 결과 (0.54, 5단계: 기본을 C++로, Python REST 삭제)
+
+| 항목 | 결과 |
+|---|---|
+| 시작 셸 | 게이트웨이만 띄운다(`WORKSPACE_REST_IMPL`·`config/rest_impl` 없어짐). 실행 파일이 없으면 화면·REST 없이 Manager만 돌고 로그에 `dev/release-worker.sh gateway`를 안내. nginx 규칙은 그대로 |
+| PC 개발 실행 | `dev/workspace-dev.sh`가 process-manager·게이트웨이를 `~/.cache/workspace-dev/<저장소 폴더>/`에 PC용으로 빌드(바뀐 것만)해 띄운다. 다른 빌드는 `WORKSPACE_MANAGER_BIN`·`WORKSPACE_GATEWAY_BIN`. nginx 없이 게이트웨이가 포트를 직접 |
+| 제품 묶음 | `build_product.py`가 C++ 확정 실행 파일(`manager/bin/process-manager`, `gateway/bin/gateway`)과 `gateway/nginx/`를 넣고 심볼을 지운다. Python Manager·REST 컴파일은 뺌(logger·시스템 모니터만 남음). 확정 파일이 없으면 빌드 실패 |
+| 제품 첫 계정 | `install.sh`가 사용자가 없으면 `admin`(maintainer, 무작위 비밀번호)과 원격 화면 토큰 `remote`를 만들어 설치 출력에 한 번 보여 준다(옛 `WORKSPACE_REST_TOKEN` 만들기 대신). 7장 두 미결 해결 |
+| 지운 것 | `rest/workspace_rest/`(약 1,600줄), `rest/test_stream.py`(같은 SSE 동작은 수락 시험·`test_nginx_front`가 봄) |
+| 시험 | `rest/test_rest_accept.py`는 게이트웨이 전용(`REST_BIN` 없으면 건너뜀). 정답 기준: 워크스페이스 정보는 `rest/reference_profile.py`(옛 Python 코드를 시험 기준으로만 남김), 로그 끝은 시험 안 `tail()`, 지난 지표는 logger의 `workspace_history`. 같은 포트 재시작 시험은 게이트웨이 → 게이트웨이 |
+
 ## 7. 미결
 
 | 항목 | 언제 |
 |---|---|
 | HTTPS 인증서를 어디서 받나(보드 자체 서명 또는 프로필). 붙으면 쿠키에 `Secure` | 3단계 |
 | 제품 빌드 기능(`/system/product-build`, 개발 전용)을 게이트웨이에 둘지 개발 도구로 뺄지 | 2단계 |
-| 원격 화면(DURU_ui 등)이 보드에 붙을 때 토큰 받는 방법: 지금은 보드에서 `gateway token add`로 만들어 사람이 넣음 | 5단계 전 |
-| 제품 묶음에 사용자 파일 넣기(프로필 `users.json` 또는 설치 때 만들기) | C++ 게이트웨이를 제품 기본으로 할 때 |
+| ~~원격 화면 토큰 받는 방법~~ → 제품은 설치 때 `remote` 토큰(6.3), 개발 보드는 `gateway token add` | 0.54 해결 |
+| ~~제품 묶음에 사용자 파일 넣기~~ → 설치 때 첫 계정(6.3) | 0.54 해결 |

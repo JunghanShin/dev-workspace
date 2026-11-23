@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.53 |
+| 문서 버전 | 0.54 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -331,9 +331,9 @@ workers/<워커>/workspace/
 
 ### 6.4 REST
 
-**nginx + C++ 게이트웨이로 다시 만든다(0.49, 설계 `docs/gateway.md`):** 바깥은 nginx 하나(화면 파일·HTTPS·제한), 게이트웨이는 보드 안 Unix 소켓만 엶. 이 절의 경로·상태 코드는 그대로, 더하는 일: 신분 확인(세션·토큰, 역할 viewer·operator·maintainer, 개발 보드 기본 끔), 운용/정비 모드, 명령 기록, Manager 구독 캐시. 옮기는 동안 시작 셸이 고른다.
+**nginx + C++ 게이트웨이로 다시 만든다(0.49, 설계 `docs/gateway.md`):** 바깥은 nginx 하나(화면 파일·HTTPS·제한), 게이트웨이는 보드 안 Unix 소켓만 엶. 이 절의 경로·상태 코드는 그대로, 더하는 일: 신분 확인(세션·토큰, 역할 viewer·operator·maintainer, 개발 보드 기본 끔), 운용/정비 모드, 명령 기록, Manager 구독 캐시. 0.54부터 게이트웨이만 있다(Python REST 삭제, `docs/gateway.md` 6.3).
 
-별도 프로세스(늘 띄움), 패키지 `workspace_rest`, 무상태. 바인딩 `WORKSPACE_REST_BIND:WORKSPACE_REST_PORT`(기본 `0.0.0.0:8080`).
+별도 프로세스(늘 띄움), C++ 실행 파일 `gateway/bin/gateway`, 무상태. 바인딩 `WORKSPACE_REST_BIND:WORKSPACE_REST_PORT`(기본 `0.0.0.0:8080`).
 
 - HTTP 핸들러는 검증 → Manager API 1회 → 응답 변환. Manager 연결 1 s·응답 2 s timeout, 실패하면 `503`. Manager가 없어도 REST는 끝나지 않는다
 - `POST /workers/{id}/command`: 워커 명령 소켓(9.6)으로 1회 전달. 응답 timeout `WORKSPACE_REST_COMMAND_TIMEOUT`
@@ -430,7 +430,7 @@ Manager API(워커 시작·정지·설정·상태)를 쓰는 워커. 외부 운�
 
 | 규칙 | 내용 |
 |---|---|
-| 부품 | 워커 `worker::Publisher`(libworker), REST `workspace_rest/stream.py` |
+| 부품 | 워커 `worker::Publisher`(libworker), 게이트웨이 `gw.up.<워커>`(docs/gateway.md) |
 | 막히지 않음 | `publish`는 큐에 넣기만. 느린 구독자는 버퍼 상한을 넘으면 그 구독자만 끊음 |
 | 주제(topic) | 상태를 주제로 나누고 주제마다 최소 간격. 간격이 지났고 값이 바뀐 주제만(변경분) |
 | 기준 상태(kf) | 새 구독자에게, 그리고 5 s마다 모든 주제 + 최근 이벤트 |
@@ -1251,7 +1251,8 @@ REST는 `0.0.0.0` 바인딩이라 새 IP로 닿는 즉시 재개된다(진행 �
     design.md, README.md          # 본 문서, 사용법
     workspace-start.sh / -stop.sh # 시작·감시·종료 셸(11.2)
     manager/workspace_manager/    # Manager (+ test_schema.py)
-    rest/workspace_rest/ # REST: Manager API 번역, 화면 제공(ui.py), 보드 읽기(reads.py, profile.py), 스트림 중계(stream.py)
+    gateway/                      # 게이트웨이(C++, REST·화면 제공·스트림 중계·신분 확인) + nginx/ 설정 틀. bin/ 확정 실행 파일
+    rest/                         # 게이트웨이 수락 시험(test_rest_accept.py, test_nginx_front.py)
     logger/workspace_logger/      # workspace-logger, workspace_history.py
     monitor/                      # 시스템 모니터(기본 탑재 워커) + worker-types.json, config.json·presets/
     ui/web/                       # 화면(6.11)
@@ -1536,6 +1537,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 |---|---|
 | 0.52 | **게이트웨이 4단계**(`docs/gateway.md` 3장·6.2): 신분 확인 `WORKSPACE_AUTH=on`(제품 모드는 늘), 사용자 파일 `config/users.json`(PBKDF2-HMAC-SHA256, 토큰은 sha256)·설정 명령 `gateway user`·`token`, 로그인 세션·Bearer 토큰·역할(viewer·operator·maintainer), 운용/정비 모드 `GET·PUT /api/mode` + Manager op `set_access_mode`(6.2, Python·C++ 판 둘 다), 명령 기록 `records/gateway/`, Manager 구독 캐시, 화면 로그인·머리 배지·워크스페이스 패널 모드 토글 |
 | 0.53 | **자동 상태 화면**(6.11): 자기 패널이 없는 워커를 워커 계약(`io/self.json` metrics·status)대로 그리는 `ui/web/panels/auto`. 화면 틀(머리·왼쪽 메뉴·본문) 위에 패널만 바뀌는 구조 그대로 |
+| 0.54 | **게이트웨이 5단계**(`docs/gateway.md` 6.3): 시작 셸 기본·유일 C++ 게이트웨이, Python REST(`rest/workspace_rest`) 삭제, PC 개발 실행이 process-manager·게이트웨이를 PC용으로 빌드해 씀, 제품 묶음에 C++ Manager·게이트웨이·nginx 틀(Python Manager·REST 컴파일 뺌), 제품 설치가 첫 계정 `admin`·원격 화면 토큰을 만듦 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |
