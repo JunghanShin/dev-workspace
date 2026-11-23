@@ -47,7 +47,6 @@ workers/<이름>/
 ├─ io.json                   입출력 정의 목록: 내보내는 정의(provides), 쓰는 정의(uses), 출력 대조 방법(check). 아래 "입출력 정의 쓰기"
 ├─ io/<역할>.json            역할 정의 원본(받는 명령·발행 주제·데이터 버스, 칸은 JSON Schema)
 ├─ io/self.json              워커 정의(모듈별 get_status 칸·지표·진단 주제·정비 명령, 라이브러리 조각 include)
-├─ io/common.json            공통 정의(틀에만 하나, 모든 워커가 따름. 새 워커로 복사하지 않음)
 ├─ io/uses/<역할>.json       쓰는 정의 사본(다른 워커의 것)
 ├─ src/main.cpp              호스트 + 모듈 조립(얇음)                                   ②
 ├─ test/test_worker.cpp      워커 통합 시험(실행 파일, 워커 둘)
@@ -235,7 +234,7 @@ public:
 io.json                  {"provides": ["example"], "uses": {"upstream": {"from": "example", "version": "1.1", ...}}, "check": {...}}
 io/example.json          역할 정의(원본): commands·topics·data. 같은 역할이면 다른 워커로 바꿔도 같음
 io/self.json             워커 정의: status(모듈 칸)·metrics·진단 topics·정비 commands, include(라이브러리 조각)
-io/common.json           공통 정의(틀): get_status 겉모양·공통 명령·호스트·단계 지표·스트림 겉모양·이벤트·시각
+lib/libworker/io/common.json  공통 정의(libworker 사본에 같이): get_status 겉모양·공통 명령·호스트·단계 지표·스트림 겉모양·이벤트·시각
 io/uses/example.json     쓰는 정의(사본). 여기서는 peer가 같은 종류의 다른 워커를 받아서 자기 정의의 사본
 ```
 

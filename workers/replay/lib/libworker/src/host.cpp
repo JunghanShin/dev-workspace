@@ -18,6 +18,7 @@
 
 #include "worker/child.hpp"
 #include "worker/command_server.hpp"
+#include "worker/io.hpp"
 #include "worker/runtime.hpp"
 
 namespace worker {
@@ -542,11 +543,22 @@ int Host::run(int argc, char** argv) {
     bool bad_args = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
+        if (a == "--io") {
+            // 실행 파일에 넣은 입출력 정의를 출력하고 끝(설정·소켓 없이. 워크스페이스 design.md 6.6.7.1)
+            std::string err;
+            const auto bundle = io_bundle(&err);
+            if (bundle.is_null()) {
+                std::fprintf(stderr, "%s: %s\n", program_.c_str(), err.c_str());
+                return kExitConfig;
+            }
+            std::printf("%s\n", bundle.dump(2).c_str());
+            return 0;
+        }
         if (a == "--config" && i + 1 < argc) config_path = argv[++i];
         else bad_args = true;
     }
     if (bad_args || config_path.empty()) {
-        std::fprintf(stderr, "usage: %s --config <file>\n", program_.c_str());
+        std::fprintf(stderr, "usage: %s --config <file> | --io\n", program_.c_str());
         return kExitConfig;
     }
     std::string error;

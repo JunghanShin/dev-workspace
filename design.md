@@ -1,8 +1,9 @@
+| 0.61 | **`--io`**(6.6.7.1): libworker 0.12 `worker_io()`·`--io`, 공통 정의를 `lib/libworker/io/common.json`으로 옮김(process-manager `get_io`는 워커의 libworker 사본 것을 먼저). **설정 칸 `unique`**(6.10): process-manager에 박혀 있던 칸 이름 `device_sn` 검사를 걷어내고, 스키마 칸 표시 `"unique": true`로 일반화(묶음 `section` 안도 봄. 예전 검사는 맨 위 키만 봐서 묶음 안 시리얼은 걸리지 않았음). 15장에 모듈화와 별개로 미룬 것 목록 |
 # 워크스페이스 설계서
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.60 |
+| 문서 버전 | 0.61 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -618,7 +619,7 @@ dev/new-worker.sh [--video] <폴더> [type]    틀 복사·워커 이름 바꾸�
 |---|---|---|---|---|
 | 역할 정의 | `io/<역할>.json` | 그 역할이면 누구나 같은 것: 받는 명령, 발행 주제, 데이터 버스 | 매니저, 다른 워커(사본) | 같은 역할 워커로 바꿔도 그대로 |
 | 워커 정의 | `io/self.json` | 이 워커 구현의 것: 모듈별 `get_status` 칸, 지표, 진단 주제, 역할에 없는 명령(정비용 등), 임대가 끊겼을 때의 안전 상태 | 정비 화면, record-manager, process-manager | 워커마다 다름(사본 없음) |
-| 공통 정의 | `workers/_template/io/common.json`(플랫폼 하나) | 모든 워커가 같은 것: `get_status` 겉모양(`id`, `config_version`, `threads`, `runtime`), 공통 명령(임대 갱신 포함), 오류 code(9.6), heartbeat 형식(9.5), 스트림 겉모양(9.7), **이벤트**(시각·출처·심각도·코드·내용), **시각**(모든 주제의 `t_mono_ns`, 보드 CLOCK_MONOTONIC) | 모두 | 바뀌지 않음(플랫폼 버전) |
+| 공통 정의 | `lib/libworker/io/common.json`(libworker가 내보내는 칸이라 libworker 안, 원본은 틀의 사본. 0.61 전에는 `workers/_template/io/`) | 모든 워커가 같은 것: `get_status` 겉모양(`id`, `config_version`, `threads`, `runtime`), 공통 명령(임대 갱신 포함), 오류 code(9.6), heartbeat 형식(9.5), 스트림 겉모양(9.7), **이벤트**(시각·출처·심각도·코드·내용), **시각**(모든 주제의 `t_mono_ns`, 보드 CLOCK_MONOTONIC) | 모두 | 바뀌지 않음(플랫폼 버전) |
 
 **역할 정의는 역할 단위다.** 정의 이름은 워커 이름·type이 아니라 그 워커가 맡는 역할(예: 기체 정보, 짐벌, 카메라, 예제의 `example`)이다. 워커 하나가 정의를 여러 개 내보낼 수 있고, 같은 정의를 내보내는 워커끼리는 서로 바꿔 쓸 수 있다(쓰는 쪽은 사본도 연결도 그대로). 역할에 넣을지 워커 정의에 넣을지는 "다른 회사 장비로 바꿔도 같은 값이 나와야 하나"로 가른다(예: 기체 자세는 역할, 장비별 링크 통계는 워커).
 
@@ -712,7 +713,7 @@ workers/<이름>/
 - **정의에 넣는 것(0.41):** 바깥으로 나가는 것 전부(위 세 정의). 예전(0.38~0.40)에는 워커끼리 주고받는 것만 넣고 `get_status`·지표·화면용 주제는 뺐다. 화면을 따로 맡기고 매니저가 정의만 보고 쓰려면 화면이 쓰는 칸도 계약에 있어야 해서 바꿈
 - **엄격함:** 정의의 `object`는 적힌 칸만 허용한다(검사기는 `additionalProperties`를 적지 않으면 false로 본다). 이름이 바뀌는 칸(예: 메시지 이름별 주기)은 `"additionalProperties": {<값의 모양>}`으로 적는다. `runtime`만 `"additionalProperties": true`
 - **보드가 정의를 내줌:** REST `GET /workers/{id}/io`(Manager API `get_io`, 6.2) → `{"common": …, "self": …, "includes": {"<경로>": …}, "provides": {"<역할>": …}, "uses": {"<입력>": {…, "definition": <사본>}}}`. 워커 폴더의 파일을 읽는다(제품 빌드도 `io.json`·`io/`·조각·공통 정의를 넣음). 화면 담당자는 저장소 없이 실행 중인 보드에서 계약을 받는다
-- **실행 파일에 넣는다(구현 예정):** 빌드가 정의를 실행 파일에 넣는다(실행 때 파일을 찾지 않음, 단독 실행 그대로). `<exec> --io`가 정의를 출력한다
+- **실행 파일에 넣는다(0.61):** 워커 CMakeLists의 `worker_io(<대상> <폴더>)`가 `io.json`·`io/*.json`·`io/uses/*.json`·`lib/*/io/*.json`을 실행 파일에 넣는다(실행 때 파일을 찾지 않음, 단독 실행 그대로). `<exec> --io`가 `get_io`와 같은 모양(id만 없음)으로 출력하고 끝난다(설정·소켓 없이). 저장소 없이 실행 파일 하나로 계약을 받는다
 - **칸 검사(구현 예정):** 받는 쪽은 운용 중에도 받은 주제·응답의 칸을 사본으로 검사한다(필수 칸 없음, 형식 틀림 → 그 줄 버림 + 지표 `inputs_<입력>_bad`). 보내는 쪽은 시험 빌드에서 정의대로 내보내는지 확인한다
 
 ##### 6.6.7.2 가져온 정의 (사본)
@@ -783,7 +784,7 @@ workers/<이름>/
 | `host.uses("<입력>")` | 그 입력의 주소(`worker::InputAddress`: `worker`, `command`, `stream`, `data`, `from`), 없거나 이어지지 않았으면 nullptr(0.11). 모듈이 `Subscriber`·`CommandClient`·`framebus::Consumer`를 만들 때 소켓으로 쓴다(주소를 직접 계산하지 않음). 가져온 정의로 칸 검사는 다음 단계 |
 | `host.input_link("<입력>", up)` | 모듈이 붙었는지 알림(0.11) → 지표 `inputs_<입력>_link`, `get_status` `inputs`(`worker`·`from`·`link`, 공통 정의 1.2) |
 | `Subscriber`·`CommandClient` | 정의를 받으면 받은 칸 검사(6.6.7.1), 정의에 없는 명령은 보내기 전에 거절 |
-| 호스트 | `--io` 출력, `inputs` 읽기, 입력마다 링크 지표, `get_status`에 `inputs` |
+| 호스트 | `--io` 출력(0.61), `inputs` 읽기, 입력마다 링크 지표, `get_status`에 `inputs` |
 
 ##### 6.6.7.6 지금 방식에서 옮기기
 
@@ -981,7 +982,7 @@ Manager /proc 측정 ───────┘                                   
 | 칸 속성 | 뜻 |
 |---|---|
 | `key`, `type` | `string` `int` `number` `bool` `enum` `list`(`item_key`, `fields`) `map`(`key_pattern`, `value_type`) |
-| 검사 | `required`, `min`/`max`, `options`, `format`(`ipv4` `host_port` `stream_url` `worker_id`), `pattern`. `worker_id`는 워커 id 형식만 검사하고(없는 워커여도 저장됨, 상대는 나중에 붙을 수 있음), 상태 `peers`로 나간다(6.6.7). 0.38부터 상대 지정은 `inputs`·연결 선언으로 옮겨 가는 중(6.6.7.6) |
+| 검사 | `required`, `min`/`max`, `options`, `format`(`ipv4` `host_port` `stream_url` `worker_id`), `pattern`. `worker_id`는 워커 id 형식만 검사하고(없는 워커여도 저장됨, 상대는 나중에 붙을 수 있음), 상태 `peers`로 나간다(6.6.7). 0.38부터 상대 지정은 `inputs`·연결 선언으로 옮겨 가는 중(6.6.7.6). `unique`: 다른 워커가 같은 경로(역시 `unique`)에 같은 값을 쓰고 있으면 저장 거부(`conflict`, 예: 장치 시리얼). 빈 값은 검사 안 함. 플랫폼은 칸 이름을 모르고 이 표시만 본다(0.61) |
 | 꾸밈 | `label`, `unit`, `hint`, `placeholder`, `empty_label`, `default`, `advanced` |
 | 묶음 `section` | 그 묶음의 칸이 `config["<모듈>"]` 안에 있다. 오류 경로 `<모듈>.<키>` |
 
@@ -1505,6 +1506,8 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 0.38 6.6.7 입출력 정의에서 정한 것(2026-11-18): 정의 이름 = 역할(워커 하나가 여러 개를 내보낼 수 있음), 원본은 처음 내보낸 워커(여럿이 쓰면 템플릿 공용으로), 받는 칸은 운용 중에도 검사, 연결 선언은 `<데이터>/config/connections.json`(프로필로 배포), 내보내는 워커가 하나뿐이면 자동 연결, 칸은 JSON Schema 문법.
 
 워크스페이스(개발 작업대와 제품 빌드)에서 정할 것은 없다(0.33).
+
+모듈화(층·계약·워커 분리)와 별개라 뒤로 미룬 것(0.61): 명령 임대(원칙 14, 매니저 층과 함께), 워커 소켓 검사를 `enforce`로 바꾸는 시점(보드 `warn` 기록을 보고), HTTPS 인증서(설치가 자체 서명으로 만들지 등), 받은 칸을 실행 중에도 검사할지(지금은 출력 대조). 모듈화 작업 중에는 꺼내지 않는다.
 
 예전 미결이 간 곳: 송출 인코더·프레임 버스 GPU 메모리(NvBufSurface) 전환은 영상 워커 설계서의 미결, 외부 운용 인터페이스 워커는 그 워커를 만들 때 그 설계서, 기존 워커 고도화 순서는 워커 작업에서 정한다. OS·보드 층 보호(디스크 암호화, 보안 부팅, 읽기 전용 루트, A/B 갱신)는 워크스페이스와 별개(보드 이미지 저장소). 전원 모드는 설치가 맞춘다(11.1 개발 보드 MAXN_SUPER, 11.4 제품은 빌드에서 고름). 워커 설정을 깃에 올리는 일은 사용자가 한다(6.3.1)
 

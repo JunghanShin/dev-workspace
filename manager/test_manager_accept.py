@@ -112,6 +112,8 @@ SCHEMA = {"groups": [
         {"key": "peer", "type": "string", "format": "worker_id"}]},
     {"title": "호스트", "fields": [{"key": "watchdog_sec", "type": "number", "min": 1}]}]}
 
+UNIQUE_SCHEMA = {"groups": [{"title": "장치", "section": "dev", "fields": [{"key": "sn", "type": "string", "unique": True}]}]}
+
 FAST_RESTART = {"restart": {"interval_s": 0.3, "max_interval_s": 1.0, "crash_count": 3, "crash_window_s": 60}}
 
 
@@ -513,7 +515,8 @@ class Accept(unittest.TestCase):
 
     def test_schema_rejection(self):
         e = self.env({"w": {"autostart": False, "decl": {"config_schema": SCHEMA}},  # 프리셋 파일 없음
-                      "o": {"config": {"device_sn": "A1"}, "autostart": False}}).start()
+                      "o": {"config": {"dev": {"sn": "A1"}}, "autostart": False, "decl": {"config_schema": UNIQUE_SCHEMA}},
+                      "u": {"autostart": False, "decl": {"config_schema": UNIQUE_SCHEMA}}}).start()
         r = e.rest({"op": "set_config", "id": "w", "config": {"mod": {"level": 99, "peer": "Bad Id"}, "watchdog_sec": 0}})
         self.assertEqual(r["error"]["code"], "bad_request")
         self.assertEqual(set(r["error"]["fields"]), {"mod.level", "mod.peer", "watchdog_sec"})
@@ -530,9 +533,13 @@ class Accept(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(e.ws["w"], "presets", "p2.json")))
         self.assertEqual(e.status("w")["config_version"], 1)
         self.assertFalse(os.path.exists(os.path.join(e.ws["w"], "presets", "default.json")))
-        # 같은 장치(device_sn)를 두 워커가 쓰면 conflict
-        r = e.rest({"op": "set_config", "id": "w", "config": {"device_sn": "A1"}})
-        self.assertEqual(r["error"], {"code": "conflict", "message": "device_sn 'A1' already used by 'o'"})
+        # 스키마에 unique가 붙은 칸(장치 시리얼 등)을 두 워커가 같은 값으로 쓰면 conflict
+        r = e.rest({"op": "set_config", "id": "u", "config": {"dev": {"sn": "A1"}}})
+        self.assertEqual(r["error"], {"code": "conflict", "message": "dev.sn 'A1' already used by 'o'"})
+        e.ok({"op": "set_config", "id": "u", "config": {"dev": {"sn": "B2"}}})
+        e.ok({"op": "set_config", "id": "u", "config": {"dev": {"sn": ""}}})  # 빈 값은 겹쳐도 됨
+        # unique 표시가 없는 스키마의 같은 이름 칸은 검사하지 않는다(플랫폼은 칸 이름을 모름)
+        e.ok({"op": "set_config", "id": "w", "config": {"dev": {"sn": "A1"}}})
         # 맞는 값은 저장되고, 프리셋 파일이 없었으면 만든다(config.json은 있음)
         e.ok({"op": "set_config", "id": "w", "config": {"mod": {"level": 0, "peer": "o"}}})
         self.assertEqual(read_json(os.path.join(e.ws["w"], "presets", "default.json"))["label"], "기본")

@@ -489,7 +489,9 @@ Json Supervisor::get_io(const Json& id) {
     out["includes"] = Json::object();
     out["provides"] = Json::object();
     out["uses"] = Json::object();
-    const std::string common = cfg_.workspace_root + "/workers/_template/io/common.json";
+    // 공통 정의는 libworker가 내보내는 칸: 워커의 libworker 사본 것, 없으면(Python 워커 등) 틀의 것
+    std::string common = folder + "/lib/libworker/io/common.json";
+    if (!fs_.exists(common)) common = cfg_.workspace_root + "/workers/_template/lib/libworker/io/common.json";
     if (fs_.exists(common)) out["common"] = load(common, "common.json");
     const std::string self_path = folder + "/io/self.json";
     if (fs_.exists(self_path)) {
@@ -539,12 +541,28 @@ void Supervisor::check_schema(const std::string& type, const Json& config) const
     throw ApiError{"bad_request", "설정 값이 맞지 않습니다: " + join(parts, "; "), errs};
 }
 
-void Supervisor::check_device_conflict(const std::string& id, const Json& config) const {
-    const Json sn = jget(config, "device_sn");
-    if (sn.is_null()) return;
+// 칸에 "unique": true가 붙은 값(장치 시리얼 등)을 다른 워커가 같은 경로(역시 unique)에 이미 쓰고 있으면 conflict.
+// 플랫폼은 칸 이름을 모른다(스키마 표시만 본다)
+void Supervisor::check_unique(const std::string& id, const Json& config) const {
+    auto schema_of = [this](const std::string& type) {
+        auto it = cfg_.types.find(type);
+        return it == cfg_.types.end() ? Json() : jget(*it, "config_schema");
+    };
+    const Worker* me = nullptr;
     for (const auto& o : workers_)
-        if (o->id != id && o->config.is_object() && py_eq(jget(o->config, "device_sn"), sn))
-            throw api_error("conflict", "device_sn " + py_repr(sn) + " already used by " + py_quote(o->id));
+        if (o->id == id) me = o.get();
+    if (!me) return;
+    const Json mine = schema::unique_values(schema_of(me->type), config);
+    if (mine.empty()) return;
+    for (const auto& o : workers_) {
+        if (o->id == id) continue;
+        const Json theirs = schema::unique_values(schema_of(o->type), o->config);
+        for (auto m = mine.begin(); m != mine.end(); ++m) {
+            auto t = theirs.find(m.key());
+            if (t != theirs.end() && py_eq(*t, *m))
+                throw api_error("conflict", m.key() + " " + py_repr(*m) + " already used by " + py_quote(o->id));
+        }
+    }
 }
 
 // ---- 명령 (요청 처리 중 워커 기동·종료를 기다리지 않는다) ------------------------------------------
@@ -580,7 +598,7 @@ OpPlan Supervisor::set_config(const Json& id, const Json& config, bool save) {
     Worker& w = valid(id);
     if (!config.is_object()) throw api_error("bad_request", "config must be an object");
     check_schema(w.type, config);
-    check_device_conflict(w.id, config);
+    check_unique(w.id, config);
     Worker* wp = &w;
     OpPlan plan;
     if (save) {
@@ -613,7 +631,7 @@ OpPlan Supervisor::use_preset(const Json& id, const Json& name) {
     Worker& w = valid(id);
     auto preset = files_call([&] { return w.files->read_preset(name); });
     if (!preset) throw api_error("not_found", "no preset " + py_repr(name));
-    check_device_conflict(w.id, preset->config);
+    check_unique(w.id, preset->config);
     OpPlan plan;
     plan.pre.push_back(w.files->write_config(name.get<std::string>(), w.autostart));
     Worker* wp = &w;
@@ -643,7 +661,7 @@ OpPlan Supervisor::save_preset(const Json& id, const Json& spec) {
     const bool use = spec.contains("use") ? py_truthy(spec["use"]) : true;
     if (use) {
         // 만든 프리셋을 사용 중으로(Python은 save_preset → use_preset)
-        check_device_conflict(w.id, config);
+        check_unique(w.id, config);
         plan.pre.push_back(w.files->write_config(name.get<std::string>(), w.autostart));
         plan.commit = [this, wp, name, config] {
             PM_INFO("%s: preset %s created", wp->id.c_str(), py_str(name).c_str());

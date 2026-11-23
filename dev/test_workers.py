@@ -4,7 +4,7 @@
   - 층 규칙: 모듈 코어(① 유닛)가 libworker를 쓰지 않는지(쓰면 실패)
   - 패널 id 겹침, Python 도우미 사본
   - 입출력 정의(design.md 6.6.7.1~6.6.7.2): io.json·io/<역할>.json 형식, 가리키는 파일, uses가 쓰는 항목, 사본(io/uses/)이 원본과 같은지·호환되는지,
-    공통 정의(틀 io/common.json)·워커 정의(io/self.json + include 조각) 형식, 지표 이름 규칙, check(출력 대조 방법)
+    공통 정의(틀 lib/libworker/io/common.json)·워커 정의(io/self.json + include 조각) 형식, 지표 이름 규칙, check(출력 대조 방법)
     (실제 출력 대조는 dev/test_io_output.py)
   - 미준수 목록(실패가 아니라 알림): 유닛 시험이 없는 모듈, ICD(설계서 3장)가 없는 워커, 입출력 정의가 없는 워커 → 워커 고도화 때 하나씩 없앤다
 
@@ -284,7 +284,7 @@ class IoDefinitions(unittest.TestCase):
             self.check_schema(t.get("schema"), "%s: topics.%s.schema" % (where, name), defs)
 
     def test_common_definition(self):
-        d = load_json(os.path.join(TEMPLATE, "io", "common.json"))
+        d = load_json(os.path.join(TEMPLATE, "lib", "libworker", "io", "common.json"))
         self.assertEqual(d.get("name"), "common")
         self.assertEqual(sorted(set(d.get("errors", [])) ^ IO_ERRORS), [], "common.json errors = 9.6 code")
         self.check_parts(d, "common.json", d.get("definitions", {}),
@@ -297,6 +297,8 @@ class IoDefinitions(unittest.TestCase):
         """라이브러리 조각(lib/<라이브러리>/io/<모듈>.json): 형식, 지표 이름은 그 조각의 status 모듈로 시작"""
         allowed = {"name", "version", "description", "status", "metrics", "commands", "topics", "definitions"}
         for p in sorted(glob.glob(os.path.join(ROOT, "workers", "*", "lib", "*", "io", "*.json"))):
+            if p.replace(os.sep, "/").endswith("/lib/libworker/io/common.json"):
+                continue  # 공통 정의(libworker 안, test_common_definition이 봄)
             rel = os.path.relpath(p, ROOT)
             with self.subTest(fragment=rel):
                 d = load_json(p)

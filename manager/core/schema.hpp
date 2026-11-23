@@ -24,5 +24,7 @@ Json check_object(const std::vector<Json>& fields, const Json& obj, const std::s
 Json check_config(const Json& schema, const Json& config);
 // 다른 워커를 가리키는 값(format worker_id) → {경로: 워커 id}
 Json worker_refs(const Json& schema, const Json& config);
+// 같은 종류 워커끼리 겹치면 안 되는 값(칸에 "unique": true, 예: 장치 시리얼) → {경로: 값}. 빈 값·null은 뺀다
+Json unique_values(const Json& schema, const Json& config);
 
 }  // namespace pm::schema

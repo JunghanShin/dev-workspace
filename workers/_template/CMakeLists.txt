@@ -25,6 +25,7 @@ add_subdirectory(lib/peer)
 add_executable(example-worker src/main.cpp)
 target_link_libraries(example-worker PRIVATE source processor peer)
 target_compile_options(example-worker PRIVATE -Wall -Wextra -Wpedantic)
+worker_io(example-worker ${CMAKE_CURRENT_SOURCE_DIR})  # 입출력 정의를 실행 파일에(`example-worker --io`)
 install(TARGETS example-worker RUNTIME DESTINATION bin)
 
 # 가짜 장치 프로그램(가짜 장치 모드, 프리셋 sim. 워크스페이스 design.md 6.6.8). 실행 파일 옆(bin/)에 설치

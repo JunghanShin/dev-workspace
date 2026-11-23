@@ -170,7 +170,7 @@ private:
     double rnum(const char* key) const;
     Json config_errors(const std::string& type, const Json& config) const;
     void check_schema(const std::string& type, const Json& config) const;
-    void check_device_conflict(const std::string& id, const Json& config) const;
+    void check_unique(const std::string& id, const Json& config) const;
     void change_config(Worker& w, const Json& config, const Json* saved, bool temp);
     void try_live(Worker& w, const Json& old);
     void save_versions();

@@ -19,6 +19,7 @@ add_subdirectory(lib/replay)
 add_executable(replay-worker src/main.cpp)
 target_link_libraries(replay-worker PRIVATE replay)
 target_compile_options(replay-worker PRIVATE -Wall -Wextra -Wpedantic)
+worker_io(replay-worker ${CMAKE_CURRENT_SOURCE_DIR})  # 입출력 정의를 실행 파일에(`replay-worker --io`)
 install(TARGETS replay-worker RUNTIME DESTINATION bin)
 
 if(BUILD_TESTING)

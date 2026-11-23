@@ -364,4 +364,26 @@ Json worker_refs(const Json& schema, const Json& config) {
     return out;
 }
 
+Json unique_values(const Json& schema, const Json& config) {
+    Json out = Json::object();
+    if (!py_truthy(schema) || !config.is_object()) return out;
+    for (const auto& [section, fields] : sections_of(schema)) {
+        Json obj = config;
+        std::string prefix;
+        if (section.is_string()) {
+            obj = get(config, section.get<std::string>().c_str());
+            prefix = section.get<std::string>() + ".";
+        }
+        if (!obj.is_object()) continue;
+        for (const auto& f : fields) {
+            const Json k = get(f, "key");
+            if (!k.is_string() || !py_truthy(get(f, "unique"))) continue;
+            const Json v = get(obj, k.get<std::string>().c_str());
+            if (v.is_null() || (v.is_string() && v.get<std::string>().empty())) continue;
+            out[prefix + k.get<std::string>()] = v;
+        }
+    }
+    return out;
+}
+
 }  // namespace pm::schema

@@ -1,7 +1,7 @@
 """입출력 정의(계약) 읽기·합치기·검사(워크스페이스 design.md 6.6.7.1~6.6.7.2). 표준 라이브러리만.
 
 정의 세 가지를 합쳐 워커 하나의 계약을 만든다:
-  공통 정의  workers/_template/io/common.json   (get_status 겉모양, 공통 명령, 호스트·단계 지표, 스트림 겉모양, 이벤트)
+  공통 정의  workers/_template/lib/libworker/io/common.json   (libworker가 내보내는 칸: get_status 겉모양, 공통 명령, 호스트·단계 지표, 스트림 겉모양, 이벤트)
   워커 정의  workers/<w>/io/self.json + include  (모듈별 status, 지표, 진단 주제, 정비 명령)
   역할 정의  io.json provides → io/<역할>.json 또는 io/uses/<역할>.json
 
@@ -64,7 +64,7 @@ class Contract:
 
     def __init__(self, worker_dir):
         self.worker_dir = worker_dir
-        self.common = load_json(os.path.join(TEMPLATE, "io", "common.json"))
+        self.common = load_json(os.path.join(TEMPLATE, "lib", "libworker", "io", "common.json"))
         self.defs = dict(self.common.get("definitions", {}))
         self.status, self.metrics, self.commands, self.topics = Named(), Named(), Named(), Named()
         self.errors = set(self.common.get("errors", []))

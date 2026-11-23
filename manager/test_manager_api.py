@@ -118,9 +118,10 @@ class ManagerApiWorker(unittest.TestCase):
         json.dump({"name": "self", "version": "1.0", "include": ["lib/libx/io/x.json"], "status": {}},
                   open(os.path.join(dev_dir, "io", "self.json"), "w"))
         json.dump({"name": "x", "version": "1.0", "metrics": {}}, open(os.path.join(dev_dir, "lib", "libx", "io", "x.json"), "w"))
-        os.makedirs(os.path.join(root, "workers", "_template", "io"))
-        shutil.copyfile(os.path.join(HERE, "..", "workers", "_template", "io", "common.json"),
-                        os.path.join(root, "workers", "_template", "io", "common.json"))
+        tio = os.path.join(root, "workers", "_template", "lib", "libworker", "io")
+        os.makedirs(tio)
+        shutil.copyfile(os.path.join(HERE, "..", "workers", "_template", "lib", "libworker", "io", "common.json"),
+                        os.path.join(tio, "common.json"))
         # 예전 구성이 남긴 데이터: Manager가 지워야 한다(예전 이름 소켓, 빠진 워커의 실행 설정 파일)
         os.makedirs(os.path.join(data, "run"), exist_ok=True)
         os.makedirs(os.path.join(data, "state", "workers"), exist_ok=True)

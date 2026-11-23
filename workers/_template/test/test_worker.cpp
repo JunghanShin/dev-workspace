@@ -120,6 +120,25 @@ int main(int argc, char** argv) {
     unsetenv("WORKSPACE_NOTIFY_SOCKET");
     for (const char* d : {"/run", "/run/cmd", "/run/stream", "/run/frames"}) mkdir((g_dir + d).c_str(), 0755);
 
+    // 0) --io: 실행 파일에 넣은 입출력 정의(설정·소켓 없이 출력하고 끝)
+    {
+        std::string line;
+        for (const auto& a : g_cmd) line += "'" + a + "' ";
+        FILE* p = popen((line + "--io").c_str(), "r");
+        CHECK(p != nullptr);
+        std::string text;
+        char buf[4096];
+        size_t n;
+        while (p && (n = fread(buf, 1, sizeof buf, p)) > 0) text.append(buf, n);
+        CHECK(p && pclose(p) == 0);
+        const Json io = Json::parse(text, nullptr, false);
+        CHECK(io.is_object());
+        CHECK(io.value("common", Json::object()).value("name", "") == "common");
+        CHECK(io.value("self", Json::object()).value("name", "") == "self");
+        CHECK(io.value("provides", Json::object()).contains("example"));
+        CHECK(io["uses"]["upstream"]["definition"].value("name", "") == "example");
+    }
+
     // 1) 워커 하나
     pid_t a = start("a", {{"source", {{"rate_hz", 50}, {"size", 16}}}, {"processor", {{"window", 10}}}});
     CHECK(wait_until([] { return status("a").contains("source"); }, 8000));
