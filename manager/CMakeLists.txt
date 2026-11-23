@@ -1,4 +1,4 @@
-# process-manager: 워크스페이스 Manager의 C++ 판 (docs/process-manager.md). Python 판(workspace_manager/)과
+# process-manager: 워크스페이스 Manager (docs/process-manager.md). 0.57까지 있던 Python 판(workspace_manager/)과
 # 같은 API·파일·인자. 시작 셸이 고르기 전까지는 Python 판이 기본.
 #
 #   cmake -S manager -B ~/pm-build -DCMAKE_BUILD_TYPE=Release && cmake --build ~/pm-build -j

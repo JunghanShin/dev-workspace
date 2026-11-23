@@ -19,6 +19,9 @@ import threading
 import time
 import unittest
 
+if not os.environ.get("MANAGER_BIN"):  # 0.58부터 C++ process-manager만(Python 판 삭제)
+    raise unittest.SkipTest("MANAGER_BIN(process-manager 실행 파일)이 있어야 함")
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 시험 워커. 인자: <out 파일> --config <설정 파일>
@@ -114,7 +117,7 @@ FAST_RESTART = {"restart": {"interval_s": 0.3, "max_interval_s": 1.0, "crash_cou
 
 def manager_cmd():
     b = os.environ.get("MANAGER_BIN")
-    return [b] if b else [sys.executable, "-m", "workspace_manager"]
+    return [b]
 
 
 def wait_for(fn, timeout=15.0, step=0.1):

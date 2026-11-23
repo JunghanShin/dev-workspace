@@ -1,4 +1,6 @@
-"""schema.py 시험(표준 라이브러리만): 워커 스키마 형식, 프로필 설정이 스키마를 통과하는지, 잘못된 값 검출.
+"""저장소 설정 파일 점검(표준 라이브러리만): 워커 스키마 형식, 프리셋이 스키마를 통과하는지, libvideo 칸 사본, 잘못된 값 검출.
+기준 코드는 reference_schema.py(옛 Python Manager의 스키마 검사, 0.58에 Manager를 지울 때 점검 기준으로만 남김).
+같은 규칙의 C++ 판은 process-manager core/schema(test_core가 같은 저장소 파일을 검사).
 
     cd manager && python3 -m unittest test_schema -v
 """
@@ -7,7 +9,7 @@ import json
 import os
 import unittest
 
-from workspace_manager.schema import check_config, check_schema, fields_of, worker_refs
+from reference_schema import check_config, check_schema, fields_of, worker_refs
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 

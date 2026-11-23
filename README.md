@@ -79,7 +79,7 @@ dev-workspace/
 ├─ workspace-start.sh        전체 시작
 ├─ workspace-stop.sh         전체 종료
 ├─ .jetson-dev-env           필요한 빌드 환경 버전
-├─ manager/                  Manager (workspace_manager)
+├─ manager/                  process-manager(C++: 워커 실행·감시·설정·연결 선언·허용 목록)
 ├─ gateway/                  게이트웨이(C++: REST + 화면 제공 + 스트림 중계 + 신분 확인 + 제품 빌드), nginx/ 설정 틀
 ├─ rest/                     게이트웨이 수락 시험
 ├─ logger/                   workspace-logger, 지난 지표 조회(workspace_history.py)

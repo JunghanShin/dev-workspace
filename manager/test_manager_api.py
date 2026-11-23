@@ -20,6 +20,9 @@ import tempfile
 import time
 import unittest
 
+if not os.environ.get("MANAGER_BIN"):  # 0.58부터 C++ process-manager만(Python 판 삭제)
+    raise unittest.SkipTest("MANAGER_BIN(process-manager 실행 파일)이 있어야 함")
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 HELPER = os.path.join(HERE, "..", "workers", "_template", "python", "workspace_worker.py")
 
@@ -62,7 +65,7 @@ while not stop.requested:
 def manager_cmd():
     """시험할 Manager 실행 명령. MANAGER_BIN이 있으면 그 실행 파일(C++ process-manager), 없으면 Python 판"""
     b = os.environ.get("MANAGER_BIN")
-    return [b] if b else [sys.executable, "-m", "workspace_manager"]
+    return [b]
 
 
 def wait_for(fn, timeout=15.0):

@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.57 |
+| 문서 버전 | 0.58 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -251,7 +251,7 @@
 
 ### 6.3 Manager
 
-**C++ process-manager로 다시 만든다(0.46, 설계 `docs/process-manager.md`):** 하는 일·API·파일은 이 절 그대로 두고, 상태는 제어 루프 하나, 기다릴 수 있는 일(구독 송신 `pm.pub`, 파일 쓰기 `pm.store`, 자원 측정 `pm.res`)은 스레드로 뺀다. 더하는 일: 누구에게 붙을지 알려 주기(6.6.7.4 연결 선언), 명령하는 곳 허용 목록(`run/peers.json`, 워커는 환경 변수 `WORKSPACE_PEERS_FILE`이 있을 때만 봄, 없으면 막지 않음, `docs/command-path.md`). 옮기는 동안 시작 셸이 `WORKSPACE_MANAGER_IMPL=python|cpp`로 고른다.
+**C++ process-manager로 다시 만든다(0.46, 설계 `docs/process-manager.md`):** 하는 일·API·파일은 이 절 그대로 두고, 상태는 제어 루프 하나, 기다릴 수 있는 일(구독 송신 `pm.pub`, 파일 쓰기 `pm.store`, 자원 측정 `pm.res`)은 스레드로 뺀다. 더하는 일: 누구에게 붙을지 알려 주기(6.6.7.4 연결 선언), 명령하는 곳 허용 목록(`run/peers.json`, 워커는 환경 변수 `WORKSPACE_PEERS_FILE`이 있을 때만 봄, 없으면 막지 않음, `docs/command-path.md`). 0.58부터 C++ 판만 있다(Python 판 삭제).
 
 별도 프로세스, 시스템 상태의 단일 소유자. 하나의 non-blocking 이벤트 루프로 API 소켓, 구독자 송신, heartbeat 수신, 워커 exit 감시, 자원 측정을 처리한다.
 
@@ -986,7 +986,7 @@ Manager /proc 측정 ───────┘                                   
 | 묶음 `section` | 그 묶음의 칸이 `config["<모듈>"]` 안에 있다. 오류 경로 `<모듈>.<키>` |
 
 - 빈 칸 = 키를 지움(워커 기본값). 스키마에 없는 키는 폼에 안 나오고 그대로 저장된다
-- 검사는 두 번: 화면이 입력할 때, Manager가 저장할 때(`workspace_manager/schema.py`, 틀리면 `bad_request` + `fields`). 사람이 파일을 직접 고쳐 안 맞으면 기동은 막지 않고 경고, `get_config`의 `config_errors`
+- 검사는 두 번: 화면이 입력할 때, Manager가 저장할 때(process-manager `core/schema`, 틀리면 `bad_request` + `fields`). 사람이 파일을 직접 고쳐 안 맞으면 기동은 막지 않고 경고, `get_config`의 `config_errors`
 - 적용·저장: 설정 창 위에서 프리셋을 고르고, **적용**(임시) 또는 **저장**(사용 중 프리셋에), **새 이름으로 저장**·이름 바꾸기·삭제(6.3.1). 칸마다 저장값과 다르면 표시. 반영은 재시작(`live_keys`만이면 바로). 바로 적용하는 조작(송출 켜고 끄기 등)은 패널의 명령
 - API: `get_schema` → `{id, type, schema, live_keys}`, `get_config` → `{config(지금 값), saved(프리셋 값), temp, preset, presets, autostart, files}`. 화면: `kit.js` `workerSettings(ctx, id, {before, after})`(6.11)
 
@@ -1256,7 +1256,7 @@ REST는 `0.0.0.0` 바인딩이라 새 IP로 닿는 즉시 재개된다(진행 �
   <워크스페이스>/                 # 깃 저장소(dev-workspace). 받은 폴더 이름 그대로(예: my-workspace). 여기서 바로 실행
     design.md, README.md          # 본 문서, 사용법
     workspace-start.sh / -stop.sh # 시작·감시·종료 셸(11.2)
-    manager/workspace_manager/    # Manager (+ test_schema.py)
+    manager/                      # process-manager(C++: core·src·test, bin/ 확정 실행 파일) + 수락 시험
     gateway/                      # 게이트웨이(C++, REST·화면 제공·스트림 중계·신분 확인) + nginx/ 설정 틀. bin/ 확정 실행 파일
     rest/                         # 게이트웨이 수락 시험(test_rest_accept.py, test_nginx_front.py)
     logger/workspace_logger/      # workspace-logger, workspace_history.py
@@ -1423,7 +1423,7 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | 프레임 버스(데이터 버스) | CPU 공유 메모리, 영상·원시 레코드, Latest·InOrder. NvBufSurface는 미결 |
 | 데이터 버스 녹화·재생 | 구현(`workers/replay`, 녹화 → 재생 왕복 시험) |
 | 계약 규칙(6.6.7.1~6.6.7.2: 세 정의, 정의 밖 칸 금지, 출력 대조, REST `/io`) | **구현 완료(0.45).** 템플릿(0.43), REST `/io`·libvideo 조각(0.44), 모든 워커에 역할·워커 정의와 출력 대조: replay(역할 `recorder`, 이 저장소), 장치 워커(프로젝트 저장소). 공통 이벤트에 `seq`·`detail`. 미준수 목록 없음 |
-| process-manager C++ 판(6.3, `docs/process-manager.md`) | 구현(0.47), 보드 확인: 메모리 25.6 → 6.7 MB, CPU 3.48 → 1.92%. 시작 셸 기본 C++(0.48, 되돌리기 `manager_impl` = `python`), pm.res는 기억한 pid만 읽고 전체 훑기 5초마다. 보드 재측정 CPU 0.98%. 남은 것: Python 판 삭제 → 연결 선언·명령 소유·권한 표 |
+| process-manager C++ 판(6.3, `docs/process-manager.md`) | 구현(0.47), 보드 확인: 메모리 25.6 → 6.7 MB, CPU 3.48 → 1.92%. 시작 셸 기본 C++(0.48), pm.res는 기억한 pid만 읽고 전체 훑기 5초마다. 보드 재측정 CPU 0.98%. 허용 목록(0.55)·입력 연결(0.57), Python 판 삭제(0.58) |
 | 게이트웨이 C++ 판(6.4, `docs/gateway.md`) | 구현(0.50): 지금 REST와 같은 경로·응답, HTTP 수락 시험·단위 시험·TSan 통과, 메모리 20.8 → 6.8 MB(PC). 시작 셸에서 고름(기본 Python). 보드 확인됨. nginx 앞단(0.51, 보드 확인: nginx가 포트 8080, 게이트웨이는 Unix 소켓만). 남은 것: 신분 확인·모드·기록·캐시 → 기본 C++, Python 삭제 |
 | 계층과 매니저(4.1, `docs/layers.md`) | 설계 확정(0.40), 구현 전. 언어(원칙 10, 0.42): 매니저는 C++(libworker 위), 지금 Python인 REST·Manager·logger는 게이트웨이·process-manager·record-manager로 재구성하면서 C++로 다시 짬. 순서: 계약 규칙(상태·화면용 주제도 정의에, 실제 출력 대조) → 게이트웨이 → record → status → fault → mission·payload → config → 명령 경로 강제 |
 | 워커 | 세 워커 모두 템플릿 규칙 충족(유닛·모듈·워커 시험, 설계서 3장 ICD, 미준수 목록 없음). 워커별 구조 설계(모듈 나누기, 워커 간 통신 적용)는 다음 단계 |
@@ -1547,6 +1547,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.55 | **명령 길**(`docs/command-path.md`, 그림 `docs/command-path.svg`): 명령하는 곳은 허용 목록(`connections.json` `commanders`, 화면은 늘 허용)으로, 동시 명령은 조정하지 않고 보낸 곳(`from`)을 남김(조정은 매니저 규칙). 정비 모드 → **개발 모드**(`development`): 운용 모드에서는 읽기·역할 명령만, 워커 전용·계약에 없는 명령·설정·시작/정지·연결 선언은 개발 모드에서만. 검사 세 곳: 게이트웨이(모드 × 역할 × 명령 종류), 워커 명령 소켓(libworker, `SO_PEERCRED` + `run/peers.json`, `command_guard` warn → enforce), process-manager(Manager API 쓰기 × 모드). `get_status` 공통 칸 `last_command`. 원칙 13·17 고침 |
 | 0.56 | **명령 표시 `operate`**(6.6.7.1, `docs/command-path.md` 3장): 워커 정의·조각의 명령 중 운용 중에도 쓰는 조작을 계약에 표시하면 운용 모드에서도 통과(게이트웨이), 연결 선언에 워커 전체로 적은 명령하는 곳에도 열림(process-manager). libvideo `stream.start`·`stop`에 표시(조각 1.1). 점검이 명령 칸 `read`·`operate`를 받음(true만, 같이 쓰지 않음) |
 | 0.57 | **입력 연결 구현**(6.6.7.3~6.6.7.5): process-manager가 계약(uses·provides)·연결 선언(`connections`)·프리셋 `inputs`로 입력을 풀고(선언 → 자동 → 설정), 검사(역할·버전·주제·명령·데이터)한 결과를 `run/inputs/<id>.json` + `WORKSPACE_INPUTS_FILE`로 넣음, 바뀌면 그 워커만 다시 시작, 워커 상태 `inputs`. libworker 0.11 `host.uses`·`input_link`(지표 `inputs_<입력>_link`, 공통 정의 1.2 `inputs`). 템플릿 `peer` 모듈이 입력 `upstream`으로. 자동 상태 화면에 입력 연결 |
+| 0.58 | **Python 판 process-manager 삭제**: 시작 셸은 C++ 실행 파일만(없으면 끝냄, `manager_impl` 없어짐), `manager/workspace_manager/`·`test_notify_race.py` 삭제, 수락 시험은 C++ 전용(`MANAGER_BIN` 없으면 건너뜀), 저장소 설정 점검 `test_schema.py`는 기준 코드 `manager/reference_schema.py`로 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |
