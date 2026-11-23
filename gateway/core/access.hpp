@@ -11,8 +11,11 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
+
+#include "text.hpp"
 
 namespace gw {
 
@@ -67,6 +70,19 @@ bool open_path(const std::string& path, bool ui_enabled);
 // path: 요청 경로 그대로(쿼리 없음, /api/board 접두어 포함 가능)
 Need classify(const std::string& method, const std::string& path, bool ui_enabled);
 bool allows(Role role, Need need);
+
+// ---- 운용/개발 모드(docs/command-path.md 3장) ----
+bool is_worker_command(const std::string& path);  // POST /workers/<id>/command 경로
+// 워커 명령의 종류: 계약(get_io 답)으로. 읽기(get_status, "read": true) · 역할 명령(provides) · 그 밖(워커 전용·계약에 없음)
+enum class CmdKind { Read, Role, Other };
+struct CommandKinds {
+    std::set<std::string> read, role;
+    CmdKind of(const std::string& cmd) const {
+        if (cmd == "get_status" || read.count(cmd)) return CmdKind::Read;
+        return role.count(cmd) ? CmdKind::Role : CmdKind::Other;
+    }
+};
+CommandKinds command_kinds(const Json& io);  // io가 null(계약 없음)이면 get_status만 읽기
 
 // 게이트웨이가 직접 답하는 경로: /api/auth/{login,logout,me}, /api/mode(앞에 /api/board도, /api 없이도)
 enum class Own { None, Login, Logout, Me, ModeGet, ModeSet, MethodNotAllowed };
@@ -124,7 +140,7 @@ private:
 
 // ---- 명령 기록 한 줄(gw.log). 본문·쿼리·헤더는 넣지 않는다(비밀번호·토큰이 섞이지 않게) ----
 struct RecordFields {
-    std::string t, user, role, mode, remote, method, path, cmd;
+    std::string t, user, role, mode, remote, method, path, cmd, from;
     int code = 0;
     double ms = 0;
 };

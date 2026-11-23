@@ -51,8 +51,16 @@ Reply json_reply(int status, const Json& body) {
     return r;
 }
 
+// 운용 모드에서 막을 때(docs/command-path.md 3장): 403 + need
 Reply json_error(int status, const std::string& code, const std::string& message) {
     return json_reply(status, Json{{"error", {{"code", code}, {"message", message}}}});
+}
+
+Reply development_required() {
+    Json o = Json::object();
+    o["error"] = Json{{"code", "forbidden"}, {"message", "development mode required"}};
+    o["need"] = "development";
+    return json_reply(403, o);
 }
 
 // 값으로 돌려준다(기본값이 임시 객체여도 안전하게)
@@ -444,6 +452,7 @@ Reply Gateway::handle(const RequestView& rq, const std::function<Body()>& body, 
     Reply r;
     try {
         who = auth_->identify(rq);
+        ctx.from = who.via == "token" ? "remote:" + who.token : "screen";
         const Decision d = auth_->authorize(who, rq);
         if (!d.allowed) r = json_error(d.status, d.code, d.message);
         else r = dispatch(rq, body, remote, who, ctx);
@@ -462,6 +471,7 @@ Reply Gateway::handle(const RequestView& rq, const std::function<Body()>& body, 
         f.method = rq.method;
         f.path = rq.path;
         f.cmd = ctx.cmd;
+        if (!ctx.cmd.empty() && is_worker_command(rq.path)) f.from = ctx.from;
         f.code = r.status;
         f.ms = (mono_now() - t0) * 1000;
         recorder_->record(std::move(f));
@@ -571,9 +581,9 @@ Reply Gateway::own(Own o, const RequestView& rq, const std::function<Body()>& bo
             Body b = body();
             if (!b.ok) return json_error(400, "bad_request", "invalid JSON body: " + b.error);
             const std::string m = body_str(b.value, "mode");
-            if (m != "operation" && m != "maintenance") {
+            if (m != "operation" && m != "development") {
                 ctx.cmd = "mode";
-                return json_error(400, "bad_request", "body must be {\"mode\": \"operation\" | \"maintenance\"}");
+                return json_error(400, "bad_request", "body must be {\"mode\": \"operation\" | \"development\"}");
             }
             ctx.cmd = "mode:" + m;
             return set_mode(m, who);
@@ -687,6 +697,7 @@ Reply Gateway::forward(const RequestView& rq, const std::function<Body()>& body,
             return json_error(404, "not_found", "not available in product mode");
         case RouteKind::ProductBuild:
             ctx.cmd = "product_build";
+            if (m != "GET" && mode().mode != "development") return development_required();  // 관리 조작(command-path 3장)
             return product_build(m, rstrip_char(path, '/'), rt.sub, rq.query, body);
         case RouteKind::Read:
             return read(rt, rq.query);
@@ -696,6 +707,8 @@ Reply Gateway::forward(const RequestView& rq, const std::function<Body()>& body,
             return command(rt.id, body, ctx);
         case RouteKind::Manager:
             ctx.cmd = rt.op;
+            // 쓰기(시작·정지·설정·프리셋·자동 시작·연결 선언)는 개발 모드에서만(docs/command-path.md 3장)
+            if (m != "GET" && mode().mode != "development") return development_required();
             return manager_op(rt, body);
         case RouteKind::MethodNotAllowed:
             return json_error(405, "method_not_allowed", m + " not allowed on " + path);
@@ -795,6 +808,8 @@ Reply Gateway::command(const std::string& id, const std::function<Body()>& body,
     if (!b.value.is_object() || !b.value.contains("cmd") || !b.value["cmd"].is_string())
         return json_error(400, "bad_request", "body must be {\"cmd\": \"...\", \"args\": {...}}");
     ctx.cmd = b.value["cmd"].get<std::string>();  // 기록에는 명령 이름만(인자는 넣지 않음)
+    // 운용 모드: 읽기·역할 명령만(워커 전용·계약에 없는 명령은 개발 모드에서, docs/command-path.md 3장)
+    if (mode().mode != "development" && kinds_of(id).of(ctx.cmd) == CmdKind::Other) return development_required();
     // 소켓 위치는 워커 설정(command_socket), 없으면 기본 위치 (design.md 9.6)
     Json resp;
     try {
@@ -808,6 +823,7 @@ Reply Gateway::command(const std::string& id, const std::function<Body()>& body,
     request["cmd"] = b.value["cmd"];
     const Json& args = get_or(b.value, "args", Json(nullptr));
     request["args"] = py_truthy(args) ? args : Json::object();
+    request["from"] = ctx.from;  // 워커는 게이트웨이(믿는 곳)가 붙인 것만 쓴다(docs/command-path.md 5장)
     const CommandResult r = worker_command(path, request, 1.0, cfg_.command_timeout);
     switch (r.kind) {
         case CommandResult::NoSocket:
@@ -822,6 +838,27 @@ Reply Gateway::command(const std::string& id, const std::function<Body()>& body,
     if (py_truthy(get_or(r.reply, "ok", Json(nullptr)))) return json_reply(200, get_or(r.reply, "data", Json(nullptr)));
     const Json& err = get_or(r.reply, "error", Json::object());
     return json_reply(command_status(get_or(err, "code", Json(nullptr))), Json{{"error", err}});
+}
+
+CommandKinds Gateway::kinds_of(const std::string& id) {
+    const double now = mono_now();
+    {
+        std::lock_guard<std::mutex> lock(kinds_mu_);
+        auto it = kinds_.find(id);
+        if (it != kinds_.end() && now - it->second.first < 10.0) return it->second.second;
+    }
+    Json io;  // 계약(Manager get_io). 없으면 null → get_status만 읽기, 나머지는 워커 전용
+    try {
+        const Json resp = mgr_.call(Json{{"op", "get_io"}, {"id", id}});
+        if (py_truthy(get_or(resp, "ok", Json(nullptr)))) io = get_or(resp, "data", Json(nullptr));
+    } catch (const std::exception&) {
+        return command_kinds(Json());  // Manager가 없으면 기억하지 않음(뒤에서 어차피 503)
+    }
+    CommandKinds k = command_kinds(io);
+    std::lock_guard<std::mutex> lock(kinds_mu_);
+    if (kinds_.size() > 256) kinds_.clear();
+    kinds_[id] = {now, k};
+    return k;
 }
 
 int Gateway::open_stream(const std::string& wid, std::string& why) {

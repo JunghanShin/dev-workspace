@@ -1,6 +1,6 @@
 {
   "name": "common",
-  "version": "1.0",
+  "version": "1.1",
   "description": "공통 정의: 모든 워커가 같은 것(워크스페이스 design.md 6.6.7.1). get_status 겉모양, 공통 명령, 오류 code, heartbeat 지표(호스트·단계), 스트림 겉모양, 이벤트, 시각. 워커가 고치지 않는다(플랫폼 버전)",
   "errors": ["bad_request", "unavailable", "timeout", "busy", "forbidden", "internal"],
   "status": {
@@ -12,6 +12,12 @@
                            "running": {"type": "boolean"}, "restarts": {"type": "integer"}}},
     "threads": {"optional": true, "description": "스레드 이름 → 마지막 beat 뒤(ms)",
                 "type": "object", "additionalProperties": {"type": "number", "unit": "ms"}},
+    "last_command": {"optional": true, "description": "마지막으로 받은 읽기가 아닌 명령(워크스페이스 docs/command-path.md 5장, libworker 0.10). 없으면 null",
+                     "type": ["object", "null"], "required": ["cmd", "from", "t_mono_ns", "ok"],
+                     "properties": {"cmd": {"type": "string", "description": "명령 이름"},
+                                    "from": {"type": ["string", "null"], "description": "보낸 곳: screen, remote:<토큰 이름>, 워커·매니저 id, unknown:<pid>. 단독 실행이면 명령의 from(없으면 null)"},
+                                    "t_mono_ns": {"type": "integer", "unit": "ns", "description": "받은 시각(보드 CLOCK_MONOTONIC)"},
+                                    "ok": {"type": ["boolean", "null"], "description": "응답 결과(응답 전이면 null)"}}},
     "runtime": {"description": "워커 속사정(루프·단계·큐). 형식 보장 없음",
                 "type": "object", "additionalProperties": true}
   },

@@ -95,7 +95,8 @@ async function refreshStatus(ctx) {
   }
   if (!els.status) return;  // 패널을 떠남
   const schemas = statusSchemas(els.io);
-  const skip = new Set(["id", "config_version", "runtime", "threads", "sim"]);  // 공통 겉모양(속사정은 시스템 모니터 워커 보기에)
+  const skip = new Set(["id", "config_version", "runtime", "threads", "sim", "last_command"]);  // 공통 겉모양(속사정은 시스템 모니터 워커 보기에)
+  if (els.last) els.last.set([["마지막 명령", ctx.ui.lastCommand(d)]]);
   const modules = Object.keys(d || {}).filter((k) => !skip.has(k)).sort();
   els.status.replaceChildren(...modules.map((mod) => {
     const rows = [];
@@ -115,9 +116,11 @@ export default {
     els.note = h("div", { class: "muted" }, "계약 읽는 중…");
     els.metrics = h("div");
     els.status = h("div", { class: "stack" });
+    els.last = ui.kvList([["마지막 명령", "—"]]);  // 누가 무엇을 보냈나(docs/command-path.md 5장)
     el.appendChild(h("div", { class: "stack" },
       ui.panelHead({ title: id, badges: [els.pill], actions: [ui.settingsButton(els.settings, `${id} 설정`), h("span", { class: "ph-sep" }), els.controls] }),
       els.note,
+      els.last,
       ui.card("지표 (heartbeat, 1초)", els.metrics),
       ui.card("상태 (get_status, 모듈별)", els.status)));
     try {

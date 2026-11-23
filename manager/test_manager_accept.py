@@ -41,7 +41,8 @@ b = cfg.get("behavior", {})
 ver = d.get("config_version")
 log(ev="start", pid=os.getpid(), pgid=os.getpgid(0), ver=ver, config=cfg, argv=sys.argv, payload=d,
     nice=os.nice(0), env={k: os.environ.get(k) for k in ("WORKSPACE_WORKER_ID", "WORKSPACE_NOTIFY_SOCKET",
-                                                          "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_DATA")})
+                                                          "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_DATA",
+                                                          "WORKSPACE_PEERS_FILE")})
 print("hello stdout from %s" % d.get("id"), flush=True)
 if b.get("log_bytes"):
     sys.stdout.write("x" * b["log_bytes"] + "\n")
@@ -746,10 +747,10 @@ class Accept(unittest.TestCase):
         mode = lambda: e.call("manager.sock", {"op": "system"})["data"]["access_mode"]
         self.assertEqual(mode(), "operation")
         for sock in ("manager.sock", "manager-logger.sock", "manager-adp.sock"):
-            r = e.call(sock, {"op": "set_access_mode", "mode": "maintenance"})
+            r = e.call(sock, {"op": "set_access_mode", "mode": "development"})
             self.assertEqual(r["ok"], False, sock)
             self.assertEqual(r["error"]["code"], "forbidden", sock)
-        for bad in ("maint", None, 1, ["maintenance"], ""):
+        for bad in ("maint", None, 1, ["development"], ""):
             r = e.rest({"op": "set_access_mode", "mode": bad})
             self.assertEqual((r["ok"], r["error"]["code"]), (False, "bad_request"), bad)
         self.assertEqual(e.rest({"op": "set_access_mode"})["error"]["code"], "bad_request")
@@ -760,17 +761,17 @@ class Accept(unittest.TestCase):
             self.assertTrue(wait_for(lambda: len(sub.snapshot()) >= 2, 3))
             self.assertTrue(wait_for(lambda: len(cmd.snapshot()) >= 1, 3))
             t0 = time.time()
-            self.assertEqual(e.ok({"op": "set_access_mode", "mode": "maintenance"}), {"access_mode": "maintenance"})
-            self.assertEqual(mode(), "maintenance")
+            self.assertEqual(e.ok({"op": "set_access_mode", "mode": "development"}), {"access_mode": "development"})
+            self.assertEqual(mode(), "development")
             # 구독자에게 바로(주기 5 s를 기다리지 않음)
             got = wait_for(lambda: [t for t, x in sub.snapshot() if x.get("event") == "system"
-                                    and x["data"].get("access_mode") == "maintenance"], 3)
+                                    and x["data"].get("access_mode") == "development"], 3)
             self.assertTrue(got)
             self.assertLess(got[0] - t0, 1.5)
             c = wait_for(lambda: [x["data"] for _, x in cmd.snapshot() if x.get("event") == "command"], 3)
-            self.assertEqual(c[0], {"op": "set_access_mode", "id": None, "client": "rest", "ok": True, "mode": "maintenance"})
+            self.assertEqual(c[0], {"op": "set_access_mode", "id": None, "client": "rest", "ok": True, "mode": "development"})
             # 같은 값 다시: 그대로 ok
-            self.assertEqual(e.ok({"op": "set_access_mode", "mode": "maintenance"}), {"access_mode": "maintenance"})
+            self.assertEqual(e.ok({"op": "set_access_mode", "mode": "development"}), {"access_mode": "development"})
         finally:
             sub.close()
             cmd.close()
@@ -968,6 +969,123 @@ class Accept(unittest.TestCase):
         for f in stale:
             self.assertFalse(os.path.exists(f), f)
         self.assertFalse(os.path.exists(os.path.join(e.data, "state", "workers", "brk.json")))
+
+
+def write_io(e, name, provides=None, uses=None):
+    """워커 폴더(workers/<이름>/)에 계약: io.json + io/<역할>.json"""
+    folder = os.path.dirname(e.ws[name])
+    write_json(os.path.join(folder, "io.json"), {"provides": sorted(provides or {}), "uses": uses or {}})
+    for role, cmds in (provides or {}).items():
+        write_json(os.path.join(folder, "io", role + ".json"),
+                   {"name": role, "version": "1.0", "commands": {c: ({"read": True} if c.split(".")[-1].startswith("get") else {})
+                                                                  for c in cmds}})
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "Unix sockets, Linux only")
+@unittest.skipUnless(os.environ.get("MANAGER_BIN"), "C++ process-manager only (docs/command-path.md)")
+class CommandPath(unittest.TestCase):
+    """명령 길(docs/command-path.md 4·5장): connections.json commanders → run/peers.json, Manager API 쓰기 × 모드"""
+
+    def setUp(self):
+        self.envs = []
+
+    def tearDown(self):
+        for e in self.envs:
+            e.close()
+
+    def make(self, connections=None, settings=None):
+        e = Env({"gim": {"config": {}, "autostart": True},
+                 "ext": {"config": {}, "autostart": True, "decl": {"manager_api": True}},
+                 "bare": {"config": {}, "autostart": False}}, settings=settings)
+        self.envs.append(e)
+        write_io(e, "gim", provides={"gimbal": ["gimbal.angle", "gimbal.get"], "camera": ["camera.zoom"]})
+        write_io(e, "ext", uses={"g": {"from": "gimbal", "version": "1.0"}})
+        if connections is not None:
+            write_json(os.path.join(e.data, "config", "connections.json"), connections)
+        return e
+
+    def peers(self, e):
+        try:
+            return read_json(os.path.join(e.run_dir, "peers.json"))
+        except (OSError, ValueError):
+            return None
+
+    def test_peers_file(self):
+        e = self.make({"connections": [], "commanders": {"gim.gimbal": ["ext"]}}).start()
+        s_gim = e.wait_state("gim", "running")
+        s_ext = e.wait_state("ext", "running")
+        self.assertEqual(e.starts("gim")[-1]["env"]["WORKSPACE_PEERS_FILE"], os.path.join(e.run_dir, "peers.json"))
+        e.ok({"op": "ping"})  # 게이트웨이 자리: manager-rest.sock에 붙은 이 프로세스의 pid가 들어감
+        p = wait_for(lambda: (lambda x: x if x and "gateway" in x["peers"] and "ext" in x["peers"] else None)(self.peers(e)), 5)
+        self.assertTrue(p, self.peers(e))
+        self.assertEqual((p["version"], p["guard"], p["mode"]), (1, "warn", "operation"))
+        self.assertEqual(p["peers"]["gateway"], {"pid": os.getpid(), "trusted_from": True})
+        self.assertEqual(p["peers"]["ext"], {"pgid": s_ext["pid"]})
+        self.assertEqual(p["peers"]["gim"], {"pgid": s_gim["pid"]})
+        self.assertNotIn("bare", p["peers"])  # 떠 있지 않음
+        self.assertIsInstance(p["written_at_ms"], int)
+        self.assertEqual(p["workers"]["gim"]["allow"], {"gateway": "*", "ext": ["gimbal.angle", "gimbal.get"]})
+        self.assertEqual(p["workers"]["gim"]["read"], ["get_status", "gimbal.get"])
+        self.assertEqual(p["workers"]["bare"], {"read": ["get_status"], "allow": {"gateway": "*"}})
+        # 개발 모드: 허용된 곳은 전부
+        e.ok({"op": "set_access_mode", "mode": "development"})
+        p = wait_for(lambda: (lambda x: x if x and x["mode"] == "development" else None)(self.peers(e)), 3)
+        self.assertEqual(p["workers"]["gim"]["allow"], {"gateway": "*", "ext": "*"})
+        e.ok({"op": "set_access_mode", "mode": "operation"})
+        # 워커가 다시 뜨면 새 프로세스 그룹
+        e.ok({"op": "stop", "id": "ext"})
+        e.wait_state("ext", "stopped")
+        self.assertTrue(wait_for(lambda: "ext" not in (self.peers(e) or {"peers": {"ext": 1}})["peers"], 4))
+        # 손으로 바꾼 연결 선언도 따라감(1 s 주기)
+        write_json(os.path.join(e.data, "config", "connections.json"), {"commanders": {"gim": ["ext"]}})
+        p = wait_for(lambda: (lambda x: x if x and isinstance(x["workers"]["gim"]["allow"].get("ext"), list)
+                              and "camera.zoom" in x["workers"]["gim"]["allow"]["ext"] else None)(self.peers(e)), 4)
+        self.assertTrue(p, self.peers(e))
+
+    def test_connections_ops(self):
+        e = self.make({"commanders": {"gim.gimbal": ["ext"], "gim.radar": ["ext"], "gim.camera": ["ext"]}},
+                      settings={"command_guard": "enforce"}).start()
+        d = e.call("manager.sock", {"op": "get_connections"})["data"]
+        self.assertEqual(d["path"], os.path.join(e.data, "config", "connections.json"))
+        self.assertEqual((d["guard"], d["access_mode"], d["error"]), ("enforce", "operation", None))
+        self.assertEqual(d["check"]["gim.gimbal"], {"ok": True, "error": None, "warnings": []})
+        self.assertEqual(d["check"]["gim.radar"]["ok"], False)
+        self.assertEqual(d["check"]["gim.camera"]["ok"], True)
+        self.assertEqual(len(d["check"]["gim.camera"]["warnings"]), 1)  # ext는 camera를 쓴다고 적지 않음
+        for bad in (None, [], {"commanders": {"gim": "ext"}}, {"commanders": {"Bad Key": []}}):
+            r = e.rest({"op": "set_connections", "connections": bad})
+            self.assertEqual((r["ok"], r["error"]["code"]), (False, "bad_request"), bad)
+        self.assertFalse(e.call("manager.sock", {"op": "set_connections", "connections": {}})["ok"])  # 읽기 전용 소켓
+        d = e.ok({"op": "set_connections", "connections": {"connections": [], "commanders": {"gim": ["ext"]}}})
+        self.assertEqual(list(d["check"]), ["gim"])
+        self.assertEqual(read_json(d["path"]), {"connections": [], "commanders": {"gim": ["ext"]}})
+        self.assertEqual(self.peers(e)["guard"], "enforce")
+        # 깨진 파일: 직전 값을 쓰고 오류를 보임
+        with open(d["path"], "w") as f:
+            f.write("{broken")
+        self.assertTrue(wait_for(lambda: e.call("manager.sock", {"op": "get_connections"})["data"]["error"], 4))
+        d = e.call("manager.sock", {"op": "get_connections"})["data"]
+        self.assertEqual(d["connections"], {"connections": [], "commanders": {"gim": ["ext"]}})
+
+    def test_manager_api_writes_follow_mode(self):
+        """외부 연동 워커(Manager API)의 관리 조작은 운용 모드에서 막힘, 개발 모드에서 됨. 읽기는 늘 됨"""
+        e = self.make().start()
+        e.wait_state("ext", "running")
+        sock = "manager-ext.sock"
+        for req in ({"op": "start", "id": "bare"}, {"op": "set_autostart", "id": "bare", "autostart": True},
+                    {"op": "set_connections", "connections": {}}):
+            r = e.call(sock, req)
+            self.assertEqual(r, {"ok": False, "error": {"code": "forbidden", "message": "development mode required"},
+                                 "need": "development"}, req)
+        self.assertTrue(e.call(sock, {"op": "list"})["ok"])
+        self.assertTrue(e.call(sock, {"op": "get_connections"})["ok"])
+        e.ok({"op": "set_access_mode", "mode": "development"})
+        self.assertTrue(e.call(sock, {"op": "start", "id": "bare"})["ok"])
+        e.wait_state("bare", "running")
+        self.assertEqual(e.call(sock, {"op": "stop", "id": "ext"})["error"]["code"], "forbidden")  # 자기 자신은 그대로 금지
+        # 게이트웨이(manager-rest.sock)는 여기서 모드를 보지 않음(사용자 역할과 함께 게이트웨이가 판단)
+        e.ok({"op": "set_access_mode", "mode": "operation"})
+        self.assertTrue(e.rest({"op": "stop", "id": "bare"})["ok"])
 
 
 if __name__ == "__main__":

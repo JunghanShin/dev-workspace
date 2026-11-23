@@ -151,6 +151,7 @@ int main(int argc, char** argv) {
     sc.workspace_root = root;
     sc.boot_id = read_boot_id();
     sc.manager_api_workers = api_workers;
+    sc.peers_file = paths.run_dir + "/peers.json";
     pm::Supervisor sup(sc, clock, spawner, store, fs);
     sup.load();
     // 시작 때 쓴 파일(옮긴 설정, desired.json 등)이 다 써진 뒤 API를 연다(Python 판처럼 시작 상태가 파일에 먼저)
@@ -180,6 +181,20 @@ int main(int argc, char** argv) {
     ac.api_workers = api_workers;
     ac.product = product;
     ac.config_write = config_write;
+    // 명령 길(docs/command-path.md): 연결 선언(설정 폴더의 connections.json) → run/peers.json
+    {
+        const pm::Json cf = settings.value("connections_file", pm::Json());
+        const size_t slash = settings_path.rfind('/');
+        const std::string conf_dir = slash == std::string::npos ? std::string(".") : settings_path.substr(0, slash);
+        ac.connections_path = cf.is_string() ? cf.get<std::string>() : conf_dir + "/connections.json";
+    }
+    ac.peers_path = sc.peers_file;
+    ac.command_guard = settings.value("command_guard", std::string("warn"));
+    if (ac.command_guard != "off" && ac.command_guard != "warn" && ac.command_guard != "enforce") {
+        PM_WARN("command_guard %s unknown (off|warn|enforce); using warn", ac.command_guard.c_str());
+        ac.command_guard = "warn";
+    }
+    ac.boot_id = sc.boot_id.empty() ? pm::Json(nullptr) : pm::Json(sc.boot_id);
     int rc = 0;
     {
         pm::App app(ac, sup, store, pub, res, watch);

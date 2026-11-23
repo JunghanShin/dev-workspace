@@ -195,6 +195,12 @@ class FakeManager(UnixServer):
             return {"ok": False, "error": {"code": "not_found", "message": "unknown worker %s" % wid}}
         if op == "get_config":
             return {"ok": True, "data": {"config": WORKERS[wid] or {}, "preset": "default"}}
+        if op == "get_io" and wid == "w2":  # 명령 종류(docs/command-path.md 3장)
+            return {"ok": True, "data": {"id": "w2", "common": {"commands": {"get_status": {}}},
+                                         "self": {"commands": {"diag.dump": {}}}, "includes": {},
+                                         "provides": {"example": {"commands": {"source.set_rate": {},
+                                                                               "source.get": {"read": True}}}},
+                                         "uses": {}}}
         return {"ok": True, "data": {"echo": req}}
 
 
@@ -313,7 +319,7 @@ class FakeStreamWorker:
 class Server:
     """게이트웨이 프로세스(REST_BIN)"""
 
-    def __init__(self, env=None, args=None, name="rest", unix_only=None):
+    def __init__(self, env=None, args=None, name="rest", unix_only=None, dev=True):
         self.unix_only = unix_only  # TCP 없이 Unix 소켓만 여는 서버면 그 경로(뜬 것을 소켓 파일로 봄)
         self.port = int((env or {}).get("WORKSPACE_REST_PORT") or free_port())
         e = dict(os.environ)
@@ -334,6 +340,17 @@ class Server:
         if not wait_for(self._up, START_TIMEOUT, 0.05):
             self.stop()
             raise RuntimeError("server did not start: %s" % open(self.log_path, errors="replace").read()[-2000:])
+        # 대부분의 시험은 쓰기(시작·설정·워커 명령)를 보므로 개발 모드로 시작한다(docs/command-path.md 3장).
+        # 운용 모드 동작을 보는 시험은 dev=False
+        if dev and not unix_only:
+            hdrs = {}
+            tok = AUTH_USERS_TOKEN.get(e.get("WORKSPACE_DATA"))
+            if tok and (e.get("WORKSPACE_AUTH") == "on" or e.get("WORKSPACE_PRODUCT") == "1"):
+                hdrs["Authorization"] = "Bearer " + tok
+            try:
+                self.request("PUT", "/api/mode", {"mode": "development"}, hdrs)
+            except OSError:
+                pass
 
     def _up(self):
         if self.proc.poll() is not None:
@@ -926,10 +943,10 @@ class Commands(unittest.TestCase):
     def test_ok_default_and_custom_socket(self):
         st, obj, _ = self.srv.json("POST", "/workers/w1/command", {"cmd": "source.set_rate", "args": {"hz": 20}})
         self.assertEqual((st, obj), (200, {"worker": "w1", "cmd": "source.set_rate", "args": {"hz": 20}}))
-        self.assertEqual(T["w1"].requests[-1], {"cmd": "source.set_rate", "args": {"hz": 20}})
+        self.assertEqual(T["w1"].requests[-1], {"cmd": "source.set_rate", "args": {"hz": 20}, "from": "screen"})
         st, obj, _ = self.srv.json("POST", "/api/board/workers/w2/command/", {"cmd": "x"})
         self.assertEqual((st, obj), (200, {"worker": "w2", "cmd": "x", "args": {}}))
-        self.assertEqual(T["w2"].requests[-1], {"cmd": "x", "args": {}})
+        self.assertEqual(T["w2"].requests[-1], {"cmd": "x", "args": {}, "from": "screen"})
         st, obj, _ = self.srv.json("POST", "/workers/w1/command", {"cmd": "nodata", "args": None})
         self.assertEqual((st, obj), (200, None))
 
@@ -1689,7 +1706,7 @@ class AuthOn(unittest.TestCase):
         """WORKSPACE_AUTH=off(기본): 지금처럼 누구나, me는 auth off·maintainer, 로그인은 400"""
         srv = T["srv"]
         st, obj, _ = srv.json("GET", "/api/auth/me")
-        self.assertEqual((st, obj), (200, {"auth": "off", "name": None, "role": "maintainer", "mode": "operation"}))
+        self.assertEqual((st, obj), (200, {"auth": "off", "name": None, "role": "maintainer", "mode": "development"}))
         self.assertEqual(srv.json("GET", "/workers")[0], 200)
         self.assertEqual(srv.json("POST", "/workers/w1/start")[0], 202)
         st, obj, _ = srv.json("POST", "/api/auth/login", {"name": "m1", "password": "x"})
@@ -1720,13 +1737,13 @@ class AuthOn(unittest.TestCase):
             st, obj, _ = self.srv.json("POST", "/api/auth/login", body)
             self.assertEqual(st, 400, body)
         st, obj, hdrs = s.login("m1", PASSWORDS["m1"])
-        self.assertEqual((st, obj), (200, {"auth": "on", "name": "m1", "role": "maintainer", "mode": "operation"}))
+        self.assertEqual((st, obj), (200, {"auth": "on", "name": "m1", "role": "maintainer", "mode": "development"}))
         cookie = hdrs["set-cookie"]
         for part in ("HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=604800"):
             self.assertIn(part, cookie)
         self.assertEqual(len(s.cookie), 64)
         st, obj, _ = s.json("GET", "/api/auth/me")
-        self.assertEqual((st, obj), (200, {"auth": "on", "name": "m1", "role": "maintainer", "mode": "operation", "via": "session"}))
+        self.assertEqual((st, obj), (200, {"auth": "on", "name": "m1", "role": "maintainer", "mode": "development", "via": "session"}))
         self.assertEqual(s.json("GET", "/workers")[0], 200)
         self.assertEqual(s.json("GET", "/api/board/workers/w1")[0], 200)
         st, hdrs, _ = self.srv.request("POST", "/api/auth/logout", headers=s.headers())
@@ -1889,35 +1906,35 @@ class AuthLimits(unittest.TestCase):
             srv.stop()
 
 
-@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(운용/정비 모드)")
+@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(운용/개발 모드)")
 class AccessMode(unittest.TestCase):
     def test_mode(self):
         data = auth_data_dir()
-        srv = Server(auth_env(data), name="mode")
+        srv = Server(auth_env(data), name="mode", dev=False)
         try:
             m, o = Session(srv), Session(srv)
             m.login("m1", PASSWORDS["m1"])
             o.login("o1", PASSWORDS["o1"])
             st, obj, _ = o.json("GET", "/api/mode")
             self.assertEqual((st, obj), (200, {"mode": "operation", "since": None, "by": None}))
-            st, obj, _ = o.json("PUT", "/api/mode", {"mode": "maintenance"})
+            st, obj, _ = o.json("PUT", "/api/mode", {"mode": "development"})
             self.assertEqual((st, obj["error"]["code"]), (403, "forbidden"))
-            for bad in ({"mode": "maint"}, {"mode": None}, {}, ["maintenance"]):
+            for bad in ({"mode": "maint"}, {"mode": None}, {}, ["development"]):
                 self.assertEqual(m.json("PUT", "/api/mode", bad)[0], 400, bad)
             n = len(T["mgr"].requests)
-            st, obj, _ = m.json("PUT", "/api/board/mode", {"mode": "maintenance"})
+            st, obj, _ = m.json("PUT", "/api/board/mode", {"mode": "development"})
             self.assertEqual(st, 200)
-            self.assertEqual((obj["mode"], obj["by"], obj["manager"]), ("maintenance", "m1", "ok"))
+            self.assertEqual((obj["mode"], obj["by"], obj["manager"]), ("development", "m1", "ok"))
             self.assertRegex(obj["since"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d\d:\d\d$")
-            self.assertIn({"op": "set_access_mode", "mode": "maintenance"}, T["mgr"].requests[n:])  # process-manager에 알림
+            self.assertIn({"op": "set_access_mode", "mode": "development"}, T["mgr"].requests[n:])  # process-manager에 알림
             st, obj, _ = o.json("GET", "/api/mode")
-            self.assertEqual((obj["mode"], obj["by"]), ("maintenance", "m1"))
-            self.assertEqual(o.json("GET", "/api/auth/me")[1]["mode"], "maintenance")
+            self.assertEqual((obj["mode"], obj["by"]), ("development", "m1"))
+            self.assertEqual(o.json("GET", "/api/auth/me")[1]["mode"], "development")
             self.assertEqual(m.json("DELETE", "/api/mode")[0], 405)
         finally:
             srv.stop()
         # 저장하지 않음: 다시 시작하면 운용
-        srv = Server(auth_env(data), name="mode2")
+        srv = Server(auth_env(data), name="mode2", dev=False)
         try:
             s = Session(srv)
             s.login("v1", PASSWORDS["v1"])
@@ -1925,7 +1942,7 @@ class AccessMode(unittest.TestCase):
         finally:
             srv.stop()
         cmds = [l["cmd"] for l in log_lines(data)]
-        self.assertIn("mode:maintenance", cmds)
+        self.assertIn("mode:development", cmds)
 
     def test_manager_down(self):
         """process-manager가 없어도 모드는 바뀜(manager: unreachable), 다시 붙으면 gw.mgr가 맞춤"""
@@ -1933,16 +1950,71 @@ class AccessMode(unittest.TestCase):
         path = os.path.join(data, "sub-manager.sock")
         srv = Server({"WORKSPACE_DATA": data, "WORKSPACE_MANAGER_SOCKET": path}, name="modemgr")
         try:
-            st, obj, _ = srv.json("PUT", "/api/mode", {"mode": "maintenance"})  # 인증 꺼짐: 누구나
-            self.assertEqual((st, obj["mode"]), (200, "maintenance"))
+            st, obj, _ = srv.json("PUT", "/api/mode", {"mode": "development"})  # 인증 꺼짐: 누구나
+            self.assertEqual((st, obj["mode"]), (200, "development"))
             self.assertTrue(obj["manager"].startswith("unreachable"))
             fake = SubManager(path)  # 이제 뜬 Manager는 운용 모드(다시 시작한 process-manager처럼)
             try:
                 self.assertTrue(wait_for(lambda: fake.count("set_access_mode") >= 1, 8))
                 with fake.lock:
-                    self.assertEqual([r for r in fake.ops if r.get("op") == "set_access_mode"][0]["mode"], "maintenance")
+                    self.assertEqual([r for r in fake.ops if r.get("op") == "set_access_mode"][0]["mode"], "development")
             finally:
                 fake.close()
+        finally:
+            srv.stop()
+
+
+@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(명령 길)")
+class CommandPathModes(unittest.TestCase):
+    """운용/개발 모드 × 명령 종류, 보낸 곳 from(docs/command-path.md 2·3·5장 ①)"""
+
+    def test_operation_vs_development(self):
+        srv = Server(name="modes", dev=False)  # 신분 확인 꺼짐: 모두 화면
+        need = (403, {"error": {"code": "forbidden", "message": "development mode required"}, "need": "development"})
+        try:
+            cmd = lambda c, wid="w2": srv.json("POST", "/workers/%s/command" % wid, {"cmd": c, "args": {}})[:2]
+            # 운용 모드: 읽기·역할 명령만
+            self.assertEqual(cmd("source.set_rate")[0], 200)
+            self.assertEqual(T["w2"].requests[-1]["from"], "screen")
+            self.assertEqual(cmd("source.get")[0], 200)
+            self.assertEqual(cmd("get_status")[0], 200)
+            self.assertEqual(cmd("diag.dump"), need)       # 워커 전용
+            self.assertEqual(cmd("no.such.cmd"), need)     # 계약에 없음
+            self.assertEqual(cmd("source.set_rate", "w1"), need)  # 계약 없는 워커(가짜 Manager가 계약을 안 줌)
+            self.assertEqual(cmd("get_status", "w1")[0], 200)
+            for method, path, body in (("POST", "/workers/w1/start", None), ("POST", "/workers/w1/stop", None),
+                                       ("PUT", "/workers/w1/config", {"k": 1}), ("PUT", "/workers/w1/autostart", True),
+                                       ("POST", "/workers/w1/presets", {"name": "a"}), ("PUT", "/connections", {})):
+                with self.subTest(method=method, path=path):
+                    self.assertEqual(srv.json(method, path, body)[:2], need)
+            self.assertEqual(srv.json("GET", "/connections")[0], 200)
+            self.assertEqual(srv.json("GET", "/api/board/workers/w1/config")[0], 200)  # 읽기는 그대로
+            # 없는 경로·메서드는 모드보다 먼저 404/405
+            self.assertEqual(srv.json("POST", "/workers/w1/nothing")[0], 404)
+            self.assertEqual(srv.json("DELETE", "/workers/w1")[0], 405)
+            # 개발 모드: 전부
+            self.assertEqual(srv.json("PUT", "/api/mode", {"mode": "development"})[0], 200)
+            self.assertEqual(cmd("diag.dump")[0], 200)
+            self.assertEqual(srv.json("POST", "/workers/w1/start")[0], 202)
+            n = len(T["mgr"].requests)
+            st, obj, _ = srv.json("PUT", "/api/board/connections", {"commanders": {"w2": ["w1"]}})
+            self.assertEqual(st, 200)
+            self.assertIn({"op": "set_connections", "connections": {"commanders": {"w2": ["w1"]}}}, T["mgr"].requests[n:])
+        finally:
+            srv.stop()
+
+    def test_remote_token_from(self):
+        data = auth_data_dir()
+        srv = Server(auth_env(data), name="remote", dev=False)
+        try:
+            m = Session(srv, token=AUTH_USERS_TOKEN[data])  # m1의 토큰 "ci"
+            self.assertEqual(m.json("POST", "/workers/w2/command", {"cmd": "source.set_rate", "args": {}})[0], 200)
+            self.assertEqual(T["w2"].requests[-1]["from"], "remote:ci")
+            s = Session(srv)
+            s.login("o1", PASSWORDS["o1"])
+            self.assertEqual(s.json("POST", "/workers/w2/command", {"cmd": "source.set_rate", "args": {"from": "x"}})[0], 200)
+            self.assertEqual(T["w2"].requests[-1]["from"], "screen")
+            self.assertEqual(s.json("POST", "/workers/w2/command", {"cmd": "diag.dump"})[0], 403)  # 운용 모드
         finally:
             srv.stop()
 
@@ -1952,7 +2024,7 @@ class CommandLog(unittest.TestCase):
     def test_log_lines(self):
         data = auth_data_dir()
         tok = AUTH_USERS_TOKEN[data]
-        srv = Server(auth_env(data), name="cmdlog")
+        srv = Server(auth_env(data), name="cmdlog", dev=False)
         try:
             Session(srv).login("m1", "secret-wrong-pass")       # 틀린 비밀번호(있는 이름)
             Session(srv).login("ghost-name", "another-secret")   # 없는 이름: 이름도 남기지 않음
@@ -1961,8 +2033,8 @@ class CommandLog(unittest.TestCase):
             self.assertEqual(o.json("POST", "/workers/w2/command", {"cmd": "source.set_rate", "args": {"password": "argsecret"}})[0], 200)
             self.assertEqual(o.json("POST", "/workers/w1/start")[0], 403)
             m = Session(srv, token=tok)
-            self.assertEqual(m.json("PUT", "/workers/w1/config?token=" + tok, {"key": "v"})[0], 202)
-            self.assertEqual(m.json("PUT", "/api/mode", {"mode": "maintenance"})[0], 200)
+            self.assertEqual(m.json("PUT", "/workers/w1/config?token=" + tok, {"key": "v"})[0], 403)  # 운용 모드
+            self.assertEqual(m.json("PUT", "/api/mode", {"mode": "development"})[0], 200)
             self.assertEqual(m.json("POST", "/workers/w1/stop")[0], 202)
             self.assertEqual(srv.json("POST", "/workers/w1/start")[0], 401)
             for _ in range(3):
@@ -1970,12 +2042,12 @@ class CommandLog(unittest.TestCase):
             self.assertEqual(srv.request("POST", "/api/auth/logout", headers=o.headers())[0], 200)
             st, obj, _ = srv.json("GET", "/health?detail=1")
             g = obj["gateway"]
-            self.assertEqual((g["auth"], g["mode"]["mode"], g["log"]["dropped"]), ("on", "maintenance", 0))
+            self.assertEqual((g["auth"], g["mode"]["mode"], g["log"]["dropped"]), ("on", "development", 0))
             self.assertTrue(wait_for(lambda: srv.json("GET", "/health?detail=1")[1]["gateway"]["log"]["written"] >= 10, 5))
         finally:
             srv.stop()
         lines = log_lines(data)
-        keys = {"t", "user", "role", "mode", "remote", "method", "path", "cmd", "code", "ms"}
+        keys = {"t", "user", "role", "mode", "remote", "method", "path", "cmd", "from", "code", "ms"}
         for l in lines:
             self.assertEqual(set(l), keys, l)
         got = [(l["user"], l["role"], l["mode"], l["method"], l["path"], l["cmd"], l["code"]) for l in lines]
@@ -1985,13 +2057,15 @@ class CommandLog(unittest.TestCase):
             ("o1", "operator", "operation", "POST", "/api/auth/login", "login", 200),
             ("o1", "operator", "operation", "POST", "/workers/w2/command", "source.set_rate", 200),
             ("o1", "operator", "operation", "POST", "/workers/w1/start", None, 403),
-            ("m1", "maintainer", "operation", "PUT", "/workers/w1/config", "set_config", 202),
-            ("m1", "maintainer", "operation", "PUT", "/api/mode", "mode:maintenance", 200),
-            ("m1", "maintainer", "maintenance", "POST", "/workers/w1/stop", "stop", 202),
-            ("-", "-", "maintenance", "POST", "/workers/w1/start", None, 401),
-            ("o1", "operator", "maintenance", "POST", "/api/auth/logout", "logout", 200),
+            ("m1", "maintainer", "operation", "PUT", "/workers/w1/config", "set_config", 403),
+            ("m1", "maintainer", "operation", "PUT", "/api/mode", "mode:development", 200),
+            ("m1", "maintainer", "development", "POST", "/workers/w1/stop", "stop", 202),
+            ("-", "-", "development", "POST", "/workers/w1/start", None, 401),
+            ("o1", "operator", "development", "POST", "/api/auth/logout", "logout", 200),
         ])
         self.assertEqual({l["remote"] for l in lines}, {"127.0.0.1"})
+        self.assertEqual([l["from"] for l in lines if l["cmd"] == "source.set_rate"], ["screen"])  # 세션 = 화면
+        self.assertEqual({l["from"] for l in lines if l["cmd"] != "source.set_rate"}, {None})
         text = log_text(data)
         for secret in list(PASSWORDS.values()) + [tok, "secret-wrong-pass", "another-secret", "ghost-name", "argsecret", "token="]:
             self.assertNotIn(secret, text)

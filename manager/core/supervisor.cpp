@@ -900,6 +900,19 @@ std::vector<int> Supervisor::running_pids() const {
     return out;
 }
 
+std::map<std::string, int> Supervisor::pids_by_id() const {
+    std::map<std::string, int> out;
+    for (const auto& w : workers_)
+        if (w->has_proc()) out[w->id] = w->pid;
+    return out;
+}
+
+std::vector<std::string> Supervisor::ids() const {
+    std::vector<std::string> out;
+    for (const auto& w : workers_) out.push_back(w->id);
+    return out;
+}
+
 void Supervisor::apply_resources(const std::map<int, Json>& by_pgid) {
     for (auto& w : workers_) {
         if (!w->has_proc()) continue;
@@ -1005,12 +1018,14 @@ void Supervisor::do_spawn(Worker& w, const Json& t) {
     const std::string mgr_sock = "WORKSPACE_MANAGER_SOCKET=";
     for (const auto& e : cfg_.base_env) {
         if (e.rfind("WORKSPACE_WORKER_ID=", 0) == 0 || e.rfind("WORKSPACE_NOTIFY_SOCKET=", 0) == 0 ||
-            e.rfind(mgr_sock, 0) == 0)
+            e.rfind(mgr_sock, 0) == 0 || e.rfind("WORKSPACE_PEERS_FILE=", 0) == 0)
             continue;
         spec.env.push_back(e);
     }
     spec.env.push_back("WORKSPACE_WORKER_ID=" + w.id);
     spec.env.push_back("WORKSPACE_NOTIFY_SOCKET=" + cfg_.notify_path);
+    // 명령하는 곳 허용 목록(docs/command-path.md 4.2). 설정 파일이 아니라 환경 변수로: 예전 libworker는 모르는 값을 무시
+    if (!cfg_.peers_file.empty()) spec.env.push_back("WORKSPACE_PEERS_FILE=" + cfg_.peers_file);
     // Manager API를 쓰는 워커에게만 전용 Manager 소켓을 알려 준다(design.md 6.5)
     if (cfg_.manager_api_workers.count(w.id))
         spec.env.push_back(mgr_sock + cfg_.paths.run_dir + "/manager-" + w.id + ".sock");

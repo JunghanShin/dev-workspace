@@ -130,7 +130,10 @@ private:
         std::string cmd, user;
         Role role = Role::None;
         bool user_set = false;
+        std::string from;  // 워커 명령의 보낸 곳: screen 또는 remote:<토큰 이름>(docs/command-path.md 2장)
     };
+    // 워커 명령 종류(계약에서, 10 s 동안 기억). 계약을 못 읽으면 get_status만 읽기
+    CommandKinds kinds_of(const std::string& id);
     bool start_tcp(std::string& err);
     bool start_unix(std::string& err);
     Reply dispatch(const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
@@ -163,6 +166,8 @@ private:
     FileRecorder* file_rec_ = nullptr;    // recorder_가 FileRecorder면 그것(지표)
     ManagerCache cache_;
     std::mutex mode_mu_;  // mode_ (I/O 없음)
+    std::mutex kinds_mu_;  // kinds_ (I/O 없음: Manager 호출은 잠금 밖)
+    std::map<std::string, std::pair<double, CommandKinds>> kinds_;
     Mode mode_;
     double last_mode_push_ = -1e9;  // gw.mgr만
 

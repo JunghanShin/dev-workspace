@@ -112,8 +112,8 @@ class ApiServer:
         if client != "rest":
             return self._error("forbidden", "set_access_mode is allowed only from manager-rest.sock")
         mode = req.get("mode")
-        if mode not in ("operation", "maintenance") or not isinstance(mode, str):
-            return self._error("bad_request", "mode must be 'operation' or 'maintenance'")
+        if mode not in ("operation", "development") or not isinstance(mode, str):
+            return self._error("bad_request", "mode must be 'operation' or 'development'")
         if mode != self.access_mode:
             log.info("access mode %s -> %s", self.access_mode, mode)
             self.access_mode = mode

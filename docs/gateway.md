@@ -16,7 +16,7 @@
 | 화면 파일 내주기(ui/web, 워커 패널) | nginx | 지금은 REST가 함 |
 | HTTPS, 요청 크기·접속 수·속도 제한, 압축 | nginx | 새로 |
 | 신분 확인(로그인 세션 · API 토큰)과 역할 | 게이트웨이 | 새로 |
-| 운용/정비 모드(원칙 17): 토글, 재시작하면 운용, process-manager에 알림 | 게이트웨이 | 새로 |
+| 운용/개발 모드(원칙 17): 토글, 재시작하면 운용, process-manager에 알림. 운용 모드에서 막는 명령 종류는 `docs/command-path.md` 3장 | 게이트웨이 | 새로 |
 | 전달: Manager API(워커 관리), 워커 명령, 스트림 중계(SSE), 보드 읽기(로그·기록·프로세스), 계약(`/io`) | 게이트웨이 | 지금과 같음 |
 | 명령 기록: 누가·언제·무엇을·결과(쓰기 요청 전부) | 게이트웨이(`gw.log`) | 새로 |
 | 화면 상태 요청을 캐시로 답하기: Manager 구독 하나를 유지하며 최신 워커 목록·시스템 상태를 들고 있음 | 게이트웨이 | 새로(Manager 부담 줄임) |
@@ -53,7 +53,7 @@
 | `gw.mgr` | Manager 구독 하나: 워커 목록·시스템 상태 캐시, Manager의 `access_mode`가 다르면 다시 알림 | 연결 1 s, 읽기 0.5 s씩, 5 s 조용하면 끊고 1 s 뒤 다시(그동안·3 s 넘게 안 바뀐 캐시면 `GET /workers`는 Manager에 직접) | — |
 | `gw.log` | 명령 기록 쓰기 | 끝낼 때 남은 줄 2 s | 1024, 넘치면 버리고 셈(`/health?detail=1`) |
 
-**공유 상태가 작다:** 세션(만료 시각), 운용/정비 모드, 캐시. 잠금 하나로 지키고 잠금 안에서 I/O를 하지 않는다. 요청 처리는 그 밖에서 상태 없이.
+**공유 상태가 작다:** 세션(만료 시각), 운용/개발 모드, 캐시, 워커 계약의 명령 종류 표. 잠금 하나로 지키고 잠금 안에서 I/O를 하지 않는다. 요청 처리는 그 밖에서 상태 없이.
 
 **코드:** `gateway/`(C++, CMake). `core/`(경로 표·권한 규칙·세션·기록 줄 만들기, 시스템 호출 모름, 단위 시험), `src/`(HTTP: cpp-httplib 사본, Unix 소켓 클라이언트, SSE, 보드 읽기), `lib/`(libworker 일부·nlohmann·cpp-httplib 사본), `nginx/`(설정 틀).
 
@@ -71,7 +71,7 @@
 | `POST /api/auth/logout` | 세션을 지우고 쿠키를 비움(`200 {}`) |
 | `GET /api/auth/me` | `{auth: "on", name, role, mode, via: "session"\|"token"}`, 로그인 전 `401 {error, auth: "on"}`. 인증 꺼짐이면 `{auth: "off", name: null, role: "maintainer", mode}` |
 | `Authorization: Bearer <토큰>` | 프로그램(외부 운용·원격 화면)용. GET이면 `?token=`도(EventSource). 틀린 토큰이면 쿠키가 맞아도 익명 |
-| `GET /api/mode` · `PUT /api/mode {"mode": "operation"\|"maintenance"}` | `{mode, since, by}`(+ PUT 답에 `manager`: 알림 결과). 바꾸기는 `maintainer`만. 저장하지 않음(시작하면 운용). 바꾸면 기록하고 process-manager에 `set_access_mode` op(design.md 6.2). 알림이 실패하거나 process-manager만 다시 시작되면 `gw.mgr`가 Manager의 `access_mode`를 보고 다시 알린다(모드 주인은 게이트웨이) |
+| `GET /api/mode` · `PUT /api/mode {"mode": "operation"\|"development"}` | `{mode, since, by}`(+ PUT 답에 `manager`: 알림 결과). 바꾸기는 `maintainer`만. 저장하지 않음(시작하면 운용). 바꾸면 기록하고 process-manager에 `set_access_mode` op(design.md 6.2). 알림이 실패하거나 process-manager만 다시 시작되면 `gw.mgr`가 Manager의 `access_mode`를 보고 다시 알린다(모드 주인은 게이트웨이) |
 | `GET /health?detail=1` | 기본 답에 `gateway`: 신분 확인·사용자·세션 수, 모드, 명령 기록(`written`·`dropped`·`errors`), 캐시(`fresh`·`age_s`·`direct_lists`) |
 
 | 역할 | 할 수 있는 것(신분 확인 켜짐일 때) |
@@ -82,6 +82,8 @@
 | `maintainer` | 위 + 나머지 쓰기 전부(시작·정지·설정·프리셋·자동 시작), 제품 빌드(GET 포함), 모드 바꾸기 |
 
 익명은 `401 {"error": {"code": "unauthorized", …}}`, 역할이 모자라면 `403 forbidden`. 규칙은 `core/access.cpp`(`classify`·`allows`).
+
+**모드 검사(0.55, `docs/command-path.md` 3·5장):** 역할 검사 다음에 본다. 운용 모드면 워커 명령 중 읽기·역할 명령(그 워커가 내보내는 `io/<역할>.json`)만 넘기고, 워커 전용·계약에 없는 명령과 GET이 아닌 나머지(시작·정지·설정·프리셋·자동 시작·연결 선언·제품 빌드)는 `403 {"error": {"code": "forbidden", "message": "development mode required"}, "need": "development"}`. 로그인·로그아웃·모드 바꾸기는 모드와 상관없음. 명령 종류는 워커 계약 파일(`GET /workers/{id}/io`와 같은 것)에서 만들고 파일이 바뀌면 다시 만든다. 넘기는 명령에 `from`(`screen`, 토큰이면 `remote:<토큰 이름>`)을 붙이고 명령 기록 줄에도 `from`.
 
 - **사용자 파일:** `<데이터>/config/users.json` `{"users": [{"name", "role", "password_hash", "tokens": [{"name", "hash"}]}]}`, 권한 0600. 비밀번호는 PBKDF2-HMAC-SHA256 `pbkdf2-sha256$<반복>$<소금 base64>$<해시 base64>`(반복 200000, 소금 16바이트, 해시 32바이트, 같은 시간 비교). 토큰은 무작위 32바이트(16진 64자)를 만들 때 한 번만 보여 주고 파일에는 sha256 16진만. 원문은 어디에도 저장하지 않음. 1 s마다 바뀌었는지 보고 다시 읽는다(재시작 없이 반영, 깨진 파일이면 마지막 값). 비밀번호를 바꾸거나 사용자를 지우면 그 사람의 세션이 끝난다. 프로필로 처음 넣거나 아래 명령으로, config-manager가 생기면 그쪽이 관리
 - **설정 명령**(보드에서, 비밀번호는 명령 줄로 받지 않음: 터미널이면 안 보이게, 아니면 표준 입력 두 줄): `WORKSPACE_DATA=<데이터> gateway user add <이름> <역할>` · `user passwd <이름>` · `user del <이름>` · `user list` · `token add <사용자> <토큰 이름>`(토큰을 한 번 출력) · `token del <사용자> <토큰 이름>`. 쓰기는 임시 파일 → fsync → rename. `WORKSPACE_AUTH_ITERATIONS`는 시험용(반복 수를 줄임)

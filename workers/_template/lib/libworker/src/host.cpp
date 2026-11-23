@@ -236,7 +236,9 @@ bool Host::reload_file(const std::string& path, std::string* error) {
     return true;
 }
 
-void Host::dispatch(const std::string& line, Reply reply) {
+void Host::set_peers_file(const std::string& path) { cmd_guard_ = std::make_unique<CommandGuard>(id_, path); }
+
+void Host::dispatch(const std::string& line, Reply reply, int peer_pid) {
     Json req;
     try {
         req = Json::parse(line);
@@ -246,6 +248,36 @@ void Host::dispatch(const std::string& line, Reply reply) {
         return reply(error_reply("bad_request", "request must be {\"cmd\": \"...\", \"args\": {...}}"));
     std::string cmd = req["cmd"].get<std::string>();
     const Json args = req.contains("args") && req["args"].is_object() ? req["args"] : Json::object();
+    if (const auto a = aliases_.find(cmd); a != aliases_.end()) cmd = a->second;
+    // 명령하는 곳 검사(워크스페이스 docs/command-path.md 5장 ②): 허용 목록 밖이면 warn은 기록만, enforce는 거절
+    const std::string claimed = req.contains("from") && req["from"].is_string() ? req["from"].get<std::string>() : "";
+    CommandGuard::Decision g;
+    if (cmd_guard_) g = cmd_guard_->check(peer_pid, cmd, claimed);
+    else {
+        g.read = cmd == "get_status";
+        g.from = claimed;
+    }
+    if (g.violation) {
+        const std::string key = g.from + std::string("\x1f") + cmd;
+        const auto now = Clock::now();
+        const auto it = guard_logged_.find(key);
+        if (it == guard_logged_.end() || now - it->second > std::chrono::seconds(60)) {
+            guard_logged_[key] = now;
+            if (guard_logged_.size() > 256) guard_logged_.clear();
+            std::fprintf(stderr, "%s: command guard (%s): %s from %s: %s\n", program_.c_str(), g.run ? "warn" : "denied",
+                         cmd.c_str(), g.from.c_str(), g.reason.c_str());
+        }
+        if (!g.run) return reply(error_reply("forbidden", "not allowed: " + g.reason));
+    }
+    if (!g.read) {  // 마지막 명령(get_status 공통 칸 last_command): 응답이 오면 ok를 채운다
+        const auto t = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
+        last_command_ = {{"cmd", cmd}, {"from", g.from.empty() ? Json(nullptr) : Json(g.from)}, {"t_mono_ns", t}, {"ok", nullptr}};
+        reply = [this, t, inner = std::move(reply)](const Json& resp) {
+            if (last_command_.is_object() && last_command_.value("t_mono_ns", int64_t(0)) == t)
+                last_command_["ok"] = resp.is_object() && resp.value("ok", false);
+            inner(resp);
+        };
+    }
     if (cmd == "get_status") return reply(ok_reply(status()));
     if (cmd == "__fault") {
         if (!fault_enabled_) return reply(error_reply("bad_request", "unknown command: __fault"));
@@ -253,7 +285,6 @@ void Host::dispatch(const std::string& line, Reply reply) {
         if (!fault(args, &err)) return reply(error_reply("bad_request", err));
         return reply(ok_reply({{"injected", args}}));
     }
-    if (const auto a = aliases_.find(cmd); a != aliases_.end()) cmd = a->second;
     // "<모듈>.<명령>". 모듈이 하나뿐이면 앞부분 없이 써도 된다
     std::string mod, sub = cmd;
     if (const auto dot = cmd.find('.'); dot != std::string::npos) {
@@ -309,6 +340,7 @@ Json Host::status() const {
         }
     }
     if (watch_) out["threads"] = watch_->ages_ms(Clock::now());
+    out["last_command"] = last_command_.is_object() ? last_command_ : Json(nullptr);
     out["runtime"] = runtime_status();
     return out;
 }
@@ -518,8 +550,10 @@ int Host::run(int argc, char** argv) {
             std::fprintf(stderr, "%s: warning: config.stages.%s: no such stage\n", program_.c_str(), name.c_str());
     }
 
+    // 명령하는 곳 허용 목록(process-manager가 띄울 때 WORKSPACE_PEERS_FILE). 없으면 단독 실행: 보지 않음
+    if (const char* pf = std::getenv("WORKSPACE_PEERS_FILE"); pf && *pf) set_peers_file(pf);
     CommandServer server([&](int conn, const std::string& line) {
-        dispatch(line, [&server, conn](const Json& resp) { server.reply(conn, resp.dump()); });
+        dispatch(line, [&server, conn](const Json& resp) { server.reply(conn, resp.dump()); }, server.peer_pid(conn));
     });
     if (!server.open(command_socket_, &error)) {
         std::fprintf(stderr, "%s: %s\n", program_.c_str(), error.c_str());

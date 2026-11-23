@@ -31,6 +31,8 @@
 //                                  opts.before/after: 패널 전용 묶음(section). .show() .update(worker) .dispose()
 //   settingsButton(dlg, title)     설정 창을 여는 아이콘 버튼. 패널은 iconButton 대신 이것을 쓴다(제품 모드면 null)
 //   setProduct(on), isProduct()    제품 모드(셸이 /api/ui "product"로 정함): 설정 창·프리셋·워커 시작/정지·자동 시작을 그리지 않음
+//   setMode(mode), isDevMode()     운용/개발 모드(셸이 /api/auth/me "mode"로): 운용 모드면 시작/정지·자동 시작·설정 저장 버튼을 흐리게
+//   lastCommand(st)                get_status의 last_command → "명령 · 보낸 곳 · 결과" 글(없으면 "—")
 
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -356,7 +358,10 @@ export function toggleRow(label, hint, onChange) {
 export function autostartRow(ctx, id) {
   const row = toggleRow("보드를 켤 때 자동 시작", "보드 전원을 켜면 이 워커를 바로 시작합니다",
     (on) => ctx.act("자동 시작 변경", () => ctx.api("PUT", `/workers/${id}/autostart`, { autostart: on })));
-  row.update = (w) => { if (w && document.activeElement !== row.input) row.set(w.autostart); };
+  row.update = (w) => {
+    if (w && document.activeElement !== row.input) row.set(w.autostart);
+    if (row.input) row.input.disabled = !DEV;  // 운용 모드: 바꾸지 못함(개발 모드에서)
+  };
   return row;
 }
 
@@ -392,6 +397,23 @@ let PRODUCT = false;
 export function setProduct(on) { PRODUCT = !!on; }
 export function isProduct() { return PRODUCT; }
 
+// 운용/개발 모드(워크스페이스 docs/command-path.md 3장): 운용 모드에서는 시작/정지·설정 저장이 막힌다.
+// 셸이 /api/auth/me의 mode로 알려 준다. 모르면(예전 게이트웨이) 막지 않는다
+let DEV = true;
+export const DEV_ONLY_TITLE = "개발 모드에서만 됩니다(워크스페이스 설정에서 켜기)";
+export function setMode(mode) { DEV = mode !== "operation"; }
+export function isDevMode() { return DEV; }
+
+// 마지막 명령(get_status 공통 칸 last_command, docs/command-path.md 5장): 누가 무엇을 보냈나
+const FROM_KO = { screen: "화면" };
+export function lastCommand(st) {
+  const c = st && st.last_command;
+  if (!c) return "—";
+  const from = c.from ? (FROM_KO[c.from] || (c.from.startsWith("remote:") ? "원격 " + c.from.slice(7) : c.from)) : "알 수 없음";
+  const ok = c.ok === true ? "성공" : c.ok === false ? "실패" : "응답 대기";
+  return `${c.cmd} · ${from} · ${ok}`;
+}
+
 // 워커 설정 창을 여는 버튼(패널 머리·워커 표). 제품 모드면 null(panelHead·h가 null을 건너뜀)
 export function settingsButton(dlg, title = "설정") {
   if (PRODUCT) return null;
@@ -420,7 +442,10 @@ export function workerControls(ctx, id, { startLabel = "워커 시작", stopLabe
     run.title = running ? stopLabel : startLabel;
     run.className = "ib " + (running ? "danger" : "primary");
     run.onclick = () => ctx.act(running ? "정지" : "시작", () => ctx.api("POST", `/workers/${id}/${running ? "stop" : "start"}`));
+    run.disabled = !DEV;
+    if (!DEV) run.title = (running ? stopLabel : startLabel) + ": " + DEV_ONLY_TITLE;
     auto.setOn(!!w.autostart);
+    auto.disabled = !DEV;
     auto.title = w.autostart ? "보드를 켤 때 자동 시작: 켜짐" : "보드를 켤 때 자동 시작: 꺼짐";
     auto.onclick = () => ctx.act("자동 시작 변경", () => ctx.api("PUT", `/workers/${id}/autostart`, { autostart: !w.autostart }));
   };
@@ -919,6 +944,15 @@ export function workerSettings(ctx, id, { title = "설정", before = [], after =
       foot.style.display = "none";
     });
   };
-  d.update = (w) => { if (!w) return; st.worker = w; auto.update(w); };
+  d.update = (w) => {
+    if (!w) return;
+    st.worker = w;
+    auto.update(w);
+    // 운용 모드: 보기만(저장·적용·프리셋 바꾸기는 개발 모드에서)
+    for (const b of [saveBtn, applyBtn]) { b.disabled = !DEV; if (!DEV) b.title = DEV_ONLY_TITLE; }
+    presetSel.disabled = !DEV;
+    if (!DEV && !status.textContent) status.textContent = "운용 모드: 보기만(바꾸려면 개발 모드)";
+    if (DEV && status.textContent === "운용 모드: 보기만(바꾸려면 개발 모드)") status.textContent = "";
+  };
   return d;
 }

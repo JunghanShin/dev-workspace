@@ -17,7 +17,7 @@
 <!-- ② 게이트웨이 (플랫폼) -->
 <rect x="40" y="124" width="930" height="56" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
 <text x="505" y="146" text-anchor="middle" font-size="14" font-weight="500" fill="#3C3489">② 게이트웨이 (플랫폼)</text>
-<text x="505" y="166" text-anchor="middle" font-size="11.5" fill="#534AB7">IN 요청 · 매니저 상태 · 정의 파일   OUT 신분 확인 · 매니저로 전달 · 상태 중계 · 계약 제공 · 명령 기록 · 운용/정비 모드</text>
+<text x="505" y="166" text-anchor="middle" font-size="11.5" fill="#534AB7">IN 요청 · 매니저 상태 · 정의 파일   OUT 신분 확인 · 매니저로 전달 · 상태 중계 · 계약 제공 · 명령 기록 · 운용/개발 모드</text>
 
 <!-- ③ 매니저 층 (기능) -->
 <rect x="40" y="220" width="720" height="170" rx="14" fill="none" stroke="#0F6E56" stroke-width="1.2" stroke-dasharray="6 4"/>

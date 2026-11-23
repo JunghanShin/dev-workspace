@@ -58,6 +58,7 @@ struct SupervisorConfig {
     std::string workspace_root;            // get_io의 공통 정의 위치
     std::string boot_id;                   // 비어 있으면 null
     std::set<std::string> manager_api_workers;
+    std::string peers_file;                // 허용 목록(docs/command-path.md 4.2). 워커에 WORKSPACE_PEERS_FILE로
 };
 
 struct Worker {
@@ -138,6 +139,8 @@ public:
     void on_exit(int pid, int rc);                // rc < 0: 신호 번호의 음수
     void apply_resources(const std::map<int, Json>& by_pgid);
     std::vector<int> running_pids() const;
+    std::map<std::string, int> pids_by_id() const;  // 떠 있는 워커 id → pid(= 프로세스 그룹)
+    std::vector<std::string> ids() const;           // 등록된 워커 id(순서대로)
 
     // ---- 끝내기(desired_state는 그대로 두어 다시 시작하면 복원) ----
     double shutdown_begin();  // 모두 SIGTERM, 기다릴 최대 시간(초)

@@ -154,11 +154,13 @@ Identity AuthOn::identify(const RequestView& rq) {
     }
     Identity who;
     if (!tok.empty()) {
-        if (const User* u = db->by_token(tok)) {
+        std::string tname;
+        if (const User* u = db->by_token(tok, &tname)) {
             who.user = u->name;
             who.role = u->role;
             who.anonymous = false;
             who.via = "token";
+            who.token = tname;
         }
         return who;  // 틀린 토큰이면 쿠키를 보지 않고 익명(뒤섞이지 않게)
     }

@@ -27,6 +27,7 @@ struct Identity {
     Role role = Role::None;
     bool anonymous = true;
     std::string via;  // "session" | "token" | ""(익명·인증 꺼짐)
+    std::string token;  // 토큰으로 왔으면 그 토큰 이름(명령의 보낸 곳 remote:<이름>)
     std::string sid;  // 세션으로 왔으면 그 세션(로그아웃용)
 };
 

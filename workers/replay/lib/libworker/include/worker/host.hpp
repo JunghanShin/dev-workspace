@@ -42,6 +42,7 @@
 #include <vector>
 
 #include "worker/config.hpp"
+#include "worker/guard.hpp"
 #include "worker/stage.hpp"
 #include "worker/thread.hpp"
 
@@ -191,8 +192,11 @@ public:
     // 가짜 장치 모드(설정 맨 위 "sim", design.md 6.6.8). 장치 모듈은 이것으로 실기와 다르게 할 수 있다(보통은 설정만 다름)
     bool sim() const { return sim_; }
 
-    // 명령 한 줄 처리(명령 소켓이 부른다. 시험에서 직접 불러도 된다)
-    void dispatch(const std::string& line, Reply reply);
+    // 명령 한 줄 처리(명령 소켓이 부른다. 시험에서 직접 불러도 된다). peer_pid: 보낸 프로세스(명령하는 곳 검사,
+    // 워크스페이스 docs/command-path.md 5장 ②. 0이면 모름). 읽기가 아닌 명령은 status()의 last_command에 남는다
+    void dispatch(const std::string& line, Reply reply, int peer_pid = 0);
+    // 명령하는 곳 검사(시험·run이 씀). path가 비면 검사하지 않음(단독 실행)
+    void set_peers_file(const std::string& path);
     Json status() const;
     std::string metrics() const;
 
@@ -221,6 +225,10 @@ private:
     std::unique_ptr<ThreadWatch> watch_;
     std::string id_;
     long config_version_ = 0;
+    // 명령 길: 허용 목록 검사, 마지막 명령, 위반 기록(같은 곳·명령은 60 s에 한 번)
+    std::unique_ptr<CommandGuard> cmd_guard_;
+    Json last_command_;
+    std::map<std::string, TimePoint> guard_logged_;
     std::string command_socket_, stream_socket_;
     double watchdog_sec_ = 3, stop_timeout_sec_ = 5, thread_stall_sec_ = 2;
     // 가짜 장치 모드: "sim": {"cmd": "<프로그램> <인자>"} → 호스트가 자식으로 띄우고 죽으면 다시 띄움

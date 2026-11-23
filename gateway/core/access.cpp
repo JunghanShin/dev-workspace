@@ -259,6 +259,32 @@ Need classify(const std::string& method, const std::string& path, bool ui_enable
     return Need::Maintain;
 }
 
+bool is_worker_command(const std::string& path) { return is_command(path); }
+
+namespace {
+void collect(const Json& def, std::set<std::string>* all, std::set<std::string>& read) {
+    if (!def.is_object()) return;
+    auto it = def.find("commands");
+    if (it == def.end() || !it->is_object()) return;
+    for (auto c = it->begin(); c != it->end(); ++c) {
+        if (all) all->insert(c.key());
+        if (c->is_object() && c->value("read", false) == true) read.insert(c.key());
+    }
+}
+}  // namespace
+
+CommandKinds command_kinds(const Json& io) {
+    CommandKinds k;
+    if (!io.is_object()) return k;
+    for (const char* key : {"common", "self"})
+        if (io.contains(key)) collect(io[key], nullptr, k.read);
+    if (io.contains("includes") && io["includes"].is_object())
+        for (const auto& [path, def] : io["includes"].items()) collect(def, nullptr, k.read);
+    if (io.contains("provides") && io["provides"].is_object())
+        for (const auto& [role, def] : io["provides"].items()) collect(def, &k.role, k.read);
+    return k;
+}
+
 bool allows(Role role, Need need) {
     switch (need) {
         case Need::Open: return true;
@@ -364,6 +390,7 @@ std::string record_line(const RecordFields& f) {
     o["method"] = cut(f.method, 16);
     o["path"] = cut(f.path, 512);
     o["cmd"] = f.cmd.empty() ? Json(nullptr) : Json(cut(f.cmd, 128));
+    o["from"] = f.from.empty() ? Json(nullptr) : Json(cut(f.from, 80));  // 워커 명령의 보낸 곳(docs/command-path.md)
     o["code"] = f.code;
     o["ms"] = std::round(f.ms * 10) / 10;
     return compact(o) + "\n";

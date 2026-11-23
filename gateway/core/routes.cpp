@@ -91,6 +91,9 @@ const std::vector<ManagerRoute>& manager_routes() {
         {"PUT", {"workers", ":id", "autostart"}, "set_autostart", 202, "autostart", false},
         {"POST", {"workers", ":id", "start"}, "start", 202, "", false},
         {"POST", {"workers", ":id", "stop"}, "stop", 202, "", false},
+        // 연결 선언(design.md 6.6.7.4, docs/command-path.md 4.1): 본문은 connections.json 전체
+        {"GET", {"connections"}, "get_connections", 200, "", false},
+        {"PUT", {"connections"}, "set_connections", 200, "connections", false},
     };
     return t;
 }

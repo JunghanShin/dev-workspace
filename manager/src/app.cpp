@@ -23,9 +23,10 @@ namespace pm {
 namespace {
 
 const std::set<std::string> kWriteOps = {"set_config", "use_preset", "save_preset", "rename_preset",
-                                         "delete_preset", "set_autostart", "start", "stop"};
+                                         "delete_preset", "set_autostart", "start", "stop", "set_connections"};
 const std::set<std::string> kConfigOps = {"set_config", "use_preset", "save_preset", "rename_preset",
-                                          "delete_preset", "set_autostart"};
+                                          "delete_preset", "set_autostart", "set_connections"};
+constexpr double kCommandsRefreshS = 10.0;  // 워커 계약 다시 읽기 주기(계약 파일은 운용 중 거의 안 바뀜)
 
 Json jget(const Json& obj, const char* key) {
     if (!obj.is_object()) return nullptr;
@@ -155,7 +156,129 @@ bool App::open(std::string& err) {
         if (client) names += (names.empty() ? "" : ", ") + std::string("manager-") + *client + ".sock";
     }
     PM_INFO("api listening in %s: manager.sock (read-only), %s", cfg_.run_dir.c_str(), names.c_str());
+    // 명령 길: 시작 때 허용 목록을 한 번 만든다(게이트웨이가 붙으면 그 pid를 넣어 다시)
+    load_connections(true);
+    refresh_commands();
+    write_peers(true);
     return true;
+}
+
+// ---- 명령 길(docs/command-path.md 4장) ----------------------------------------------------------------
+
+void App::load_connections(bool force) {
+    if (cfg_.connections_path.empty()) return;
+    struct stat st{};
+    const long long mtime = ::stat(cfg_.connections_path.c_str(), &st) == 0
+                                ? static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL + st.st_mtim.tv_nsec
+                                : 0;
+    if (!force && mtime == connections_mtime_) return;
+    connections_mtime_ = mtime;
+    peers_dirty_ = true;
+    if (mtime == 0) {  // 파일 없음: 선언 없음(화면만)
+        connections_ = Json::object();
+        connections_error_.clear();
+        return;
+    }
+    std::string text, err;
+    PosixFs fs;
+    if (fs.read(cfg_.connections_path, text, err) != FileSystem::Read::Ok) {
+        connections_error_ = err;
+        PM_WARN("connections: cannot read %s: %s (keeping last)", cfg_.connections_path.c_str(), err.c_str());
+        return;
+    }
+    auto j = parse(text, &err);
+    std::string shape;
+    if (!j || !j->is_object()) shape = j ? "connections.json must be an object" : err;
+    else shape = commanders_shape_error(j->value("commanders", Json()));
+    if (!shape.empty()) {
+        connections_error_ = shape;
+        PM_WARN("connections: %s: %s (keeping last)", cfg_.connections_path.c_str(), shape.c_str());
+        return;
+    }
+    connections_ = *j;
+    connections_error_.clear();
+    PM_INFO("connections: loaded %s", cfg_.connections_path.c_str());
+}
+
+void App::refresh_commands() {
+    std::map<std::string, WorkerCommands> next;
+    for (const auto& id : sup_.ids()) {
+        try {
+            next[id] = commands_from_io(sup_.get_io(Json(id)));
+        } catch (...) {
+            next[id] = commands_from_io(Json());  // 계약 없음: 읽기(get_status)만, 역할 명령 없음
+        }
+    }
+    cmds_at_ = now();
+    if (next.size() != cmds_.size() ||
+        !std::equal(next.begin(), next.end(), cmds_.begin(), [](const auto& a, const auto& b) {
+            return a.first == b.first && a.second.read == b.second.read && a.second.roles == b.second.roles &&
+                   a.second.uses == b.second.uses;
+        })) {
+        cmds_ = std::move(next);
+        peers_dirty_ = true;
+    }
+}
+
+void App::write_peers(bool force) {
+    if (cfg_.peers_path.empty() || (!force && !peers_dirty_)) return;
+    peers_dirty_ = false;
+    std::vector<PeerProcess> procs;
+    if (gateway_pid_ > 0) procs.push_back({"gateway", gateway_pid_, 0, true});
+    for (const auto& [id, pid] : sup_.pids_by_id()) procs.push_back({id, 0, pid, false});
+    Json doc = build_peers(connections_.value("commanders", Json()), cmds_, procs, access_mode_, cfg_.command_guard,
+                           cfg_.boot_id);
+    const std::string text = dump_file(doc);
+    if (!force && text == peers_text_) return;
+    peers_text_ = text;
+    doc["written_at_ms"] = static_cast<long long>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    FileOp op;
+    op.path = cfg_.peers_path;
+    op.text = dump_file(doc);
+    store_.submit({op}, [this](bool good, const std::string& err) {
+        if (!good) {
+            PM_WARN("peers.json write failed: %s", err.c_str());
+            peers_text_.clear();  // 다음 번에 다시 쓰게
+            peers_dirty_ = true;
+        }
+    });
+}
+
+Json App::connections_view() {
+    Json out = Json::object();
+    out["path"] = cfg_.connections_path;
+    out["connections"] = connections_;
+    out["error"] = connections_error_.empty() ? Json(nullptr) : Json(connections_error_);
+    out["check"] = check_commanders(connections_.value("commanders", Json()), cmds_);
+    out["guard"] = cfg_.command_guard;
+    out["access_mode"] = access_mode_;
+    return out;
+}
+
+// set_connections: 검사하고 파일 쓰기 → 끝나면 표 다시 쓰고 답. 틀리면 바로 답할 오류
+std::optional<Json> App::plan_set_connections(int fd, const Json& req) {
+    const Json c = jget(req, "connections");
+    if (!c.is_object()) return error("bad_request", "connections must be an object (the whole connections.json)");
+    const std::string shape = commanders_shape_error(c.value("commanders", Json()));
+    if (!shape.empty()) return error("bad_request", shape);
+    if (cfg_.connections_path.empty()) return error("unavailable", "no connections file path");
+    write_busy_ = true;
+    FileOp op;
+    op.path = cfg_.connections_path;
+    op.text = dump_file(c);
+    op.sync_dir = true;
+    store_.submit({op}, [this, fd, c](bool good, const std::string& err) {
+        if (!good) {
+            finish_write(fd, error("internal", "connections write failed: " + err));
+            return;
+        }
+        load_connections(true);
+        refresh_commands();
+        write_peers(true);
+        finish_write(fd, ok(connections_view()));
+    });
+    return std::nullopt;
 }
 
 // ---- 상태·이벤트 --------------------------------------------------------------------------------
@@ -194,12 +317,14 @@ Json App::set_access_mode(const Json& req, const std::optional<std::string>& cli
     // 운용/정비 모드(원칙 17): 주인은 게이트웨이. 여기서는 받아 적기만 하고 저장하지 않는다(다시 시작하면 운용)
     if (!client || *client != "rest") return error("forbidden", "set_access_mode is allowed only from manager-rest.sock");
     const Json mode = jget(req, "mode");
-    if (!mode.is_string() || (mode != "operation" && mode != "maintenance"))
-        return error("bad_request", "mode must be 'operation' or 'maintenance'");
+    if (!mode.is_string() || (mode != "operation" && mode != "development"))
+        return error("bad_request", "mode must be 'operation' or 'development'");
     const std::string m = mode.get<std::string>();
     if (m != access_mode_) {
         PM_INFO("access mode %s -> %s", access_mode_.c_str(), m.c_str());
         access_mode_ = m;
+        peers_dirty_ = true;
+        write_peers();  // 허용 명령이 모드에 따라 바뀜(운용: 역할 명령만, 개발: 전부)
         if (!subs_.empty()) {  // 구독자에게 바로(주기를 기다리지 않음)
             Json obj = Json::object();
             obj["event"] = "system";
@@ -252,6 +377,16 @@ void App::accept_on(int lfd, const std::optional<std::string>& client) {
             continue;
         }
         if (client) last_seen_[*client] = now();
+        if (client && *client == "rest") {  // 게이트웨이 pid는 커널이 알려 준다(따로 등록하지 않음)
+            ucred cr{};
+            socklen_t len = sizeof cr;
+            if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cr, &len) == 0 && cr.pid > 0 && cr.pid != gateway_pid_) {
+                PM_INFO("gateway pid %d", static_cast<int>(cr.pid));
+                gateway_pid_ = cr.pid;
+                peers_dirty_ = true;
+                write_peers();
+            }
+        }
         Conn c;
         c.fd = fd;
         c.client = client;
@@ -373,6 +508,7 @@ Json App::dispatch_read(const Json& req) {
         if (op == "get_config") return ok(sup_.get_config(id));
         if (op == "get_schema") return ok(sup_.get_schema(id));
         if (op == "get_io") return ok(sup_.get_io(id));
+        if (op == "get_connections") return ok(connections_view());
         return error("bad_request", "unknown op " + py_quote(op));
     } catch (const ApiError& e) {
         return from_api_error(e);
@@ -395,6 +531,13 @@ std::optional<Json> App::check_write(const Json& req, const std::optional<std::s
     // Manager API를 쓰는 워커는 자기 자신을 정지·설정하지 못한다(스스로 끊기지 않게)
     if (cfg_.api_workers.count(*client) && jget(req, "id") == Json(*client))
         return error("forbidden", "worker " + *client + " cannot control itself");
+    // 운용 모드에서는 관리 조작(시작·정지·설정·연결 선언)을 개발 모드에서만(docs/command-path.md 3·5장 ③).
+    // 화면의 같은 요청은 게이트웨이가 먼저 막는다. 게이트웨이(rest)는 사용자 역할과 함께 직접 판단하므로 여기서 보지 않음
+    if (cfg_.api_workers.count(*client) && access_mode_ != "development") {
+        Json e = error("forbidden", "development mode required");
+        e["need"] = "development";
+        return e;
+    }
     return std::nullopt;
 }
 
@@ -412,6 +555,10 @@ void App::run_write(int fd) {
     const Json& req = c.req;
     const std::string op = req["op"].get<std::string>();
     const Json id = jget(req, "id");
+    if (op == "set_connections") {  // 워커 상태가 아니라 설정 파일 하나: Supervisor를 거치지 않음
+        if (auto bad = plan_set_connections(fd, req)) finish_write(fd, *bad);
+        return;
+    }
     OpPlan plan;
     try {
         if (op == "set_config")
@@ -606,7 +753,12 @@ void App::housekeeping(double t) {
     if (pgids != last_pgids_) {
         res_.set_pgids(pgids);
         last_pgids_ = pgids;
+        peers_dirty_ = true;  // 허용 목록의 프로세스 그룹이 바뀜
     }
+    // 명령 길: 연결 선언이 손으로·프로필로 바뀌었나, 계약을 다시 읽을 때인가 → 바뀌었으면 peers.json
+    load_connections(false);
+    if (t - cmds_at_ >= kCommandsRefreshS) refresh_commands();
+    write_peers();
     // 로그 회전(크기만 보고 복사 후 비움). 파일 일이라 pm.store가, 큐가 비어 있을 때만
     FileOp op;
     op.kind = FileOp::Kind::RotateLogs;

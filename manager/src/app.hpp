@@ -6,7 +6,9 @@
 // API(design.md 6.1·6.2): 요청 1건 = 연결 1개, JSON 한 줄. 읽기 1 s 상한, 64 KiB 상한.
 // 쓰기 op는 한 번에 하나씩 차례로 처리한다: 검사 → 워커 폴더 파일(pm.store) → 상태 바꿈 → 실행 기록 파일
 // (pm.store) → 응답. 다음 쓰기 op는 앞 것이 끝난 상태를 보고 검사한다(Python 판처럼 순서대로).
-// 읽기 op는 기다리지 않고 바로 답한다. set_access_mode(운용/정비 모드, REST 소켓만)는 메모리 값만 바꿔 바로 답한다.
+// 읽기 op는 기다리지 않고 바로 답한다. set_access_mode(운용/개발 모드, REST 소켓만)는 메모리 값만 바꿔 바로 답한다.
+// 명령 길(docs/command-path.md): 연결 선언 commanders + 워커 계약 + 모드 + 프로세스 → run/peers.json(바뀔 때만 씀).
+// Manager API 워커의 쓰기는 운용 모드에서 forbidden.
 #pragma once
 
 #include <deque>
@@ -17,6 +19,7 @@
 #include <vector>
 
 #include "json_util.hpp"
+#include "peers.hpp"
 #include "publisher.hpp"
 #include "resources.hpp"
 #include "store.hpp"
@@ -32,6 +35,10 @@ struct AppConfig {
     std::string run_dir, logs_dir, notify_path;
     std::set<std::string> api_workers;
     bool product = false, config_write = true;
+    // 명령 길(docs/command-path.md 4장)
+    std::string connections_path, peers_path;
+    std::string command_guard = "warn";
+    Json boot_id;
 };
 
 class App {
@@ -79,6 +86,12 @@ private:
     void reap();
     void housekeeping(double t);
     void step(int timeout_ms, bool serve_api);
+    // 명령 길: 연결 선언 읽기, 워커 명령 표(계약), peers.json 쓰기
+    void load_connections(bool force);
+    void refresh_commands();
+    void write_peers(bool force = false);
+    Json connections_view();
+    std::optional<Json> plan_set_connections(int fd, const Json& req);
 
     AppConfig cfg_;
     Supervisor& sup_;
@@ -102,6 +115,14 @@ private:
     std::vector<int> last_pgids_;
     bool stopping_ = false;
     std::string access_mode_ = "operation";  // 게이트웨이가 알려 줌(set_access_mode). 저장하지 않음
+    Json connections_ = Json::object();      // connections.json 내용(없으면 빈 객체)
+    std::string connections_error_;          // 마지막 읽기 오류(깨진 파일이면 직전 값을 씀)
+    long long connections_mtime_ = -1;
+    std::map<std::string, WorkerCommands> cmds_;  // 워커 id → 명령 표(계약)
+    double cmds_at_ = -1e9;
+    int gateway_pid_ = 0;                    // manager-rest.sock에 붙은 게이트웨이(SO_PEERCRED)
+    std::string peers_text_;                 // 마지막으로 쓴 내용(시각 빼고, 바뀌었을 때만 씀)
+    bool peers_dirty_ = true;
 };
 
 }  // namespace pm

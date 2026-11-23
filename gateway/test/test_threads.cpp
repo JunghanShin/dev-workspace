@@ -352,7 +352,7 @@ void test_gateway() {
                 httplib::Result r;
                 switch ((i + k) % 4) {
                     case 0: r = c.Get("/workers"); break;
-                    case 1: r = c.Post("/workers/w/command", "{\"cmd\": \"x\"}", "application/json"); break;
+                    case 1: r = c.Post("/workers/w/command", "{\"cmd\": \"get_status\"}", "application/json"); break;  // 읽기(운용 모드에서도)
                     case 2: r = c.Get("/api/board/health"); break;
                     default: r = c.Get("/api/ui"); break;
                 }
@@ -466,7 +466,7 @@ void test_recorder() {
             total += size_of(f);
             for_each_line(f, [&](const std::string& l) {
                 auto j = parse_json(l);
-                parsed = parsed && j && j->size() == 10;
+                parsed = parsed && j && j->size() == 11;
                 ++lines;
                 return true;
             });

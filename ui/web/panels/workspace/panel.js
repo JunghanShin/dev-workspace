@@ -1,6 +1,6 @@
 // 워크스페이스: 이 보드에 적용된 프로필과 워크스페이스 설정 파일(읽기 전용), 보드 연결 상태.
 // 워크스페이스 설정은 파일로만 바꾼다(design.md 6.10). 이 화면은 보여 주기만 한다. 데이터: REST GET /system/workspace
-// 운용/정비 모드(원칙 17)만 여기서 바꾼다: 저장하지 않는 상태라 설정이 아님. 게이트웨이 GET·PUT /mode, 관리 역할만
+// 운용/개발 모드(원칙 17)만 여기서 바꾼다: 저장하지 않는 상태라 설정이 아님. 게이트웨이 GET·PUT /mode, 관리 역할만
 const RELOAD_MS = 15000;
 
 const ORIGIN = {
@@ -38,12 +38,12 @@ export default {
     els.buildDlg = buildDialog(ctx);
     els.modeInfo = ui.kvList();
     els.modePill = ui.pill("check", "—", "idle");
-    els.modeBtn = ui.iconButton({ icon: "wrench", label: "정비 모드 켜기", onClick: () => toggleMode(ctx) });
+    els.modeBtn = ui.iconButton({ icon: "wrench", label: "개발 모드 켜기", onClick: () => toggleMode(ctx) });
     els.modeBtn.style.display = "none";
-    els.modeCard = ui.card("운용/정비 모드", h("div", { class: "btnrow", style: "align-items:center" }, els.modePill, els.modeBtn),
+    els.modeCard = ui.card("운용/개발 모드", h("div", { class: "btnrow", style: "align-items:center" }, els.modePill, els.modeBtn),
       h("div", { style: "margin-top:8px" }, els.modeInfo),
       h("div", { class: "hint", style: "margin-top:6px" },
-        "정비 모드는 장비를 하나씩 시험할 때 켭니다. 켜고 끈 시각과 그동안의 명령은 모두 기록되고, "
+        "운용 모드에서는 상태 보기와 장비 조작(역할 명령)만 됩니다. 설정·시작/정지·워커 전용 명령은 개발 모드에서 됩니다. 켜고 끈 시각과 그동안의 명령은 모두 기록되고, "
         + "워크스페이스를 다시 시작하면 운용 모드로 돌아갑니다"));
     el.append(
       ui.panelHead({ title: "워크스페이스", badges: [els.prof, els.link],
@@ -266,7 +266,7 @@ async function loadBuild(ctx) {
   els.buildDl.style.display = s.last ? "" : "none";  // .ib는 display를 정해 hidden 속성이 안 먹음
 }
 
-// ---- 운용/정비 모드(게이트웨이 GET·PUT /mode, docs/gateway.md 3장) ----------------------------------------
+// ---- 운용/개발 모드(게이트웨이 GET·PUT /mode, docs/gateway.md 3장) ----------------------------------------
 let modeCtx = null;
 
 async function loadMode(ctx = modeCtx) {
@@ -282,8 +282,8 @@ async function loadMode(ctx = modeCtx) {
   if (!els.modeCard) return;
   els.mode = m;
   els.modeCard.style.display = "";
-  const maint = m.mode === "maintenance";
-  els.modePill.set(maint ? "wrench" : "check", maint ? "정비 모드" : "운용 모드", maint ? "warn" : "ok");
+  const maint = m.mode === "development";
+  els.modePill.set(maint ? "wrench" : "check", maint ? "개발 모드" : "운용 모드", maint ? "warn" : "ok");
   els.modeInfo.set([
     ["바꾼 시각", m.since ? m.since.replace("T", " ").slice(0, 19) : "시작한 뒤 그대로"],
     ["바꾼 사람", m.by || "—"],
@@ -291,17 +291,17 @@ async function loadMode(ctx = modeCtx) {
   const a = els.auth || ctx.state().auth;
   const canSet = !a || a.auth === "none" || a.role === "maintainer";
   els.modeBtn.style.display = canSet ? "" : "none";
-  els.modeBtn.querySelector(".ib-label").textContent = maint ? "운용 모드로" : "정비 모드 켜기";
+  els.modeBtn.querySelector(".ib-label").textContent = maint ? "운용 모드로" : "개발 모드 켜기";
   els.modeBtn.className = "ib" + (maint ? " primary" : " danger");
 }
 
 async function toggleMode(ctx) {
-  const toMaint = !(els.mode && els.mode.mode === "maintenance");
+  const toMaint = !(els.mode && els.mode.mode === "development");
   const msg = toMaint
-    ? "정비 모드로 바꿉니다. 장비를 하나씩 시험하는 명령이 허용됩니다. 켜고 끈 시각과 그동안의 명령은 모두 기록됩니다."
+    ? "개발 모드로 바꿉니다. 설정 바꾸기·시작/정지·워커 전용 명령이 허용됩니다. 켜고 끈 시각과 그동안의 명령은 모두 기록됩니다."
     : "운용 모드로 돌아갑니다.";
   if (!confirm(msg)) return;
-  await ctx.act(toMaint ? "정비 모드 켜기" : "운용 모드로", () => ctx.api("PUT", "/mode", { mode: toMaint ? "maintenance" : "operation" }));
+  await ctx.act(toMaint ? "개발 모드 켜기" : "운용 모드로", () => ctx.api("PUT", "/mode", { mode: toMaint ? "development" : "operation" }));
   loadMode(ctx);
 }
 

@@ -34,6 +34,8 @@ public:
 
     // 응답 한 줄을 쓰고 연결을 닫는다. 이미 닫혔으면 아무 일도 하지 않는다.
     void reply(int conn, const std::string& line);
+    // 연결한 상대 프로세스 pid(SO_PEERCRED, 커널이 알려 줌). 모르면 0. 명령하는 곳 검사(guard.hpp)에 쓴다
+    int peer_pid(int conn) const;
 
 private:
     struct Conn {
@@ -42,6 +44,7 @@ private:
         Clock::time_point opened;
         Clock::time_point requested{};  // 요청 한 줄을 받은 시각
         bool answered = false;          // 요청을 받음(응답할 때까지 더 읽지 않음)
+        int pid = 0;                    // 상대 프로세스(SO_PEERCRED)
     };
     void accept_all();
     void read_conn(int id);

@@ -593,7 +593,10 @@ void test_record_line() {
     f.ms = 1.234;
     CHECK_EQ(record_line(f), std::string(R"({"t":"2026-11-23T10:00:00.123+09:00","user":"op1","role":"operator",)"
                                          R"("mode":"operation","remote":"10.0.0.1","method":"POST","path":"/workers/w1/command",)"
-                                         R"("cmd":"source.set_rate","code":200,"ms":1.2})" "\n"));
+                                         R"("cmd":"source.set_rate","from":null,"code":200,"ms":1.2})" "\n"));
+    f.from = "remote:duru-ui";
+    CHECK(record_line(f).find("\"from\":\"remote:duru-ui\"") != std::string::npos);  // 워커 명령의 보낸 곳
+    f.from.clear();
     f.cmd.clear();
     f.path = std::string(2000, 'p');
     const std::string l = record_line(f);
@@ -601,7 +604,7 @@ void test_record_line() {
     CHECK(l.size() < 1000);  // 긴 칸은 자름
     CHECK(l.back() == '\n' && std::count(l.begin(), l.end(), '\n') == 1);
     // 기록 줄에는 본문·쿼리·헤더 칸이 없다(비밀번호·토큰이 들어갈 자리가 없음)
-    CHECK(Json::parse(l).size() == 10u);
+    CHECK(Json::parse(l).size() == 11u);
     CHECK_EQ(redact_query("a=1&token=s3cret&x=&password=pw&TOKEN=z"), std::string("a=1&token=***&x=&password=***&TOKEN=***"));
     CHECK_EQ(redact_query(""), std::string(""));
     CHECK_EQ(cookie_value("a=1; workspace_session=abc; b=2", "workspace_session"), std::string("abc"));

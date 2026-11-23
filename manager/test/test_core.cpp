@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "json_util.hpp"
+#include "peers.hpp"
 #include "posix_fs.hpp"
 #include "schema.hpp"
 #include "supervisor.hpp"
@@ -736,6 +737,80 @@ TEST(write_ops_and_errors) {
     CHECK_EQ(d["autostart"], Json(true));
     e = api_error_of([&] { r.sup->set_autostart(Json("w"), Json("yes")); });
     CHECK_EQ(e.message, std::string("autostart must be true or false"));
+}
+
+// ---- 명령 길: 허용 목록(docs/command-path.md 4장) ----
+
+// siyi처럼 역할 둘(gimbal·camera) + 워커 전용 명령, ext-ops는 gimbal을 쓴다고 적은 연동 워커
+std::map<std::string, pm::WorkerCommands> peer_workers() {
+    std::map<std::string, pm::WorkerCommands> w;
+    w["siyi"] = pm::commands_from_io(J(R"({
+        "common": {"commands": {"get_status": {}, "__fault": {}}},
+        "self": {"commands": {"stream.start": {}, "diag.dump": {"read": true}}},
+        "includes": {"lib/x.json": {"commands": {"tap.info": {"read": true}}}},
+        "provides": {"gimbal": {"commands": {"gimbal.angle": {}, "gimbal.get": {"read": true}}},
+                     "camera": {"commands": {"camera.zoom": {}}}},
+        "uses": {"vehicle": {"from": "vehicle"}}})"));
+    w["ext-ops"] = pm::commands_from_io(J(R"({"uses": {"g": {"from": "gimbal"}}})"));
+    w["bare"] = pm::commands_from_io(Json());  // 계약 없는 워커
+    return w;
+}
+
+TEST(peers_commands_from_io) {
+    const auto w = peer_workers();
+    CHECK_EQ(w.at("siyi").read, (std::set<std::string>{"get_status", "diag.dump", "tap.info", "gimbal.get"}));
+    CHECK_EQ(w.at("siyi").roles.size(), size_t(2));
+    CHECK_EQ(w.at("siyi").roles.at("gimbal"), (std::set<std::string>{"gimbal.angle", "gimbal.get"}));
+    CHECK_EQ(w.at("siyi").uses, (std::set<std::string>{"vehicle"}));
+    CHECK_EQ(w.at("bare").read, (std::set<std::string>{"get_status"}));
+    CHECK(w.at("bare").roles.empty());
+}
+
+TEST(peers_shape_and_check) {
+    CHECK_EQ(pm::commanders_shape_error(Json()), std::string(""));
+    CHECK_EQ(pm::commanders_shape_error(J(R"({"siyi.gimbal": ["ext-ops"], "siyi": []})")), std::string(""));
+    CHECK(!pm::commanders_shape_error(J("[]")).empty());
+    CHECK(!pm::commanders_shape_error(J(R"({"Siyi": ["a"]})")).empty());
+    CHECK(!pm::commanders_shape_error(J(R"({"siyi.": ["a"]})")).empty());
+    CHECK(!pm::commanders_shape_error(J(R"({"siyi": "ext-ops"})")).empty());
+    CHECK(!pm::commanders_shape_error(J(R"({"siyi": [1]})")).empty());
+    const auto w = peer_workers();
+    const Json c = pm::check_commanders(J(R"({
+        "siyi.gimbal": ["ext-ops"], "siyi.radar": ["ext-ops"], "nobody": ["ext-ops"], "bare": ["ext-ops"],
+        "siyi": ["ext-ops", "ghost", "siyi"]})"), w);
+    CHECK_EQ(c["siyi.gimbal"]["ok"], Json(true));
+    CHECK(c["siyi.gimbal"]["warnings"].empty());
+    CHECK_EQ(c["siyi.radar"]["ok"], Json(false));
+    CHECK_EQ(c["nobody"]["ok"], Json(false));
+    CHECK_EQ(c["bare"]["ok"], Json(false));
+    CHECK_EQ(c["siyi"]["ok"], Json(true));
+    // ext-ops는 camera를 쓴다고 적지 않음(경고), ghost는 없는 워커(경고), 자기 자신(경고)
+    CHECK_EQ(c["siyi"]["warnings"].size(), size_t(3));
+}
+
+TEST(peers_build_operation_and_development) {
+    const auto w = peer_workers();
+    const Json commanders = J(R"({"siyi.gimbal": ["ext-ops"], "siyi.radar": ["ext-ops"], "bare": ["ext-ops"]})");
+    const std::vector<pm::PeerProcess> procs = {{"gateway", 812, 0, true}, {"ext-ops", 0, 1290, false}, {"x", 0, 0, false}};
+    Json p = pm::build_peers(commanders, w, procs, "operation", "warn", Json("b1"));
+    CHECK_EQ(p["guard"], Json("warn"));
+    CHECK_EQ(p["mode"], Json("operation"));
+    CHECK_EQ(p["peers"], J(R"({"gateway": {"pid": 812, "trusted_from": true}, "ext-ops": {"pgid": 1290}})"));
+    CHECK_EQ(p["workers"]["siyi"]["allow"], J(R"({"gateway": "*", "ext-ops": ["gimbal.angle", "gimbal.get"]})"));
+    CHECK_EQ(p["workers"]["siyi"]["read"], J(R"(["diag.dump", "get_status", "gimbal.get", "tap.info"])"));
+    CHECK_EQ(p["workers"]["bare"]["allow"], J(R"({"gateway": "*"})"));  // 계약 없는 워커: 연동 워커에 아무것도 안 열림
+    CHECK_EQ(p["workers"]["ext-ops"]["allow"], J(R"({"gateway": "*"})"));
+    // 개발 모드: 허용된 곳은 그 워커의 모든 명령
+    p = pm::build_peers(commanders, w, procs, "development", "enforce", Json());
+    CHECK_EQ(p["workers"]["siyi"]["allow"], J(R"({"gateway": "*", "ext-ops": "*"})"));
+    CHECK_EQ(p["workers"]["bare"]["allow"], J(R"({"gateway": "*"})"));
+    // 워커 이름만(모든 역할)
+    p = pm::build_peers(J(R"({"siyi": ["ext-ops"]})"), w, procs, "operation", "warn", Json());
+    CHECK_EQ(p["workers"]["siyi"]["allow"]["ext-ops"], J(R"(["camera.zoom", "gimbal.angle", "gimbal.get"])"));
+    // 선언 없음: 화면만
+    p = pm::build_peers(Json(), w, {}, "operation", "off", Json());
+    CHECK_EQ(p["peers"], Json::object());
+    CHECK_EQ(p["workers"]["siyi"]["allow"], J(R"({"gateway": "*"})"));
 }
 
 }  // namespace

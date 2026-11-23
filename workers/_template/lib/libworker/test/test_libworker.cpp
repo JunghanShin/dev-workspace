@@ -18,6 +18,7 @@
 #include <pthread.h>
 
 #include "worker/command_server.hpp"
+#include "worker/guard.hpp"
 #include "worker/host.hpp"
 #include "worker/mutex.hpp"
 #include "worker/stage.hpp"
@@ -764,7 +765,103 @@ static void command_server_timeouts() {
     srv.close();
 }
 
+// ---- 명령하는 곳 검사(워크스페이스 docs/command-path.md 5장 ②) ----
+
+static void write_text(const std::string& path, const std::string& text) {
+    const std::string tmp = path + ".tmp";
+    FILE* f = std::fopen(tmp.c_str(), "w");
+    std::fputs(text.c_str(), f);
+    std::fclose(f);
+    std::rename(tmp.c_str(), path.c_str());  // 새 파일: 바뀐 시각이 달라져 다시 읽힘
+}
+
+static void guard_table() {
+    char dir[] = "/tmp/lw-guard-XXXXXX";
+    CHECK(mkdtemp(dir) != nullptr);
+    const std::string path = std::string(dir) + "/peers.json";
+    const int me = static_cast<int>(getpid());
+    const int pg = static_cast<int>(getpgid(0));
+    // 단독 실행: 보지 않음
+    {
+        worker::CommandGuard g("w1", "");
+        auto d = g.check(me, "alpha.echo", "screen");
+        CHECK(d.run && !d.violation && d.from == "screen" && !d.read);
+        CHECK(g.check(me, "get_status", "").read);
+    }
+    worker::CommandGuard g("w1", path);
+    // 표가 아직 없음: 실행하고 기록
+    auto d = g.check(me, "alpha.echo", "");
+    CHECK(d.run && d.violation && d.reason == "no peers table yet");
+    // 이 프로세스 = 게이트웨이(믿는 곳): 적힌 from을 씀, "*"
+    write_text(path, R"({"guard": "warn", "peers": {"gateway": {"pid": )" + std::to_string(me) +
+                         R"(, "trusted_from": true}}, "workers": {"w1": {"read": ["get_status", "x.get"],
+                         "allow": {"gateway": "*", "ext": ["alpha.echo"]}}}})");
+    d = g.check(me, "beta.echo", "remote:duru-ui");
+    CHECK(d.run && !d.violation && d.from == "remote:duru-ui");
+    CHECK(g.check(me, "beta.echo", "").from == "gateway");
+    // 이 프로세스 그룹 = 연동 워커 ext(믿지 않는 곳): 적힌 from은 무시, 역할 명령만
+    write_text(path, R"({"guard": "warn", "peers": {"gateway": {"pid": 1}, "ext": {"pgid": )" + std::to_string(pg) +
+                         R"(}}, "workers": {"w1": {"read": ["get_status", "x.get"], "allow": {"gateway": "*", "ext": ["alpha.echo"]}}}})");
+    d = g.check(me, "alpha.echo", "screen");
+    CHECK(d.run && !d.violation && d.from == "ext");
+    d = g.check(me, "beta.echo", "screen");
+    CHECK(d.run && d.violation && d.from == "ext" && g.mode() == "warn");  // warn: 실행하고 기록
+    d = g.check(me, "x.get", "");
+    CHECK(d.run && d.read && !d.violation);  // 읽기는 늘
+    write_text(path, R"({"guard": "enforce", "peers": {"ext": {"pgid": )" + std::to_string(pg) +
+                         R"(}}, "workers": {"w1": {"read": ["get_status"], "allow": {"gateway": "*", "ext": ["alpha.echo"]}}}})");
+    CHECK(!g.check(me, "beta.echo", "").run);
+    CHECK(g.check(me, "alpha.echo", "").run);
+    // 모르는 프로세스: enforce면 거절
+    write_text(path, R"({"guard": "enforce", "peers": {}, "workers": {"w1": {"allow": {"gateway": "*"}}}})");
+    d = g.check(me, "alpha.echo", "screen");
+    CHECK(!d.run && d.violation && d.from == "unknown:" + std::to_string(me));
+    CHECK(g.check(me, "get_status", "").run);
+    // off: 보지 않음(읽기 표만)
+    write_text(path, R"({"guard": "off", "peers": {}, "workers": {}})");
+    CHECK(g.check(me, "alpha.echo", "").run && !g.check(me, "alpha.echo", "").violation);
+    // 깨진 파일: 직전 표(off) 그대로
+    write_text(path, "{broken");
+    CHECK(g.mode() == "off" || g.check(me, "alpha.echo", "").run);
+    std::remove(path.c_str());
+    rmdir(dir);
+}
+
+static void host_guard_and_last_command() {
+    char dir[] = "/tmp/lw-hostguard-XXXXXX";
+    CHECK(mkdtemp(dir) != nullptr);
+    const std::string cfg = std::string(dir) + "/w1.json", peers = std::string(dir) + "/peers.json";
+    write_text(cfg, R"({"id": "w1", "config_version": 1, "config": {}})");
+    worker::Host host("test");
+    host.add<Echo>("alpha");
+    host.add<Echo>("beta");
+    std::string err;
+    CHECK(host.configure_file(cfg, &err));
+    worker::Json r;
+    auto call = [&](const std::string& line, int pid) { host.dispatch(line, [&r](const worker::Json& j) { r = j; }, pid); return r; };
+    // 검사 없음(단독): 마지막 명령에 보낸 곳·결과
+    CHECK(call(R"({"cmd":"alpha.echo","from":"screen"})", 0)["ok"] == true);
+    auto st = call(R"({"cmd":"get_status"})", 0)["data"];
+    CHECK(st["last_command"]["cmd"] == "alpha.echo" && st["last_command"]["from"] == "screen" && st["last_command"]["ok"] == true);
+    CHECK(st["last_command"]["t_mono_ns"].is_number_integer());
+    call(R"({"cmd":"alpha.nope"})", 0);
+    st = call(R"({"cmd":"get_status"})", 0)["data"];
+    CHECK(st["last_command"]["cmd"] == "alpha.nope" && st["last_command"]["ok"] == false && st["last_command"]["from"].is_null());
+    // enforce: 허용 목록 밖은 forbidden, 마지막 명령에 남지 않음
+    write_text(peers, R"({"guard": "enforce", "peers": {}, "workers": {"w1": {"read": ["get_status"], "allow": {"gateway": "*"}}}})");
+    host.set_peers_file(peers);
+    r = call(R"({"cmd":"beta.echo"})", static_cast<int>(getpid()));
+    CHECK(r["ok"] == false && r["error"]["code"] == "forbidden");
+    st = call(R"({"cmd":"get_status"})", static_cast<int>(getpid()))["data"];
+    CHECK(st["last_command"]["cmd"] == "alpha.nope");
+    std::remove(cfg.c_str());
+    std::remove(peers.c_str());
+    rmdir(dir);
+}
+
 int main() {
+    guard_table();
+    host_guard_and_last_command();
     queue_drop_oldest();
     queue_reject();
     queue_wake_fd();

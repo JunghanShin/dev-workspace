@@ -128,8 +128,17 @@ void CommandServer::accept_all() {
     for (;;) {
         const int fd = accept4(listen_fd_, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
         if (fd < 0) return;
-        conns_[next_id_++] = Conn{fd, {}, Clock::now()};
+        Conn c{fd, {}, Clock::now()};
+        ucred cr{};
+        socklen_t len = sizeof cr;
+        if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cr, &len) == 0) c.pid = static_cast<int>(cr.pid);
+        conns_[next_id_++] = c;
     }
+}
+
+int CommandServer::peer_pid(int conn) const {
+    const auto it = conns_.find(conn);
+    return it == conns_.end() ? 0 : it->second.pid;
 }
 
 void CommandServer::read_conn(int id) {

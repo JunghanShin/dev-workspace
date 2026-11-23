@@ -77,7 +77,7 @@ async function logout() {
   location.reload();
 }
 
-// 머리: 운용/정비 모드 배지, 사용자(역할)·로그아웃 또는 "인증 꺼짐"
+// 머리: 운용/개발 모드 배지, 사용자(역할)·로그아웃 또는 "인증 꺼짐"
 let whoSig = "";
 function renderWho() {
   const sig = JSON.stringify(auth);
@@ -88,8 +88,8 @@ function renderWho() {
   whoEl.replaceChildren();
   if (!auth || auth.auth === "none") return;
   if (auth.mode) {
-    const maint = auth.mode === "maintenance";
-    modeEl.appendChild(ui.pill(maint ? "wrench" : "check", maint ? "정비" : "운용", maint ? "warn" : "ok"));
+    const maint = auth.mode === "development";
+    modeEl.appendChild(ui.pill(maint ? "wrench" : "check", maint ? "개발" : "운용", maint ? "warn" : "ok"));
   }
   if (auth.auth === "on" && auth.name) {
     whoEl.append(ui.pill("lock", `${auth.name} · ${ROLE_KO[auth.role] || auth.role}`, "info"),
@@ -104,6 +104,7 @@ async function refreshAuth() {
   const res = await loadAuth();
   if (res === "login" && prev === "on") { location.reload(); return; }  // 세션 끝남
   state.auth = auth;
+  ui.setMode(auth && auth.mode);
   renderWho();
 }
 
@@ -131,6 +132,12 @@ async function api(method, path, body) {
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { error: { message: text } }; }
   if (!r.ok) {
+    // 운용 모드에서 막힘(docs/command-path.md 3장): 무엇을 하면 되는지 알려 준다
+    if (r.status === 403 && data && data.need === "development") {
+      const err = new Error(ui.DEV_ONLY_TITLE);
+      err.detail = data.error;
+      throw err;
+    }
     const err = new Error((data && data.error && (data.error.message || data.error.code)) || r.status);
     err.detail = data && data.error;  // 설정 검사 오류는 detail.fields {경로: 메시지}
     throw err;
@@ -380,6 +387,7 @@ async function start() {
     return;
   }
   state.auth = auth;
+  ui.setMode(auth && auth.mode);
   renderWho();
   await pollUi();
   ui.setProduct(state.ui && state.ui.product);  // 제품 모드: 패널을 띄우기 전에(kit.js 제품 모드)

@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.54 |
+| 문서 버전 | 0.55 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -149,7 +149,7 @@
 | 블록 | 평면 | IN | OUT | 하지 않음 |
 |---|---|---|---|---|
 | 화면·외부 운용 | — | 계약(`GET /io`), 상태(SSE) | 요청 | 판단, 워커 직접 접근 |
-| 게이트웨이(REST) | 플랫폼 | 요청, 매니저 상태, 정의 파일 | 신분 확인, 매니저로 전달, 상태 중계, 계약 제공, 명령 기록, 운용/정비 모드 | 판단 |
+| 게이트웨이(REST) | 플랫폼 | 요청, 매니저 상태, 정의 파일 | 신분 확인, 매니저로 전달, 상태 중계, 계약 제공, 명령 기록, 운용/개발 모드 | 판단 |
 | 매니저 | 기능 | 역할 주제, 요청 | 소유한 역할의 명령, 매니저 주제 | 장치와 대화 |
 | 추상화 층 | 플랫폼 | (파일과 규칙) | 계약(6.6.7.1), 연결 선언·명령 소유(6.6.7.4), 출력 대조(6.6.7.2) | 실행 |
 | 워커 | 기능 | 명령(+ 임대), 설정, 장치 데이터 | 주제, 응답, 지표, 이벤트, 데이터 버스 | 판단, 결과를 누가 쓰는지 알기 |
@@ -186,11 +186,11 @@
 10. **언어는 상주 여부와 성능으로.** 보드에 늘 상주하는 플랫폼(process-manager, 게이트웨이, 기록)과 매니저는 C++: 한 번 만들면 거의 바뀌지 않고 켜져 있는 내내 돌므로 실행 비용(메모리·CPU·저장 공간)을 우선한다(저가 보드 기준. 실측: 같은 성격의 일에 Python 프로세스 12~25 MB, C++ 2~5 MB). 워커는 계속 더해지고 일의 성격이 제각각이라 성능에 따라 고른다: 기본 C/C++와 HW 가속, 가벼운 일은 Python 허용. Manager가 보는 것은 실행 인자·설정 파일·exit code·heartbeat·로그뿐이라 워커 언어와 무관하다
 11. **명령은 위에서 아래로, 결과는 아래에서 위로(4.1).** 화면 → 게이트웨이 → 매니저 → 워커. 아래층은 위층을 모른다. 판단(예: 모드 전환 허가)은 매니저 한 곳에서 하고, 어디서 요청해도 같은 매니저를 지난다
 12. **층 사이는 계약으로만.** 바깥으로 나가는 명령 응답·주제·`get_status`·지표·이벤트·데이터 버스는 모두 입출력 정의에 있다(6.6.7.1). 정의 밖은 워커 속사정(`runtime`)뿐. 연결은 선언으로 잇고 끊으며, 정의가 같으면 갈아 끼워도 위층은 그대로
-13. **명령 소유와 방향.** 한 역할의 명령은 매니저 하나만 보낸다(연결 선언에 적고 process-manager가 겹침을 거절, 워커 명령 소켓은 소유 매니저와 정비 모드의 게이트웨이만 받음). 매니저 간 요청은 정해진 방향으로만: fault → mission, mission ↔ payload. 상태는 모두 status에서 구독. 역방향·순환 금지
+13. **명령하는 곳은 허용 목록으로, 조정은 매니저가.** 워커 명령 소켓은 화면(게이트웨이, 장비 자체라 늘 허용)과 연결 선언 `commanders`에 적힌 곳(외부 연동 워커, 매니저)의 명령만 받는다. 플랫폼은 동시 명령을 조정하지 않고 도착 순서대로 넘기며, 모든 명령에 보낸 곳(`from`)을 남긴다. 누가 우선인지(조종 권한)는 판단이라 매니저 규칙으로 둔다(`docs/command-path.md`). 매니저 간 요청은 정해진 방향으로만: fault → mission, mission ↔ payload. 상태는 모두 status에서 구독. 역방향·순환 금지
 14. **명령 임대.** 명령하는 매니저는 임대를 주기적으로 갱신하고, 끊기면 워커는 정의에 적힌 안전 상태로 간다(매니저가 죽어도 장치가 마지막 명령대로 계속 움직이지 않게)
 15. **비행 컨트롤러와의 경계.** 자세 제어와 최후 안전장치는 비행 컨트롤러가 맡고, 매니저는 임무 수준 감독이다. 보드가 통째로 멈춰도 기체는 비행 컨트롤러의 안전장치로 버틴다
 16. **빠른 제어 고리는 예외.** 매 프레임 오가는 제어는 소유 매니저가 켜고 끄고, 켜진 동안만 정해진 두 워커가 직접 주고받는다(켜진 고리는 매니저 상태에 보이고 임대가 걸림)
-17. **운용 모드가 기본, 정비 모드는 토글.** 워크스페이스 설정 화면의 토글로 켠다. 정비 모드에서 매니저는 비행 조건 검사를 건너뛰고 장비 하나씩 시험하는 명령을 넘긴다(경로는 그대로 매니저 경유). 저장하지 않는 상태라 재시작하면 운용 모드(원칙 9의 "설정"이 아님). 켜고 끈 시각과 그동안 명령은 모두 기록
+17. **운용 모드가 기본, 개발 모드는 토글.** 워크스페이스 설정 화면의 토글로 켠다(관리 역할). 운용 모드에서는 읽기와 역할 명령만 되고, 워커 전용 명령(`io/self.json`·계약에 없는 명령)·설정·시작/정지·연결 선언 바꾸기는 개발 모드에서만 된다. 화면·원격·외부 연동 워커 모두 같은 규칙(`docs/command-path.md` 3장). 매니저가 생기면 개발 모드에서 비행 조건 검사를 건너뛰고 장비 하나씩 시험하는 명령도 넘긴다(경로는 그대로 매니저 경유). 저장하지 않는 상태라 재시작하면 운용 모드(원칙 9의 "설정"이 아님). 켜고 끈 시각과 그동안 명령은 모두 기록
 18. **매니저는 엔진과 규칙을 나눈다.** 엔진(상태 모으기, 이상 판단 틀, 명령 소유·임대 관리)은 코드로 한 번 만들고, 기체·임무마다 바뀌는 규칙(예: 배터리 몇 % 이하면 귀환, 임무별 허용 모드)은 데이터(프로파일)로 둔다. 규칙은 config-manager가 관리·검증한다. 기체가 바뀌어도 매니저 코드는 그대로
 
 ## 6. 구성 요소 상세
@@ -243,13 +243,15 @@
 | `delete_preset` | `id`, `name` | ✓ | `DELETE /workers/{id}/presets/{name}` |
 | `set_autostart` | `id`, `autostart` | ✓ | `PUT /workers/{id}/autostart` |
 | `start` / `stop` | `id` | ✓ | `POST /workers/{id}/start`, `/stop` |
-| `set_access_mode` | `mode`(`operation`\|`maintenance`) | ✓(`manager-rest.sock`만) | 게이트웨이 `PUT /api/mode`(원칙 17, `docs/gateway.md` 3장). 메모리에만, `system`·구독에 `access_mode`, 재시작하면 `operation`(0.52) |
+| `set_access_mode` | `mode`(`operation`\|`development`) | ✓(`manager-rest.sock`만) | 게이트웨이 `PUT /api/mode`(원칙 17, `docs/gateway.md` 3장). 메모리에만, `system`·구독에 `access_mode`, 재시작하면 `operation`(0.52). `peers.json`에 반영(0.55, `docs/command-path.md`) |
+| `get_connections` | (없음) | | 연결 선언(`connections.json`)과 검사 결과(`commanders` 항목별 `ok`·`error`). 0.55는 `commanders`만 | `GET /connections` |
+| `set_connections` | `connections`(파일 전체) | ✓ | 검사 후 저장, `peers.json` 다시 씀. 운용 모드에서는 Manager API 워커에 `forbidden`(관리 조작) | `PUT /connections` |
 
 에러 `code`: `bad_request`(설정 오류면 `fields: {경로: 메시지}`), `not_found`, `conflict`, `forbidden`, `internal`. Manager는 요청 처리 중 워커 기동·종료를 기다리지 않는다.
 
 ### 6.3 Manager
 
-**C++ process-manager로 다시 만든다(0.46, 설계 `docs/process-manager.md`):** 하는 일·API·파일은 이 절 그대로 두고, 상태는 제어 루프 하나, 기다릴 수 있는 일(구독 송신 `pm.pub`, 파일 쓰기 `pm.store`, 자원 측정 `pm.res`)은 스레드로 뺀다. 더하는 일: 누구에게 붙을지 알려 주기(6.6.7.4 연결 선언), 명령 소유·권한 표(`run/peers.json`, 워커는 설정에 `peers_file`이 있을 때만 봄, 없으면 막지 않음). 옮기는 동안 시작 셸이 `WORKSPACE_MANAGER_IMPL=python|cpp`로 고른다.
+**C++ process-manager로 다시 만든다(0.46, 설계 `docs/process-manager.md`):** 하는 일·API·파일은 이 절 그대로 두고, 상태는 제어 루프 하나, 기다릴 수 있는 일(구독 송신 `pm.pub`, 파일 쓰기 `pm.store`, 자원 측정 `pm.res`)은 스레드로 뺀다. 더하는 일: 누구에게 붙을지 알려 주기(6.6.7.4 연결 선언), 명령하는 곳 허용 목록(`run/peers.json`, 워커는 환경 변수 `WORKSPACE_PEERS_FILE`이 있을 때만 봄, 없으면 막지 않음, `docs/command-path.md`). 옮기는 동안 시작 셸이 `WORKSPACE_MANAGER_IMPL=python|cpp`로 고른다.
 
 별도 프로세스, 시스템 상태의 단일 소유자. 하나의 non-blocking 이벤트 루프로 API 소켓, 구독자 송신, heartbeat 수신, 워커 exit 감시, 자원 측정을 처리한다.
 
@@ -331,7 +333,7 @@ workers/<워커>/workspace/
 
 ### 6.4 REST
 
-**nginx + C++ 게이트웨이로 다시 만든다(0.49, 설계 `docs/gateway.md`):** 바깥은 nginx 하나(화면 파일·HTTPS·제한), 게이트웨이는 보드 안 Unix 소켓만 엶. 이 절의 경로·상태 코드는 그대로, 더하는 일: 신분 확인(세션·토큰, 역할 viewer·operator·maintainer, 개발 보드 기본 끔), 운용/정비 모드, 명령 기록, Manager 구독 캐시. 0.54부터 게이트웨이만 있다(Python REST 삭제, `docs/gateway.md` 6.3).
+**nginx + C++ 게이트웨이로 다시 만든다(0.49, 설계 `docs/gateway.md`):** 바깥은 nginx 하나(화면 파일·HTTPS·제한), 게이트웨이는 보드 안 Unix 소켓만 엶. 이 절의 경로·상태 코드는 그대로, 더하는 일: 신분 확인(세션·토큰, 역할 viewer·operator·maintainer, 개발 보드 기본 끔), 운용/개발 모드(명령 종류 검사, `docs/command-path.md`), 명령 기록, Manager 구독 캐시. 0.54부터 게이트웨이만 있다(Python REST 삭제, `docs/gateway.md` 6.3).
 
 별도 프로세스(늘 띄움), C++ 실행 파일 `gateway/bin/gateway`, 무상태. 바인딩 `WORKSPACE_REST_BIND:WORKSPACE_REST_PORT`(기본 `0.0.0.0:8080`).
 
@@ -772,6 +774,7 @@ workers/<이름>/
 - **Manager는 통로를 만들지도, 데이터를 나르지도 않는다.** 이름을 풀고 검사하고 설정을 채울 뿐이다
 - **띄우는 순서는 상관없다.** 출력 통로는 내보내는 워커가 열고, 쓰는 쪽은 상대가 뜰 때까지 다시 붙는다(아래 공통 규칙). 상대가 다시 시작해도 같다
 - 연결 선언을 바꾸면 그 입력을 가진 워커만 다시 시작한다(설정 바뀜과 같음)
+- **명령하는 곳(0.55):** 같은 파일의 `commanders`(`{"<워커>[.<역할>]": ["<워커·매니저 id>", …]}`)가 역할마다 명령해도 되는 곳이다. process-manager가 검사하고 `run/peers.json`을 만든다. 화면은 적지 않아도 늘 허용. 바꾸면 표만 다시 쓰고 워커는 다시 시작하지 않는다(`docs/command-path.md` 4장)
 
 ##### 6.6.7.5 libworker 도구
 
@@ -1188,7 +1191,9 @@ WATCHDOG=1 id=example progress=1834 config_version=4 source_seq=1834 peer_link=1
 {"ok": false, "error": {"code": "unavailable", "message": "device link down"}}
 ```
 
-에러 `code`: `bad_request`(인자 틀림), `unavailable`(장치·상대 연결 없음), `timeout`(장치 응답 없음), `busy`(같은 동작이 진행 중), `forbidden`(설정상 금지된 동작), `internal`. 응답은 정확히 한 번(나중에라도). `get_status`는 호스트가 모든 모듈 상태를 모아 답한다.
+에러 `code`: `bad_request`(인자 틀림), `unavailable`(장치·상대 연결 없음), `timeout`(장치 응답 없음), `busy`(같은 동작이 진행 중), `forbidden`(설정상 금지된 동작, 허용 목록 밖), `internal`. 응답은 정확히 한 번(나중에라도). `get_status`는 호스트가 모든 모듈 상태를 모아 답한다.
+
+**보낸 곳(0.55, `docs/command-path.md`):** 요청에 `"from"`(게이트웨이만 넣음: `screen`, `remote:<토큰 이름>`)을 더한다. 워커(libworker 0.10)는 환경 변수 `WORKSPACE_PEERS_FILE`이 있으면 상대 pid(`SO_PEERCRED`)로 누구인지 알아보고 `<데이터>/run/peers.json`의 허용 명령인지 본다(`guard` `warn`이면 기록만, `enforce`면 `forbidden`). 읽기(`get_status`, 계약 `"read": true`)는 늘 허용. 읽기가 아닌 명령은 `get_status`의 공통 칸 `last_command`(`cmd`·`from`·`t_mono_ns`·`ok`)에 남는다.
 
 ### 9.7 스트림 소켓 (워커 → REST·다른 워커, 텔레메트리 발행)
 
@@ -1538,6 +1543,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.52 | **게이트웨이 4단계**(`docs/gateway.md` 3장·6.2): 신분 확인 `WORKSPACE_AUTH=on`(제품 모드는 늘), 사용자 파일 `config/users.json`(PBKDF2-HMAC-SHA256, 토큰은 sha256)·설정 명령 `gateway user`·`token`, 로그인 세션·Bearer 토큰·역할(viewer·operator·maintainer), 운용/정비 모드 `GET·PUT /api/mode` + Manager op `set_access_mode`(6.2, Python·C++ 판 둘 다), 명령 기록 `records/gateway/`, Manager 구독 캐시, 화면 로그인·머리 배지·워크스페이스 패널 모드 토글 |
 | 0.53 | **자동 상태 화면**(6.11): 자기 패널이 없는 워커를 워커 계약(`io/self.json` metrics·status)대로 그리는 `ui/web/panels/auto`. 화면 틀(머리·왼쪽 메뉴·본문) 위에 패널만 바뀌는 구조 그대로 |
 | 0.54 | **게이트웨이 5단계**(`docs/gateway.md` 6.3): 시작 셸 기본·유일 C++ 게이트웨이, Python REST(`rest/workspace_rest`) 삭제, PC 개발 실행이 process-manager·게이트웨이를 PC용으로 빌드해 씀, 제품 묶음에 C++ Manager·게이트웨이·nginx 틀(Python Manager·REST 컴파일 뺌), 제품 설치가 첫 계정 `admin`·원격 화면 토큰을 만듦 |
+| 0.55 | **명령 길**(`docs/command-path.md`, 그림 `docs/command-path.svg`): 명령하는 곳은 허용 목록(`connections.json` `commanders`, 화면은 늘 허용)으로, 동시 명령은 조정하지 않고 보낸 곳(`from`)을 남김(조정은 매니저 규칙). 정비 모드 → **개발 모드**(`development`): 운용 모드에서는 읽기·역할 명령만, 워커 전용·계약에 없는 명령·설정·시작/정지·연결 선언은 개발 모드에서만. 검사 세 곳: 게이트웨이(모드 × 역할 × 명령 종류), 워커 명령 소켓(libworker, `SO_PEERCRED` + `run/peers.json`, `command_guard` warn → enforce), process-manager(Manager API 쓰기 × 모드). `get_status` 공통 칸 `last_command`. 원칙 13·17 고침 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

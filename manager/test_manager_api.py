@@ -48,6 +48,9 @@ def call(req):
         data += d
     return json.loads(data)
 hb = ww.Heartbeat(); stop = ww.StopFlag(); hb.ready()
+# 관리 조작은 개발 모드에서만(docs/command-path.md 3장 ③): 시험이 개발 모드로 바꿀 때까지 기다림
+while call({"op": "system"})["data"].get("access_mode") != "development" and not stop.requested:
+    hb.watchdog(1); time.sleep(0.1)
 out = {"system": call({"op": "system"}), "start_dev": call({"op": "start", "id": "dev"}),
        "stop_self": call({"op": "stop", "id": "adp"}), "list": call({"op": "list"})}
 open(sys.argv[3], "w").write(json.dumps(out))
@@ -172,6 +175,11 @@ class ManagerApiWorker(unittest.TestCase):
 
     def test_manager_api_worker(self):
         self.start()
+        rest = os.path.join(self.run, "manager-rest.sock")
+        self.assertTrue(wait_for(lambda: os.path.exists(rest)))
+        time.sleep(0.5)
+        self.assertIsNone(self.read("adp"))  # 운용 모드: 아직 기다리는 중
+        self.assertTrue(self.call(rest, {"op": "set_access_mode", "mode": "development"})["ok"])
         out = json.loads(wait_for(lambda: self.read("adp")) or "null")
         self.assertIsNotNone(out, "manager_api worker did not run")
         self.assertEqual(out["system"]["data"]["manager_api_workers"], ["adp"])

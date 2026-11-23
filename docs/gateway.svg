@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="940" height="640" viewBox="0 0 940 640" role="img" font-family="'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif">
 <title>게이트웨이 실행 구조</title>
-<desc>브라우저와 외부 프로그램은 nginx로만 들어온다. nginx는 화면 파일을 바로 내주고, HTTPS·요청 크기·접속 수를 제한하고, API만 보드 안 Unix 소켓으로 게이트웨이에 넘긴다. 게이트웨이는 신분 확인, 명령 기록, 운용·정비 모드, 매니저·process-manager·워커로 전달, 스트림 중계를 한다. 판단은 하지 않는다</desc>
+<desc>브라우저와 외부 프로그램은 nginx로만 들어온다. nginx는 화면 파일을 바로 내주고, HTTPS·요청 크기·접속 수를 제한하고, API만 보드 안 Unix 소켓으로 게이트웨이에 넘긴다. 게이트웨이는 신분 확인, 명령 기록, 운용·개발 모드, 매니저·process-manager·워커로 전달, 스트림 중계를 한다. 판단은 하지 않는다</desc>
 <defs>
 <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
 </defs>
@@ -32,7 +32,7 @@
 
 <rect x="500" y="66" width="400" height="108" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
 <text x="700" y="88" text-anchor="middle" font-size="13" font-weight="500" fill="#3C3489">요청 처리 스레드 묶음 gw.http (상한 N개)</text>
-<text x="700" y="108" text-anchor="middle" font-size="11.5" fill="#534AB7">① 신분 확인(세션 · 토큰) → ② 권한(역할 · 운용/정비 모드)</text>
+<text x="700" y="108" text-anchor="middle" font-size="11.5" fill="#534AB7">① 신분 확인(세션 · 토큰) → ② 권한(역할 · 운용/개발 모드)</text>
 <text x="700" y="126" text-anchor="middle" font-size="11.5" fill="#534AB7">③ 전달: Manager API · 워커 명령 · (나중) 매니저 · 보드 읽기</text>
 <text x="700" y="144" text-anchor="middle" font-size="11.5" fill="#534AB7">④ 명령 기록 큐에 넣기 → ⑤ 응답</text>
 <text x="700" y="164" text-anchor="middle" font-size="10.5" fill="#888780">요청 하나 = 짧은 일. 기다림마다 상한(Manager 2 s, 워커 명령 설정값)</text>
@@ -50,7 +50,7 @@
 
 <rect x="500" y="322" width="400" height="88" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
 <text x="700" y="344" text-anchor="middle" font-size="12.5" font-weight="500" fill="#444441">작은 공유 상태 (잠금 하나, 잠금 안에서 I/O 금지)</text>
-<text x="700" y="364" text-anchor="middle" font-size="11" fill="#5F5E5A">세션(만료) · 운용/정비 모드(저장 안 함, 재시작하면 운용)</text>
+<text x="700" y="364" text-anchor="middle" font-size="11" fill="#5F5E5A">세션(만료) · 운용/개발 모드(저장 안 함, 재시작하면 운용)</text>
 <text x="700" y="382" text-anchor="middle" font-size="11" fill="#5F5E5A">사용자 · 역할은 파일(config-manager가 생기면 그쪽이 관리)</text>
 <text x="700" y="398" text-anchor="middle" font-size="10.5" fill="#888780">게이트웨이는 판단하지 않음: 허가는 매니저, 기록 보관은 record-manager</text>
 
