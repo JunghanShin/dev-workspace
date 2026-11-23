@@ -131,5 +131,37 @@ class NginxFront(unittest.TestCase):
                                      name="gw-front2", unix_only=self.sock)
 
 
+class Render(unittest.TestCase):
+    """render.sh가 nginx 빌드에 맞춰 설정을 만드는지(nginx 없이: 가짜 nginx -V). 보드의 Ubuntu 22.04 nginx-light는
+    limit_conn 모듈이 없어 설정 점검이 실패했던 일이 있다"""
+
+    def render(self, version_text):
+        import tempfile
+        d = tempfile.mkdtemp(prefix="ngr")
+        fake = os.path.join(d, "nginx")
+        with open(fake, "w") as f:
+            f.write("#!/bin/sh\necho '%s' >&2\n" % version_text)
+        os.chmod(fake, 0o755)
+        out = os.path.join(d, "nginx.conf")
+        subprocess.check_call(["bash", RENDER, out, d, "/x/gw.sock", "127.0.0.1:1", "/ws", "1"],
+                              env=dict(os.environ, NGINX_BIN=fake))
+        text = open(out).read()
+        shutil.rmtree(d, ignore_errors=True)
+        return text
+
+    def test_with_and_without_limit_conn(self):
+        full = self.render("configure arguments: --with-http_ssl_module")
+        light = self.render("configure arguments: --without-http_limit_conn_module --without-http_limit_req_module")
+        self.assertIn("limit_conn_zone", full)
+        self.assertIn("limit_conn perip", full)
+        self.assertNotIn("limit_conn_zone", light)
+        self.assertNotIn("limit_conn perip", light)
+        for text in (full, light):
+            body = [l for l in text.splitlines() if not l.lstrip().startswith("#")]  # 머리 설명 주석은 빼고
+            self.assertFalse([l for l in body if "@PREFIX@" in l or "@LIMIT" in l or "@UI_LOCATION@" in l])
+            self.assertIn("server unix:/x/gw.sock;", text)
+            self.assertIn("root /ws/ui/web;", text)
+
+
 if __name__ == "__main__":
     unittest.main()

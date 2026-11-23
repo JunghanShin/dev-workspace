@@ -2,6 +2,7 @@
 # 워크스페이스 계정으로 띄운다(시스템 nginx 설정·서비스는 쓰지 않음). 만들어진 파일은 손으로 고치지 않는다.
 #   @PREFIX@ 이 nginx의 실행 폴더(<데이터>/run/nginx)   @SOCK@ 게이트웨이 Unix 소켓   @LISTEN@ 받는 주소:포트
 #   @MIME@ mime.types 경로   @UI_LOCATION@ 화면 파일을 직접 줄지(화면 끔이면 전부 게이트웨이로)
+#   @LIMIT_ZONE@ @LIMIT_CONN@ 주소당 연결 제한(nginx에 limit_conn 모듈이 있을 때만, render.sh가 정함)
 worker_processes 1;
 pid @PREFIX@/nginx.pid;
 error_log stderr warn;          # 시작 셸 로그(journal)로
@@ -29,7 +30,7 @@ http {
     client_body_timeout 10s;
     send_timeout 30s;
     keepalive_timeout 15s;
-    limit_conn_zone $binary_remote_addr zone=perip:1m;
+@LIMIT_ZONE@
 
     gzip on;
     gzip_types text/css text/javascript application/javascript application/json image/svg+xml;
@@ -40,7 +41,7 @@ http {
 
     server {
         listen @LISTEN@;
-        limit_conn perip 64;    # 주소 하나가 연결을 다 쓰지 못하게(화면 여러 개 + 스트림은 넉넉히)
+@LIMIT_CONN@
 
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;               # 게이트웨이가 영상 주소에 이 보드 주소를 씀
