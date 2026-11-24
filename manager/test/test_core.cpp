@@ -900,6 +900,28 @@ TEST(peers_build_operation_and_development) {
     CHECK_EQ(p["peers"]["mission-manager"], J(R"({"pgid": 1400, "trusted_from": true})"));
     CHECK_EQ(p["workers"]["siyi"]["allow"], J(R"({"gateway": "*", "mission-manager": "*"})"));
     CHECK_EQ(p["workers"]["bare"]["allow"], J(R"({"gateway": "*", "mission-manager": "*"})"));
+    CHECK(!p.contains("entry"));  // 입구 id를 안 줌: 예전과 같음
+    // 명령 입구가 있으면(managers/mission/external-link.md): commanders는 via로, 입구 allow에 mission 명령 자동
+    {
+        auto wm = w;
+        wm["mission-manager"].roles["mission"] = {"mission.send"};
+        wm["mission-manager"].read = {"get_status", "mission.get_queues"};
+        const std::vector<pm::PeerProcess> pr = {{"gateway", 812, 0, true}, {"mission-manager", 0, 1400, true},
+                                                 {"ext-ops", 0, 1290, false}};
+        Json q = pm::build_peers(commanders, wm, pr, "operation", "enforce", Json(), "mission-manager");
+        CHECK_EQ(q["entry"], J(R"({"id": "mission-manager"})"));
+        CHECK_EQ(q["workers"]["siyi"]["allow"], J(R"({"gateway": "*", "mission-manager": "*"})"));
+        CHECK_EQ(q["workers"]["siyi"]["via"], J(R"({"ext-ops": ["gimbal.angle", "gimbal.get"]})"));
+        CHECK_EQ(q["workers"]["mission-manager"]["allow"]["ext-ops"], J(R"(["mission.send"])"));
+        CHECK(!q["workers"]["bare"].contains("via"));
+        q = pm::build_peers(commanders, wm, pr, "development", "enforce", Json(), "mission-manager");
+        CHECK_EQ(q["workers"]["siyi"]["via"], J(R"({"ext-ops": "*"})"));
+        CHECK_EQ(q["workers"]["siyi"]["allow"], J(R"({"gateway": "*", "mission-manager": "*"})"));
+        // 입구가 역할 mission을 안 내보내면(계약 없음) 입구 없음과 같음
+        q = pm::build_peers(commanders, w, pr, "operation", "enforce", Json(), "mission-manager");
+        CHECK(!q.contains("entry"));
+        CHECK(q["workers"]["siyi"]["allow"].contains("ext-ops"));
+    }
 }
 
 }  // namespace

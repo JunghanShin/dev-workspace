@@ -3,6 +3,7 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cstring>
@@ -1062,7 +1063,84 @@ static void command_lease() {
     rmdir(dir);
 }
 
+
+// 명령 입구로 감싸기(0.16, managers/mission/external-link.md): peers.json entry가 있으면 mission.send로 입구에,
+// get_status·입구 자신·via_entry=false는 그대로, 기다리는 동안 맥박(느린 입구에도 stall 아님)
+static void command_client_via_entry() {
+    char tmpl[] = "/tmp/lw-entry-XXXXXX";
+    CHECK(mkdtemp(tmpl) != nullptr);
+    const std::string dir = tmpl;
+    CHECK(mkdir((dir + "/run").c_str(), 0700) == 0 && mkdir((dir + "/run/cmd").c_str(), 0700) == 0);
+    const std::string peers = dir + "/peers.json";
+    write_text(peers, R"({"version": 1, "entry": {"id": "gate"}, "peers": {}, "workers": {}})");
+    setenv("WORKSPACE_DATA", dir.c_str(), 1);
+    setenv("WORKSPACE_PEERS_FILE", peers.c_str(), 1);
+    const std::string sock = dir + "/run/cmd/gate.sock";
+    const int lfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    sockaddr_un a{};
+    a.sun_family = AF_UNIX;
+    std::strncpy(a.sun_path, sock.c_str(), sizeof(a.sun_path) - 1);
+    CHECK(bind(lfd, reinterpret_cast<sockaddr*>(&a), sizeof a) == 0 && listen(lfd, 4) == 0);
+    // 가짜 입구: 받은 요청을 data로 돌려줌(2.3 s 늦게: 기본 thread_stall 2 s보다 길게)
+    std::thread srv([lfd] {
+        for (int i = 0; i < 1; ++i) {
+            const int c = accept(lfd, nullptr, nullptr);
+            if (c < 0) return;
+            char buf[1024] = {0};
+            const ssize_t n = read(c, buf, sizeof buf - 1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2300));
+            const std::string line = worker::Json{{"ok", true}, {"data", worker::Json::parse(std::string(buf, n))}}.dump() + "\n";
+            CHECK(::write(c, line.data(), line.size()) == static_cast<ssize_t>(line.size()));
+            close(c);
+        }
+    });
+    worker::ThreadWatch watch(std::chrono::milliseconds(2000));
+    worker::CommandClient::Options co;
+    co.thread_name = "t.via";
+    worker::CommandClient cmd(watch, "cam", co);
+    cmd.start();
+    CHECK(cmd.send("mount.rate", {{"hz", 2}}) == 1);
+    std::optional<worker::CommandClient::Reply> r;
+    bool stalled = false;
+    for (int i = 0; i < 400 && !r; ++i) {
+        r = cmd.next();
+        stalled |= !watch.all_alive(worker::Clock::now());
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(r && r->response["ok"] == true);
+    CHECK(r && r->response["data"]["cmd"] == "mission.send" && r->response["data"]["args"]["target"] == "cam");
+    CHECK(r && r->response["data"]["args"]["cmd"] == "mount.rate" && r->response["data"]["args"]["args"]["hz"] == 2);
+    CHECK(!stalled && cmd.sent_via_entry() == 1);
+    // get_status는 대상으로 바로(대상 소켓이 없어 connect)
+    CHECK(cmd.send("get_status") == 2);
+    r.reset();
+    CHECK(wait_until([&] { r = cmd.next(); return r.has_value(); }, 3000));
+    CHECK(r && r->response["error"]["code"] == "connect" && cmd.sent_via_entry() == 1);
+    cmd.stop();
+    // 입구 자신에게, via_entry=false면 감싸지 않음(입구 소켓으로 바로 = 받은 그대로)
+    worker::CommandClient::Options no;
+    no.thread_name = "t.novia";
+    no.via_entry = false;
+    worker::CommandClient direct(watch, "cam", no);
+    direct.start();
+    direct.send("mount.rate");
+    r.reset();
+    CHECK(wait_until([&] { r = direct.next(); return r.has_value(); }, 3000));
+    CHECK(r && r->response["error"]["code"] == "connect" && direct.sent_via_entry() == 0);
+    direct.stop();
+    srv.join();
+    close(lfd);
+    unsetenv("WORKSPACE_PEERS_FILE");
+    unsetenv("WORKSPACE_DATA");
+    std::remove(sock.c_str());
+    std::remove(peers.c_str());
+    rmdir((dir + "/run/cmd").c_str());
+    rmdir((dir + "/run").c_str());
+    rmdir(dir.c_str());
+}
+
 int main() {
+    command_client_via_entry();
     command_lease();
     manager_link_tools();
     inputs_resolve_and_host();

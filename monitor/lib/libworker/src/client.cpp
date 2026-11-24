@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 
 namespace worker {
 
@@ -34,6 +35,11 @@ Json manager_call(const Json& request, std::chrono::milliseconds timeout) {
 }
 
 Json send_request(const std::string& path, const Json& request, std::chrono::milliseconds timeout) {
+    return send_request(path, request, timeout, std::function<void()>());
+}
+
+Json send_request(const std::string& path, const Json& request, std::chrono::milliseconds timeout,
+                  const std::function<void()>& tick) {
     sockaddr_un addr{};
     if (path.size() >= sizeof(addr.sun_path)) return error("connect", "socket path too long: " + path);
     const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -59,7 +65,11 @@ Json send_request(const std::string& path, const Json& request, std::chrono::mil
             return error("timeout", "no reply");
         }
         pollfd p{fd, POLLIN, 0};
-        if (poll(&p, 1, static_cast<int>(left)) <= 0) continue;
+        const int wait = tick ? static_cast<int>(std::min<long long>(left, 200)) : static_cast<int>(left);
+        if (poll(&p, 1, wait) <= 0) {
+            if (tick) tick();
+            continue;
+        }
         char buf[4096];
         const ssize_t n = recv(fd, buf, sizeof(buf), 0);
         if (n <= 0) break;

@@ -75,6 +75,10 @@ public:
         int timeout_ms = 1500;            // 명령 하나의 응답 대기 상한(thread_stall_sec보다 짧게)(워커 루프가 아니라 이 스레드가 기다린다)
         size_t queue = 64;                // 보낼 명령 큐(넘치면 send가 0: 잃으면 안 되므로 거절)
         std::string socket;               // 비우면 상대 워커 id의 기본 명령 소켓(default_command_socket)
+        // 명령 입구로 감싸기(libworker 0.16, 워크스페이스 managers/mission/external-link.md): 허용 목록(peers.json)에
+        // "entry"가 있고 상대가 입구가 아니면 {"cmd": "mission.send", "args": {"target", "cmd", "args"}}로 입구에 보낸다.
+        // 응답은 대상 워커의 것이 그대로 온다. 입구 자신(mission)·socket을 직접 준 경우는 끔
+        bool via_entry = true;
     };
     struct Reply {
         uint64_t id = 0;               // send가 돌려준 번호
@@ -99,6 +103,7 @@ public:
 
     bool reachable() const { return reachable_.load(); }  // 마지막 명령이 상대에게 닿았는지
     const std::string& peer() const { return peer_; }
+    uint64_t sent_via_entry() const { return via_count_.load(); }  // 입구로 감싸 보낸 수
     WorkerThread& thread() { return thread_; }
 
 private:
@@ -109,8 +114,12 @@ private:
         nlohmann::json envelope;  // 봉투에 더할 칸(없으면 null)
     };
     void run(WorkerThread& t);
+    std::string entry();  // peers.json의 entry.id(바뀐 시각을 보고 다시 읽음, 명령 스레드만 부름). 없으면 빈 글
     std::string peer_, path_;
     Options opt_;
+    std::string peers_file_, entry_;
+    long long peers_mtime_ns_ = -1;
+    std::atomic<uint64_t> via_count_{0};
     BoundedQueue<Request> requests_;
     BoundedQueue<Reply> replies_;
     WorkerThread thread_;

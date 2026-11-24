@@ -111,6 +111,8 @@ process-manager가 연결 선언·계약·모드·지금 떠 있는 프로세스
 |---|---|
 | `guard` | `off`(보지 않음) · `warn`(어긋나면 기록만) · `enforce`(거절, **기본**, 0.71). Manager 설정 `command_guard` |
 | `peers` | 명령하는 곳 → 알아볼 프로세스. 워커·매니저는 프로세스 그룹(`pgid`, process-manager가 새 그룹으로 띄움), 게이트웨이는 `pid`(게이트웨이가 `manager-rest.sock`에 붙을 때 커널이 알려 준 pid. 따로 등록하지 않음). `trusted_from`: 명령의 `from` 칸을 믿는 곳(게이트웨이만) |
+| `entry` | 명령 입구 매니저 `{"id"}`(0.73, `managers/mission/external-link.md`). 있으면 libworker `CommandClient`가 다른 워커로 가는 명령을 `mission.send`로 감싸 입구에 보냄 |
+| `workers.<id>.via` | 입구를 거쳐 보내도 되는 곳 → 허용 명령(0.73). 입구가 있으면 `commanders` 항목이 `allow` 대신 여기로(입구 mission이 검사). 입구 자신의 `allow`에는 그곳들이 역할 `mission` 명령으로 자동으로 |
 | `workers.<id>.read` | 늘 허용(읽기) |
 | `workers.<id>.allow` | 명령하는 곳 → 허용 명령. `"*"`는 전부. 운용 모드면 4.1의 역할 명령만(워커 이름만 적었으면 `operate` 명령도), 개발 모드면 그 워커의 모든 명령(`"*"`). 게이트웨이는 늘 `"*"`(모드 검사는 게이트웨이가 사용자 역할과 함께 함) |
 

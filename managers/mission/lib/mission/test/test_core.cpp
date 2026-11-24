@@ -76,7 +76,28 @@ static void test_queue() {
     CHECK(z.submit(req(2, "a", "r", 0)) == A::Busy);
 }
 
+
+static void test_access() {
+    const Json peers = Json::parse(R"({"workers": {"cam": {"allow": {}, "via": {"ext": ["mount.rate", "mount.stop"], "dev": "*"}},
+                                                   "pos": {"allow": {}}}})");
+    const mission::Access a = mission::access_from_peers(peers);
+    using V = mission::Verdict;
+    CHECK(mission::check_access(a, "screen", "cam", "mount.rate", Json::object(), nullptr) == V::Pass);  // via에 없음(게이트웨이·매니저)
+    CHECK(mission::check_access(a, "ext", "cam", "mount.rate", Json::object(), nullptr) == V::Allow);
+    CHECK(mission::check_access(a, "ext", "cam", "mount.angle", Json::object(), nullptr) == V::Deny);
+    CHECK(mission::check_access(a, "ext", "pos", "loc.reset", Json::object(), nullptr) == V::Deny);    // 그 대상엔 허락 없음
+    CHECK(mission::check_access(a, "dev", "cam", "anything", Json::object(), nullptr) == V::Allow);    // "*"
+    CHECK(mission::check_access(a, "ext", "cam", "lease.renew", Json{{"role", "mount"}}, nullptr) == V::Allow);
+    CHECK(mission::check_access(a, "ext", "cam", "lease.renew", Json{{"role", "other"}}, nullptr) == V::Deny);
+    CHECK(mission::fast_command(nullptr, "get_status") && mission::fast_command(nullptr, "lease.renew"));
+    mission::Contract c;
+    c.read.insert("mount.get");
+    CHECK(mission::fast_command(&c, "mount.get") && !mission::fast_command(&c, "mount.rate"));
+    CHECK(mission::access_from_peers(Json()).listed.empty());
+}
+
 int main() {
+    test_access();
     test_roles();
     test_queue();
     if (failures) {

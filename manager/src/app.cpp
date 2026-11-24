@@ -258,8 +258,17 @@ void App::write_peers(bool force) {
             if (std::find(list.begin(), list.end(), Json(id)) == list.end()) list.push_back(id);
         }
     }
+    // 명령 입구(설치된 command_entry 매니저 중 역할 mission을 내보내는 것, managers/mission/external-link.md)
+    std::string entry;
+    for (const auto& id : cfg_.command_entries) {
+        const auto it = cmds_.find(id);
+        if (it != cmds_.end() && it->second.roles.count("mission")) {
+            entry = id;
+            break;
+        }
+    }
     Json doc = build_peers(commanders, cmds_, procs, access_mode_, cfg_.command_guard,
-                           cfg_.boot_id);
+                           cfg_.boot_id, entry);
     const std::string text = dump_file(doc);
     if (!force && text == peers_text_) return;
     peers_text_ = text;

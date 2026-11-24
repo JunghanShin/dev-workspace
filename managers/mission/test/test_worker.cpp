@@ -222,6 +222,64 @@ static void test_mission() {
     w.finish();
 }
 
+
+// 외부 연동 워커(external-link.md): via 허락(시험 프로세스가 ext-ops), 허락 없는 명령은 forbidden, lease.renew는 큐를 안 기다림
+static Json send_as(const std::string& sock, const std::string& cmd, const Json& args) {
+    const int fd = connect_unix(sock);
+    if (fd < 0) return Json();
+    send_line(fd, Json{{"cmd", "mission.send"}, {"args", {{"target", "w1"}, {"cmd", cmd}, {"args", args}}}, {"from", "screen"}}.dump());
+    const Json r = Json::parse(read_line(fd, 8000), nullptr, false);
+    close(fd);
+    return r;
+}
+
+static void test_external() {
+    const std::string data = g_dir + "/data2";
+    (void)!std::system(("mkdir -p " + data + "/run/cmd " + data + "/run/stream").c_str());
+    const std::string peers = data + "/run/peers.json";
+    {
+        std::ofstream o(peers);
+        o << Json{{"version", 1}, {"guard", "off"}, {"mode", "operation"}, {"entry", {{"id", "mission-manager"}}},
+                  {"peers", {{"ext-ops", {{"pid", static_cast<int>(getpid())}}}}},
+                  {"workers", {{"w1", {{"read", {"get_status"}}, {"allow", Json::object()}, {"via", {{"ext-ops", {"slow.a"}}}}}}}}}.dump();
+    }
+    FakeWorker w;
+    w.start(data + "/run/cmd/w1.sock");
+    const pid_t pid = spawn(R"({"id":"mission-manager","config_version":1,"config":{"mission":{"queue":4}}})",
+                            {{"WORKSPACE_DATA", data}, {"WORKSPACE_MANAGER_SOCKET", g_dir + "/no-pm.sock"},
+                             {"WORKSPACE_PEERS_FILE", peers}});
+    const std::string sock = data + "/run/cmd/mission-manager.sock";
+    for (int i = 0; i < 150 && connect_unix(sock) < 0; ++i) std::this_thread::sleep_for(100ms);
+    // 허락 없는 명령: forbidden(게이트웨이처럼 from을 적어도 믿지 않음 → ext-ops)
+    const Json no = send_as(sock, "slow.b", Json::object());
+    CHECK(no.is_object() && !no.value("ok", true) && no["error"]["code"] == "forbidden");
+    // 허락된 slow.a(400 ms) 중에 lease.renew(role slow)는 기다리지 않음
+    Json a, renew;
+    double took_renew = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    std::thread ta([&] { a = send_as(sock, "slow.a", Json::object()); });
+    std::this_thread::sleep_for(50ms);
+    renew = send_as(sock, "lease.renew", Json{{"role", "slow"}});
+    took_renew = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    ta.join();
+    CHECK(a.value("ok", false) && a["data"]["cmd"] == "slow.a");
+    CHECK(renew.value("ok", false) && renew["data"]["cmd"] == "lease.renew" && took_renew < 0.3);
+    {
+        std::lock_guard<std::mutex> lock(w.mu);
+        bool origin_ok = false;
+        for (const auto& g : w.got) origin_ok |= g.value("cmd", "") == "slow.a" && g.value("origin", "") == "ext-ops";
+        CHECK(origin_ok);
+    }
+    const int fd = connect_unix(sock);
+    send_line(fd, R"({"cmd":"get_status","args":{}})");
+    const Json st = Json::parse(read_line(fd, 5000), nullptr, false);
+    close(fd);
+    CHECK(st.value("ok", false));
+    kill(pid, SIGTERM);
+    CHECK(wait_exit(pid, 15000) == 0);
+    w.finish();
+}
+
 static void test_bad_config() {
     CHECK(wait_exit(spawn(R"({"id":"mission-manager","config":{"mission":{"nope":1}}})", {}), 15000) == 1);
     CHECK(wait_exit(spawn(R"({"id":"mission-manager","config":{"mission":{"command_timeout_ms":3000,"total_timeout_ms":1000}}})", {}), 15000) == 1);
@@ -237,6 +295,7 @@ int main(int argc, char** argv) {
     g_dir = mkdtemp(tmpl);
     signal(SIGPIPE, SIG_IGN);
     test_mission();
+    test_external();
     test_bad_config();
     (void)!std::system(("rm -rf " + g_dir).c_str());
     if (failures) {

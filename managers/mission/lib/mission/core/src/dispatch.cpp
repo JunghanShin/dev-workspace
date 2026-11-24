@@ -2,6 +2,47 @@
 
 namespace mission {
 
+Access access_from_peers(const Json& doc) {
+    Access a;
+    if (!doc.is_object() || !doc.contains("workers") || !doc["workers"].is_object()) return a;
+    for (const auto& [target, w] : doc["workers"].items()) {
+        if (!w.is_object() || !w.contains("via") || !w["via"].is_object()) continue;
+        for (const auto& [who, v] : w["via"].items()) {
+            a.listed.insert(who);
+            if (v == Json("*")) {
+                a.via[target][who] = std::nullopt;
+            } else if (v.is_array()) {
+                std::set<std::string> s;
+                for (const auto& c : v)
+                    if (c.is_string()) s.insert(c.get<std::string>());
+                a.via[target][who] = s;
+            }
+        }
+    }
+    return a;
+}
+
+Verdict check_access(const Access& a, const std::string& origin, const std::string& target, const std::string& cmd,
+                     const Json& args, const Contract* c) {
+    if (!a.listed.count(origin)) return Verdict::Pass;
+    const auto t = a.via.find(target);
+    if (t == a.via.end()) return Verdict::Deny;
+    const auto w = t->second.find(origin);
+    if (w == t->second.end()) return Verdict::Deny;
+    if (!w->second) return Verdict::Allow;  // "*"
+    if (w->second->count(cmd)) return Verdict::Allow;
+    if (cmd == "lease.renew" && args.is_object() && args.value("role", Json()).is_string()) {
+        const std::string role = args["role"].get<std::string>();
+        for (const auto& x : *w->second)
+            if (role_of(c, x) == role) return Verdict::Allow;
+    }
+    return Verdict::Deny;
+}
+
+bool fast_command(const Contract* c, const std::string& cmd) {
+    return cmd == "get_status" || cmd == "lease.renew" || (c && c->read.count(cmd));
+}
+
 Contract contract_from_io(const Json& io) {
     Contract c;
     if (!io.is_object()) return c;

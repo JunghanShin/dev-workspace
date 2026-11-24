@@ -1,6 +1,6 @@
 {
   "name": "mission",
-  "version": "1.0",
+  "version": "1.1",
   "description": "명령 입구(managers/mission/design.md 2·4장). 이 역할을 내보내는 워커가 있으면 게이트웨이가 읽기가 아닌 워커 명령을 이리로 보낸다",
   "topics": {
     "mission": {
@@ -13,17 +13,18 @@
                    "properties": {"waiting": {"type": "integer"},
                                   "inflight": {"type": ["object", "null"], "properties": {"cmd": {"type": "string"}, "origin": {"type": "string"},
                                                                                          "age_ms": {"type": "integer", "unit": "ms"}}}}}},
-        "sent": {"type": "integer"}, "busy": {"type": "integer"}, "timeouts": {"type": "integer"}, "unavailable": {"type": "integer"}
+        "sent": {"type": "integer"}, "busy": {"type": "integer"}, "timeouts": {"type": "integer"}, "unavailable": {"type": "integer"},
+        "forbidden": {"type": "integer", "description": "via 허락이 없어 거절한 수(external-link.md)"}
       }
     }
   },
   "commands": {
-    "mission.send": {"description": "대상 워커에 명령을 넘김. 답은 대상 워커의 응답 그대로(mission 자신의 오류: busy·timeout·unavailable)",
+    "mission.send": {"description": "대상 워커에 명령을 넘김. 답은 대상 워커의 응답 그대로(mission 자신의 오류: busy·timeout·unavailable·forbidden). 읽기·lease.renew는 큐를 기다리지 않음(external-link.md)",
                      "operate": true,
                      "args": {"type": "object", "required": ["target", "cmd"],
                               "properties": {"target": {"type": "string"}, "cmd": {"type": "string"}, "args": {"type": "object"}}},
                      "reply": {"type": "object", "additionalProperties": true},
-                     "errors": ["bad_request", "busy", "timeout", "unavailable"]},
+                     "errors": ["bad_request", "busy", "timeout", "unavailable", "forbidden"]},
     "mission.get_queues": {"description": "지금 대기 큐", "read": true, "args": {"type": "object"},
                            "reply": {"type": "object", "additionalProperties": true}, "errors": []}
   }

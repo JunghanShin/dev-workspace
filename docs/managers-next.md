@@ -5,7 +5,7 @@
 | # | 일 | 들어가는 곳 | 설계서 | 상태 |
 |---|---|---|---|---|
 | 1 | 명령 임대(끊기면 안전 상태) | 계약 + libworker | `docs/command-lease.md` | 구현(0.72), 장치 워커 표시는 프로젝트 몫 |
-| 2 | 외부 연동 워커를 mission으로 | mission-manager, process-manager | `managers/mission/design.md` 다음 판 | 대기 |
+| 2 | 외부 연동 워커를 mission으로 | mission-manager, process-manager, libworker | `managers/mission/external-link.md` | 구현(0.73), 보드는 외부 연동 워커가 생기면 |
 | 3 | 우선순위(누가 이기나) | mission-manager | `managers/mission/design.md` 다음 판 | 대기 |
 | 4 | 명령 조건(모드 전환 허가) | mission-manager | `managers/mission/design.md` 다음 판 | 대기 |
 | 5 | fault 조건 조합·단계 대응 | fault-manager | `managers/fault/design.md` 다음 판 | 대기 |

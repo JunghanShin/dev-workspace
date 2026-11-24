@@ -1,3 +1,7 @@
+#include <sys/stat.h>
+
+#include <cstdlib>
+#include <fstream>
 #include "mission/module.hpp"
 
 #include <poll.h>
@@ -43,6 +47,7 @@ void Module::configure(const worker::Json& config) {
 }
 
 void Module::start(worker::Host& host) {
+    if (const char* pf = std::getenv("WORKSPACE_PEERS_FILE"); pf && *pf) peers_file_ = pf;
     host_ = &host;
     disp_ = std::make_unique<Dispatcher>(s_.queue, static_cast<int64_t>(s_.total_timeout_ms) * 1000000);
     worker::Publisher::Options po;
@@ -81,6 +86,8 @@ void Module::add_pollfds(std::vector<pollfd>& fds) {
     if (pm_) fds.push_back({pm_->wake_fd(), POLLIN, 0});
     fds.push_back({io_got_.wake_fd(), POLLIN, 0});
     for (const auto& [k, l] : lanes_)
+        if (l.client) fds.push_back({l.client->wake_fd(), POLLIN, 0});
+    for (const auto& [k, l] : fast_)
         if (l.client) fds.push_back({l.client->wake_fd(), POLLIN, 0});
 }
 
@@ -124,6 +131,17 @@ void Module::drain() {
             if (auto next = disp_->done(key)) send_now(*next);
         }
     }
+    for (auto& [target, lane] : fast_) {
+        if (!lane.client) continue;
+        while (auto rep = lane.client->next()) {
+            auto it = lane.pending.find(rep->id);
+            if (it == lane.pending.end()) continue;
+            const uint64_t rid = it->second;
+            lane.pending.erase(it);
+            finish(rid, rep->response);
+            dirty_ = true;
+        }
+    }
 }
 
 void Module::send_now(const Request& r) {
@@ -133,6 +151,7 @@ void Module::send_now(const Request& r) {
         o.thread_name = ("mc." + r.key()).substr(0, 15);
         o.timeout_ms = s_.command_timeout_ms;
         o.queue = 2;
+        o.via_entry = false;  // 입구 자신: 워커로 바로
         lane.client = std::make_unique<worker::CommandClient>(host_->watch(), r.target, o);
         lane.client->start();
     }
@@ -149,6 +168,46 @@ void Module::send_now(const Request& r) {
     lane.request_id = r.id;
     ++sent_;
     dirty_ = true;
+}
+
+void Module::send_fast(const Request& r) {
+    FastLane& lane = fast_[r.target];
+    if (!lane.client) {
+        worker::CommandClient::Options o;
+        o.thread_name = ("mf." + r.target).substr(0, 15);
+        o.timeout_ms = 1000;
+        o.queue = 8;
+        o.via_entry = false;
+        lane.client = std::make_unique<worker::CommandClient>(host_->watch(), r.target, o);
+        lane.client->start();
+    }
+    lane.last_used = worker::Clock::now();
+    Json envelope = Json::object();
+    if (!r.origin.empty()) envelope["origin"] = r.origin;
+    const uint64_t cid = lane.client->send(r.cmd, r.args, envelope);
+    if (cid == 0) {
+        ++busy_;
+        finish(r.id, worker::error_reply("busy", r.target + ": fast lane full"));
+        return;
+    }
+    lane.pending[cid] = r.id;
+    ++fast_sent_;
+    dirty_ = true;
+}
+
+void Module::refresh_access() {
+    if (peers_file_.empty()) return;
+    struct stat st{};
+    if (::stat(peers_file_.c_str(), &st) != 0) return;
+    const long long m = static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL + st.st_mtim.tv_nsec;
+    if (m == peers_mtime_ns_) return;
+    try {
+        std::ifstream in(peers_file_);
+        access_ = access_from_peers(Json::parse(in));
+        peers_mtime_ns_ = m;
+    } catch (const std::exception&) {
+        // 쓰는 중이었을 수 있음: 다음 명령 때 다시(지난 표 그대로)
+    }
 }
 
 void Module::finish(uint64_t request_id, const Json& response) {
@@ -194,9 +253,29 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
         return true;
     }
     auto c = contracts_.find(r.target);
-    r.role = role_of(c == contracts_.end() ? nullptr : &c->second, r.cmd);
+    const Contract* contract = c == contracts_.end() ? nullptr : &c->second;
+    refresh_access();
+    if (check_access(access_, r.origin, r.target, r.cmd, r.args, contract) == Verdict::Deny) {
+        ++forbidden_;
+        dirty_ = true;
+        const auto now = worker::Clock::now();
+        auto& last = denied_at_[r.origin + "\x1f" + r.target + "." + r.cmd];
+        if (last == worker::TimePoint{} || now - last >= std::chrono::seconds(10)) {
+            last = now;
+            event("warning", "command_forbidden", r.origin + " may not send " + r.cmd + " to " + r.target,
+                  {{"origin", r.origin}, {"target", r.target}, {"cmd", r.cmd}});
+        }
+        reply(worker::error_reply("forbidden", r.origin + " is not allowed to send " + r.cmd + " to " + r.target));
+        return true;
+    }
+    r.role = role_of(contract, r.cmd);
     r.id = ++next_id_;
     r.enq_ns = mono_ns();
+    if (fast_command(contract, r.cmd)) {  // 큐를 기다리지 않음(external-link.md 5장)
+        replies_[r.id] = std::move(reply);
+        send_fast(r);
+        return true;
+    }
     switch (disp_->submit(r)) {
     case Dispatcher::Admit::Busy:
         ++busy_;
@@ -234,6 +313,14 @@ void Module::on_timer(worker::TimePoint now) {
             ++it;
         }
     }
+    for (auto it = fast_.begin(); it != fast_.end();) {
+        if (it->second.pending.empty() && now - it->second.last_used > std::chrono::duration<double>(s_.idle_close_s)) {
+            it->second.client->stop();
+            it = fast_.erase(it);
+        } else {
+            ++it;
+        }
+    }
     // 계약 다시 읽기: 워커가 늘거나 줄면 바로, 아니면 10 s마다
     if (ids_changed_ || now >= next_io_) {
         std::vector<std::string> ids;
@@ -258,7 +345,7 @@ void Module::publish(worker::TimePoint now, bool force) {
     const bool kf = pub_->keyframe_requested() || now >= next_kf_;
     if (kf) next_kf_ = now + std::chrono::seconds(5);
     const Json topic = {{"t_mono_ns", mono_ns()}, {"queues", disp_->snapshot(mono_ns())}, {"sent", sent_}, {"busy", busy_},
-                        {"timeouts", timeouts_}, {"unavailable", unavailable_}};
+                        {"timeouts", timeouts_}, {"unavailable", unavailable_}, {"forbidden", forbidden_}};
     Json line = {{"seq", ++seq_}, {"kf", kf}, {"t", unix_s()}, {"topics", {{"mission", topic}}},
                  {"events", pending_events_}, {"events_next", 0}};
     pending_events_.clear();
@@ -275,6 +362,8 @@ void Module::metrics(worker::Metrics& m) const {
     m.set("busy", busy_);
     m.set("timeouts", timeouts_);
     m.set("unavailable", unavailable_);
+    m.set("forbidden", forbidden_);
+    m.set("fast_sent", fast_sent_);
     m.set("queues", static_cast<long long>(lanes_.size()));
     m.set("waiting", static_cast<long long>(disp_ ? disp_->waiting() : 0));
     m.set("pm_link", pm_ && pm_->connected());
@@ -295,6 +384,9 @@ void Module::stop() {
     for (auto& [k, l] : lanes_)
         if (l.client) l.client->stop();
     lanes_.clear();
+    for (auto& [k, l] : fast_)
+        if (l.client) l.client->stop();
+    fast_.clear();
     if (io_thread_) {
         io_thread_->request_stop();
         io_thread_->join();

@@ -5,7 +5,8 @@
 // 스레드: 코어(호스트 루프) · mission.pm(process-manager 구독: 워커 상태) · mission.io(계약 get_io를 10 s마다)
 //         · mc.<대상>.<역할>(명령 스레드, libworker CommandClient) · mission.pub(주제 mission)
 // 명령: send(운용 조작) {"target", "cmd", "args"} → 대상 워커의 응답 그대로. get_queues(읽기)
-// 지표: sent, busy, timeouts, unavailable, queues, waiting
+// 지표: sent, busy, timeouts, unavailable, forbidden, fast_sent, queues, waiting
+// 외부 연동 워커(external-link.md): 허용 목록(WORKSPACE_PEERS_FILE) via로 허락, 읽기·lease.renew는 빠른 줄 mf.<대상>
 #pragma once
 
 #include <map>
@@ -56,8 +57,15 @@ private:
         uint64_t request_id = 0;  // 보낸 명령의 Request id
         worker::TimePoint last_used{};
     };
+    struct FastLane {
+        std::unique_ptr<worker::CommandClient> client;
+        std::map<uint64_t, uint64_t> pending;  // CommandClient 번호 → Request id
+        worker::TimePoint last_used{};
+    };
     void drain();
     void send_now(const Request& r);
+    void send_fast(const Request& r);
+    void refresh_access();
     void finish(uint64_t request_id, const Json& response);
     void event(const std::string& severity, const std::string& code, const std::string& text, const Json& detail);
     void publish(worker::TimePoint now, bool force);
@@ -75,10 +83,15 @@ private:
     std::map<std::string, std::string> states_;  // 워커 id → actual_state
     bool ids_changed_ = true;
     std::map<std::string, Lane> lanes_;               // (대상, 역할) → 명령 스레드
+    std::map<std::string, FastLane> fast_;            // 대상 → 빠른 줄(읽기·lease.renew)
+    std::string peers_file_;
+    long long peers_mtime_ns_ = -1;
+    Access access_;
+    std::map<std::string, worker::TimePoint> denied_at_;  // (보낸 곳, 명령) → 마지막 이벤트(10 s에 한 번)
     std::map<uint64_t, worker::Reply> replies_;       // Request id → 보낸 곳에 답할 것
     std::vector<Json> pending_events_;
     uint64_t next_id_ = 0, seq_ = 0, ev_seq_ = 0;
-    uint64_t sent_ = 0, busy_ = 0, timeouts_ = 0, unavailable_ = 0;
+    uint64_t sent_ = 0, busy_ = 0, timeouts_ = 0, unavailable_ = 0, forbidden_ = 0, fast_sent_ = 0;
     bool dirty_ = true;
     worker::TimePoint next_pub_{}, next_kf_{}, next_io_{};
 };

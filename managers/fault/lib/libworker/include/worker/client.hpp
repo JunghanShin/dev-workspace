@@ -2,6 +2,7 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <string>
 
 #include "nlohmann/json.hpp"
@@ -17,6 +18,9 @@ nlohmann::json send_command(const std::string& socket_path, const std::string& c
 // JSON 한 줄을 보내고 응답 한 줄을 받는다(요청 1건 = 연결 1개). 실패 형식은 send_command와 같다
 nlohmann::json send_request(const std::string& socket_path, const nlohmann::json& request,
                             std::chrono::milliseconds timeout = std::chrono::seconds(2));
+// 같지만 기다리는 동안 200 ms마다 tick()을 부른다(명령 스레드가 응답을 기다리며 맥박을 유지하게, libworker 0.16)
+nlohmann::json send_request(const std::string& socket_path, const nlohmann::json& request,
+                            std::chrono::milliseconds timeout, const std::function<void()>& tick);
 
 // Manager API 호출(워커 선언 "manager_api": true인 워커만, design.md 6.5). 소켓은 Manager가 넘긴 환경 변수
 // WORKSPACE_MANAGER_SOCKET(그 워커에게만 있다). 없으면 {"ok": false, "error": {"code": "no_manager_api"}}.

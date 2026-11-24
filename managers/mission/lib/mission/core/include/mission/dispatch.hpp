@@ -37,6 +37,21 @@ struct Request {
     std::string key() const { return target + "." + role; }
 };
 
+// 입구를 거쳐 명령하는 곳의 허락(managers/mission/external-link.md 4장). peers.json workers.<대상>.via에서.
+//   via에 이름이 있는 곳만 검사한다(게이트웨이·매니저는 via에 없음: 이미 검사됐거나 플랫폼 규칙).
+//   via에 없는 곳은 입구 allow에도 없어 워커 소켓 검사(enforce)가 먼저 막는다
+struct Access {
+    std::map<std::string, std::map<std::string, std::optional<std::set<std::string>>>> via;  // 대상 → 보낸 곳 → 명령(nullopt = 전부)
+    std::set<std::string> listed;                                                           // via 어디엔가 있는 보낸 곳
+};
+Access access_from_peers(const Json& doc);
+enum class Verdict { Pass, Allow, Deny };
+// lease.renew {"role"}은 그 역할의 명령을 하나라도 보내도 되면 허락
+Verdict check_access(const Access& a, const std::string& origin, const std::string& target, const std::string& cmd,
+                     const Json& args, const Contract* c);
+// 큐를 기다리지 않는 명령: 읽기(get_status, 계약 read), lease.renew
+bool fast_command(const Contract* c, const std::string& cmd);
+
 class Dispatcher {
 public:
     Dispatcher(size_t queue_max = 4, int64_t total_timeout_ns = 2800LL * 1000000) : max_(queue_max), total_(total_timeout_ns) {}

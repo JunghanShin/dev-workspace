@@ -11,6 +11,10 @@
 #include <thread>
 
 #include "worker/client.hpp"
+#include <sys/stat.h>
+#include <cstdlib>
+#include <fstream>
+#include <algorithm>
 #include "worker/workspace.hpp"
 
 namespace worker {
@@ -114,9 +118,35 @@ CommandClient::CommandClient(ThreadWatch& watch, std::string peer_id, Options op
       opt_(std::move(opt)),
       requests_(opt_.queue, Overflow::Reject),
       replies_(opt_.queue, Overflow::DropOldest),
-      thread_(opt_.thread_name, watch, [this](WorkerThread& t) { run(t); }) {}
+      thread_(opt_.thread_name, watch, [this](WorkerThread& t) { run(t); }) {
+    if (!opt_.socket.empty()) opt_.via_entry = false;  // 소켓을 직접 줌: 그곳으로
+    if (const char* pf = std::getenv("WORKSPACE_PEERS_FILE"); pf && *pf && opt_.via_entry) peers_file_ = pf;
+}
 
 CommandClient::~CommandClient() { stop(); }
+
+std::string CommandClient::entry() {
+    if (peers_file_.empty()) return "";
+    struct stat st{};
+    if (::stat(peers_file_.c_str(), &st) != 0) {
+        peers_mtime_ns_ = -1;
+        entry_.clear();
+        return entry_;
+    }
+    const long long m = static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL + st.st_mtim.tv_nsec;
+    if (m == peers_mtime_ns_) return entry_;
+    peers_mtime_ns_ = m;
+    entry_.clear();
+    try {
+        std::ifstream in(peers_file_);
+        const Json doc = Json::parse(in);
+        const Json e = doc.value("entry", Json());
+        if (e.is_object() && e.value("id", Json()).is_string()) entry_ = e["id"].get<std::string>();
+    } catch (const std::exception&) {
+        peers_mtime_ns_ = -1;  // 쓰는 중이었을 수 있음: 다음에 다시
+    }
+    return entry_;
+}
 
 void CommandClient::start() { thread_.start(); }
 
@@ -143,13 +173,20 @@ void CommandClient::run(WorkerThread& t) {
         if (!r) continue;
         // 응답을 기다리는 동안 beat가 멈추므로, timeout은 thread_stall_sec보다 짧게 둔다(기본 2 s)
         Json resp;
-        if (r->envelope.is_object() && !r->envelope.empty()) {
+        const auto tick = [&t] { t.beat(); };
+        const std::string via = r->cmd == "get_status" ? std::string() : entry();
+        if (!via.empty() && via != peer_) {
+            // 명령 입구로 감쌈. 입구 상한(2.8 s)보다 길게 기다려 응답이 늘 입구의 답으로 오게
+            const Json req = {{"cmd", "mission.send"}, {"args", {{"target", peer_}, {"cmd", r->cmd}, {"args", r->args}}}};
+            resp = send_request(default_command_socket(via), req, std::chrono::milliseconds(std::max(opt_.timeout_ms, 3000)), tick);
+            ++via_count_;
+        } else if (r->envelope.is_object() && !r->envelope.empty()) {
             Json req = r->envelope;
             req["cmd"] = r->cmd;
             req["args"] = r->args;
-            resp = send_request(path_, req, std::chrono::milliseconds(opt_.timeout_ms));
+            resp = send_request(path_, req, std::chrono::milliseconds(opt_.timeout_ms), tick);
         } else {
-            resp = send_command(path_, r->cmd, r->args, std::chrono::milliseconds(opt_.timeout_ms));
+            resp = send_request(path_, Json{{"cmd", r->cmd}, {"args", r->args}}, std::chrono::milliseconds(opt_.timeout_ms), tick);
         }
         const auto code = resp.value("error", Json::object()).value("code", std::string());
         reachable_ = code != "connect" && code != "timeout";

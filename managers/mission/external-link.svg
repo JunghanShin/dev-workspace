@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 380" font-family="sans-serif" font-size="12">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="900" height="380" fill="#fff"/>
+  <g fill="#f4f6fa" stroke="#555">
+    <rect x="440" y="20" width="220" height="48" rx="6" fill="#fff8e6"/>
+    <rect x="720" y="20" width="160" height="48" rx="6"/>
+    <rect x="20" y="150" width="120" height="50" rx="6"/>
+    <rect x="180" y="130" width="200" height="90" rx="6" fill="#eaf4ea"/>
+    <rect x="440" y="130" width="220" height="170" rx="6" fill="#e8eef9"/>
+    <rect x="720" y="140" width="160" height="80" rx="6"/>
+    <rect x="20" y="255" width="120" height="40" rx="6"/>
+    <rect x="180" y="250" width="200" height="50" rx="6"/>
+  </g>
+  <g text-anchor="middle" fill="#222">
+    <text x="550" y="40" font-weight="bold">run/peers.json</text>
+    <text x="550" y="58">entry · allow · via</text>
+    <text x="800" y="40" font-weight="bold">process-manager</text>
+    <text x="800" y="58">표를 만듦</text>
+    <text x="80" y="172" font-weight="bold">외부 장비</text>
+    <text x="80" y="190">(외부 프로토콜)</text>
+    <text x="280" y="152" font-weight="bold">외부 연동 워커</text>
+    <text x="280" y="172">모듈: 프로토콜 → 역할 명령</text>
+    <text x="280" y="192">libworker 0.16: entry가 있으면</text>
+    <text x="280" y="210">mission.send로 감싸 보냄</text>
+    <text x="550" y="152" font-weight="bold">mission-manager</text>
+    <text x="550" y="178">② 허락: via[보낸 곳]</text>
+    <text x="550" y="200">③ 역할 줄: (대상, 역할) 한 번에 하나</text>
+    <text x="550" y="222">③ 빠른 줄: 읽기 · lease.renew</text>
+    <text x="550" y="244">④ 봉투 origin = 보낸 곳</text>
+    <text x="550" y="266" fill="#666">화면 명령과 같은 큐</text>
+    <text x="800" y="162" font-weight="bold">대상 워커</text>
+    <text x="800" y="184">from: mission-manager</text>
+    <text x="800" y="204">origin: ext-ops</text>
+    <text x="80" y="280" font-weight="bold">화면 · 원격</text>
+    <text x="280" y="272" font-weight="bold">게이트웨이</text>
+    <text x="280" y="290">origin: screen</text>
+  </g>
+  <g stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#a)">
+    <line x1="720" y1="44" x2="662" y2="44"/>
+    <line x1="140" y1="175" x2="178" y2="175"/>
+    <line x1="380" y1="168" x2="438" y2="168"/>
+    <line x1="660" y1="168" x2="718" y2="168"/>
+    <line x1="718" y1="206" x2="662" y2="206"/>
+    <line x1="438" y1="206" x2="382" y2="206"/>
+    <line x1="140" y1="275" x2="178" y2="275"/>
+    <line x1="380" y1="275" x2="438" y2="275"/>
+  </g>
+  <g stroke="#b08000" stroke-width="1.2" stroke-dasharray="5 4" fill="none" marker-end="url(#a)">
+    <line x1="470" y1="68" x2="330" y2="128"/>
+    <line x1="550" y1="68" x2="550" y2="128"/>
+    <line x1="640" y1="68" x2="780" y2="138"/>
+  </g>
+  <g text-anchor="middle" font-size="11" fill="#444">
+    <text x="409" y="161">① 명령</text>
+    <text x="689" y="161">④</text>
+    <text x="410" y="222">⑤ 응답</text>
+    <text x="690" y="222">응답</text>
+    <text x="388" y="92" fill="#8a6500">읽음</text>
+  </g>
+  <g font-size="11" fill="#444">
+    <text x="20" y="335">✕ 외부 연동 워커 → 워커로 바로: 입구가 있으면 allow에 없음 → enforce에서 forbidden</text>
+    <text x="20" y="355">mission이 설치됐는데 꺼져 있으면 unavailable(우회 안 함) · 입구가 없으면(단독 실행) 지금처럼 바로</text>
+  </g>
+</svg>

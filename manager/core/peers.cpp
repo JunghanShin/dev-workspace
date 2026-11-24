@@ -108,12 +108,16 @@ Json check_commanders(const Json& commanders, const std::map<std::string, Worker
 
 Json build_peers(const Json& commanders, const std::map<std::string, WorkerCommands>& workers,
                  const std::vector<PeerProcess>& procs, const std::string& mode, const std::string& guard,
-                 const Json& boot_id) {
+                 const Json& boot_id, const std::string& entry) {
     Json out = Json::object();
     out["version"] = 1;
     out["guard"] = guard;
     out["mode"] = mode;
     out["boot_id"] = boot_id;
+    const auto entry_it = entry.empty() ? workers.end() : workers.find(entry);
+    const bool has_entry = entry_it != workers.end() && entry_it->second.roles.count("mission");
+    if (has_entry) out["entry"] = Json{{"id", entry}};
+    std::set<std::string> via_users;  // 입구를 거쳐 명령하는 곳(입구 allow에 역할 mission 명령을 자동으로)
     Json peers = Json::object();
     for (const auto& p : procs) {
         if (p.id.empty() || (p.pid <= 0 && p.pgid <= 0)) continue;
@@ -136,6 +140,10 @@ Json build_peers(const Json& commanders, const std::map<std::string, WorkerComma
         std::set<std::string> star = {"gateway"};
         for (const auto& p : procs)  // 믿는 곳(게이트웨이처럼 넘겨받은 명령을 이미 검사한 곳: 명령 입구 매니저)은 전부
             if (p.trusted_from && !p.id.empty()) star.insert(p.id);
+        // 입구가 있으면 이 워커(입구 자신 말고)에 대한 commanders는 via로: 워커 소켓은 바로 받지 않고 입구가 검사
+        const bool routed = has_entry && id != entry;
+        std::map<std::string, std::set<std::string>> via;
+        std::set<std::string> via_star;
         if (commanders.is_object())
             for (const auto& [key, list] : commanders.items()) {
                 const auto [wk, role] = split_key(key);
@@ -145,11 +153,13 @@ Json build_peers(const Json& commanders, const std::map<std::string, WorkerComma
                 for (const auto& c : list) {
                     if (!c.is_string() || c.get<std::string>() == id) continue;
                     const std::string who = c.get<std::string>();
+                    const bool to_via = routed && !star.count(who);
+                    if (to_via) via_users.insert(who);
                     if (dev) {
-                        star.insert(who);
+                        (to_via ? via_star : star).insert(who);
                         continue;
                     }
-                    auto& set = allow[who];
+                    auto& set = (to_via ? via : allow)[who];
                     for (const auto& [r, rc] : cmds.roles)
                         if (role.empty() || r == role) set.insert(rc.begin(), rc.end());
                     if (role.empty()) set.insert(cmds.operate.begin(), cmds.operate.end());  // 워커 전체: 운용 조작도
@@ -165,7 +175,33 @@ Json build_peers(const Json& commanders, const std::map<std::string, WorkerComma
             a[who] = arr;
         }
         w["allow"] = a;
+        if (!via.empty() || !via_star.empty()) {
+            Json v = Json::object();
+            for (const auto& who : via_star) v[who] = "*";
+            for (const auto& [who, set] : via) {
+                if (via_star.count(who)) continue;
+                Json arr = Json::array();
+                for (const auto& c : set) arr.push_back(c);
+                v[who] = arr;
+            }
+            w["via"] = v;
+        }
         ws[id] = w;
+    }
+    // 입구를 거쳐 명령하는 곳은 입구의 역할 mission 명령(mission.send 등)을 보낼 수 있어야 함
+    if (has_entry && ws.contains(entry)) {
+        Json& a = ws[entry]["allow"];
+        for (const auto& who : via_users) {
+            if (a.contains(who) && a[who] == Json("*")) continue;
+            std::set<std::string> set;
+            if (a.contains(who) && a[who].is_array())
+                for (const auto& c : a[who]) set.insert(c.get<std::string>());
+            const auto& mc = entry_it->second.roles.at("mission");
+            set.insert(mc.begin(), mc.end());
+            Json arr = Json::array();
+            for (const auto& c : set) arr.push_back(c);
+            a[who] = arr;
+        }
     }
     out["workers"] = ws;
     return out;

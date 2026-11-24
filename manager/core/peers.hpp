@@ -41,8 +41,11 @@ struct PeerProcess {
 };
 
 // peers.json 내용. written_at_ms는 넣지 않는다(바뀌었는지 비교하려고. 쓸 때 더함)
+// entry: 명령 입구 매니저 id(설치돼 있고 역할 mission을 내보낼 때, managers/mission/external-link.md). 있으면
+//   "entry": {"id"}, 다른 워커에 대한 commanders 항목은 allow가 아니라 via(입구가 검사)로, 그 명령하는 곳은 입구의
+//   역할 mission 명령을 allow에 자동으로
 Json build_peers(const Json& commanders, const std::map<std::string, WorkerCommands>& workers,
                  const std::vector<PeerProcess>& procs, const std::string& mode, const std::string& guard,
-                 const Json& boot_id);
+                 const Json& boot_id, const std::string& entry = "");
 
 }  // namespace pm
