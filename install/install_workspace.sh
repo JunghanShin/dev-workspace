@@ -136,7 +136,7 @@ chmod a+x "$SRC/workspace-start.sh" "$SRC/workspace-stop.sh"
 # util-linux(setpriv: 시작 셸이 프로그램을 워크스페이스 소유자 계정으로 실행)
 REQUIRED_PKGS=(python3 openssh-server util-linux)
 # 정비 도구: REST 확인용(curl). 오프라인 현장일 수 있으므로 실패해도 경고만
-TOOL_PKGS=(curl)
+TOOL_PKGS=(curl openssl)  # openssl: HTTPS 자체 서명 인증서(docs/https.md)
 
 missing_pkgs() {
   local p

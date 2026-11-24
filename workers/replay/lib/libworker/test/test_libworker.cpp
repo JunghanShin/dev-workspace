@@ -18,6 +18,8 @@
 
 #include <pthread.h>
 
+#include "worker/schema.hpp"
+#include "worker/input_check.hpp"
 #include "worker/command_server.hpp"
 #include "worker/guard.hpp"
 #include "worker/inputs.hpp"
@@ -1139,7 +1141,51 @@ static void command_client_via_entry() {
     rmdir(dir.c_str());
 }
 
+// 받은 칸 실행 중 검사(0.17, docs/input-check.md): 스키마 부분집합, 이름 자리, 표 만들기, observe 주기·셈·알림
+static void input_check_runtime() {
+    using worker::Json;
+    std::vector<std::string> errs;
+    const Json defs = Json::parse(R"({"pt": {"type": "object", "required": ["x"], "properties": {"x": {"type": "number"}}}})");
+    const Json s = Json::parse(R"({"type": "object", "required": ["t_mono_ns", "mode"], "properties": {
+        "t_mono_ns": {"type": "integer"}, "mode": {"type": "string", "enum": ["a", "b"]}, "v": {"type": "number", "minimum": 0, "maximum": 10},
+        "p": {"$ref": "#/definitions/pt"}, "list": {"type": "array", "items": {"type": "integer"}}, "free": {"type": "object", "additionalProperties": true}}})");
+    worker::validate_schema(Json::parse(R"({"t_mono_ns": 1, "mode": "a", "v": 3, "p": {"x": 1.5}, "list": [1, 2], "free": {"q": 1}})"), s, defs, "t", errs);
+    CHECK(errs.empty());
+    worker::validate_schema(Json::parse(R"({"t_mono_ns": 1.5, "mode": "c", "v": 11, "p": {}, "list": [1, "x"], "zzz": 1})"), s, defs, "t", errs, 10);
+    CHECK(errs.size() == 6);  // 정수 아님, enum, 최대, p.x 필수, list[1], 정의에 없음
+    errs.clear();
+    worker::validate_schema(Json::parse(R"({"mode": "a"})"), s, defs, "t", errs);
+    CHECK(errs.size() == 1 && errs[0] == "t.t_mono_ns: required");
+    CHECK(worker::name_matches("stream_<송출>_fps", "stream_main_cam_fps") && !worker::name_matches("stream_<송출>_fps", "stream__fps"));
+    CHECK(worker::name_matches("cam", "cam") && !worker::name_matches("cam", "cams"));
+    // 표: 사본 스키마가 있는 주제만, many 입력은 건너뜀
+    const Json bundle = Json::parse(R"({"uses": {
+        "up": {"from": "example", "topics": ["source", "nosch"], "definition": {"topics": {"source": {"schema": {"type": "object", "required": ["seq"], "properties": {"seq": {"type": "integer"}}}}, "nosch": {"type": "object"}}}},
+        "all": {"from": "*", "many": true, "topics": ["source"], "definition": null}}})");
+    auto table = worker::input_check::table_from_bundle(bundle, {{"up", "src1"}, {"all", ""}});
+    CHECK(table.size() == 1 && table["src1"].size() == 1 && table["src1"].count("source"));
+    worker::input_check::set(table, 0.2);
+    CHECK(worker::input_check::active());
+    worker::input_check::observe("src1", Json::parse(R"({"source": {"seq": 1}})"));
+    worker::input_check::observe("src1", Json::parse(R"({"source": {"seq": "bad"}})"));  // 주기 안: 검사 안 함
+    worker::input_check::observe("other", Json::parse(R"({"source": {"seq": "bad"}})"));  // 표에 없는 상대
+    auto st = worker::input_check::stats();
+    CHECK(st["up"].checked == 1 && st["up"].bad == 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    worker::input_check::observe("src1", Json::parse(R"({"source": {"seq": "bad"}, "x": 1})"));
+    st = worker::input_check::stats();
+    CHECK(st["up"].checked == 2 && st["up"].bad == 1 && st["up"].last_error.find("source.seq") == 0);
+    auto mm = worker::input_check::take_mismatches();
+    CHECK(mm.size() == 1 && mm[0]["input"] == "up" && mm[0]["topic"] == "source");
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    worker::input_check::observe("src1", Json::parse(R"({"source": {"seq": "bad"}})"));
+    CHECK(worker::input_check::stats()["up"].bad == 2 && worker::input_check::take_mismatches().empty());  // 알림은 60 s에 한 번
+    worker::input_check::clear();
+    CHECK(!worker::input_check::active());
+}
+
 int main() {
+    input_check_runtime();
     command_client_via_entry();
     command_lease();
     manager_link_tools();

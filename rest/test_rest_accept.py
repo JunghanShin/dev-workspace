@@ -1749,6 +1749,11 @@ class AuthOn(unittest.TestCase):
         for part in ("HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=604800"):
             self.assertIn(part, cookie)
         self.assertEqual(len(s.cookie), 64)
+        self.assertNotIn("Secure", cookie)  # 평문(앞의 nginx가 HTTPS라고 알리지 않음)
+        st, hdrs, _ = self.srv.request("POST", "/api/auth/login", {"name": "m1", "password": PASSWORDS["m1"]},
+                                       headers={"X-Forwarded-Proto": "https"})
+        self.assertEqual(st, 200)
+        self.assertIn("; Secure", hdrs["set-cookie"])  # HTTPS로 온 로그인(docs/https.md)
         st, obj, _ = s.json("GET", "/api/auth/me")
         self.assertEqual((st, obj), (200, {"auth": "on", "name": "m1", "role": "maintainer", "mode": "development", "via": "session"}))
         self.assertEqual(s.json("GET", "/workers")[0], 200)

@@ -1,6 +1,6 @@
 {
   "name": "common",
-  "version": "1.4",
+  "version": "1.5",
   "description": "공통 정의: 모든 워커가 같은 것(워크스페이스 design.md 6.6.7.1). get_status 겉모양, 공통 명령, 오류 code, heartbeat 지표(호스트·단계), 스트림 겉모양, 이벤트, 시각. 워커가 고치지 않는다(플랫폼 버전)",
   "errors": ["bad_request", "unavailable", "timeout", "busy", "forbidden", "internal"],
   "status": {
@@ -28,6 +28,9 @@
                "type": "object", "additionalProperties": {"type": "object", "required": ["cmd", "from", "origin", "left_ms"],
                  "properties": {"cmd": {"type": "string"}, "from": {"type": ["string", "null"]}, "origin": {"type": ["string", "null"]},
                                 "left_ms": {"type": "integer", "unit": "ms", "description": "기한까지 남은 시간"}}}},
+    "input_check": {"optional": true, "description": "받은 칸 실행 중 검사(워크스페이스 docs/input-check.md, libworker 0.17). 입력 → 셈. 계약에 스키마 있는 주제를 받는 입력이 있을 때만",
+                    "type": "object", "additionalProperties": {"type": "object", "required": ["checked", "bad", "last_error"],
+                      "properties": {"checked": {"type": "integer"}, "bad": {"type": "integer"}, "last_error": {"type": ["string", "null"]}}}},
     "runtime": {"description": "워커 속사정(루프·단계·큐). 형식 보장 없음",
                 "type": "object", "additionalProperties": true}
   },
@@ -37,6 +40,7 @@
     "host_budget_overruns": {"type": "integer", "description": "처리 예산을 넘긴 바퀴 수"},
     "host_lease_active": {"optional": true, "type": "integer", "description": "지금 걸린 명령 임대 수(계약에 임대 명령이 있을 때만, libworker 0.15)"},
     "host_lease_expired": {"optional": true, "type": "integer", "description": "기한이 지나 안전 상태로 간 수(누적)"},
+    "inputs_<입력>_bad": {"optional": true, "type": "integer", "description": "받은 칸이 정의와 달랐던 수(누적, 검사한 것 중, libworker 0.17)"},
     "inputs_<입력>_link": {"type": "integer", "description": "입력이 상대에 붙었나(0/1, 모듈이 host.input_link로 알림, libworker 0.11)"},
     "<단계>_q": {"type": "integer", "description": "단계 큐에 쌓인 수"},
     "<단계>_q_max": {"type": "integer", "description": "큐 최대"},

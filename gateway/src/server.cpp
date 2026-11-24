@@ -444,6 +444,11 @@ void Gateway::tick() { hub_.reap(); }
 
 // ---- 요청 단계: 신분 확인 → 권한 → 전달 → 기록 → 응답 ----
 
+// 쿠키 Secure: 앞의 nginx가 HTTPS로 받았다고 알려 줄 때만(proxy_set_header X-Forwarded-Proto $scheme가 덮어씀)
+static std::string secure_flag(const RequestView& rq) {
+    return rq.header && rq.header("X-Forwarded-Proto") == "https" ? "; Secure" : "";
+}
+
 Reply Gateway::handle(const RequestView& rq, const std::function<Body()>& body, const std::string& remote) {
     const double t0 = mono_now();
     const std::string mode_at = mode().mode;
@@ -543,15 +548,16 @@ Reply Gateway::own(Own o, const RequestView& rq, const std::function<Body()>& bo
             Reply r = json_reply(200, out);
             // 쿠키: 스크립트가 못 읽게(HttpOnly), 다른 사이트에서 온 요청에는 안 붙게(SameSite=Strict).
             // 브라우저 보관은 절대 만료(7일)까지, 쉼 만료(12시간)는 게이트웨이가 본다
+            // HTTPS로 왔으면(nginx가 넣는 X-Forwarded-Proto, docs/https.md) Secure: 평문으로는 쿠키가 안 나감
             r.headers.push_back({"Set-Cookie", "workspace_session=" + res.sid + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" +
-                                                   std::to_string(static_cast<long long>(auth_on_->absolute_s()))});
+                                                   std::to_string(static_cast<long long>(auth_on_->absolute_s())) + secure_flag(rq)});
             return r;
         }
         case Own::Logout: {
             ctx.cmd = "logout";
             if (auth_on_ && !who.sid.empty()) auth_on_->logout(who.sid);
             Reply r = json_reply(200, Json::object());
-            r.headers.push_back({"Set-Cookie", "workspace_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"});
+            r.headers.push_back({"Set-Cookie", "workspace_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" + secure_flag(rq)});
             return r;
         }
         case Own::Me: {

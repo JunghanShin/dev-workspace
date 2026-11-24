@@ -85,6 +85,13 @@ bash ~/dev-workspace/workspace-stop.sh
 - 서비스 없이 터미널에서 실행(디버깅): `~/dev-workspace/workspace-start.sh --foreground`
 - 상태·로그: `systemctl status workspace`, `journalctl -u workspace -n 100`
 
+### HTTPS (`docs/https.md`)
+
+- 데이터 폴더 `config/workspace.env`에 `WORKSPACE_HTTPS=on` → 다시 시작. 화면은 `https://<보드>:8443`(`WORKSPACE_HTTPS_PORT`)
+- 인증서를 주지 않으면 시작할 때 보드 자체 서명 인증서를 `config/tls/`에 만든다(브라우저가 처음 한 번 경고). 사용자 인증서는 `WORKSPACE_HTTPS_CERT`·`WORKSPACE_HTTPS_KEY`(워크스페이스 계정이 읽을 수 있게)
+- 평문 포트(8080)로 온 바깥 요청은 HTTPS로 넘긴다(`WORKSPACE_HTTP_REDIRECT=off`로 끔). 보드 안(127.0.0.1, SSH 터널)은 그대로
+- 443을 쓰려면 한 번: `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v nginx)")"` 뒤 `WORKSPACE_HTTPS_PORT=443`
+
 ## 데이터 폴더 (`<워크스페이스>_data/`)
 
 | 파일 | 내용 | 적용 |

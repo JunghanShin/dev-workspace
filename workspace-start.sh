@@ -258,12 +258,32 @@ NGINX_BIN="$(command -v nginx 2>/dev/null || true)"
 NG_DIR="$DATA/run/nginx"
 GW_SOCK="$DATA/run/gateway.sock"
 use_nginx=0
+TLS_ENV=()
 REST=""
 if [[ ! -x "$GW_BIN" ]]; then
   log "gateway: $GW_BIN not found; no REST/UI (manager keeps running). Release it: dev/release-worker.sh gateway"
 else
   if [[ -n "$NGINX_BIN" && "${WORKSPACE_NGINX:-on}" != off ]]; then
-    bash "$ROOT/gateway/nginx/render.sh" "$NG_DIR/nginx.conf" "$NG_DIR" "$GW_SOCK" \
+    # HTTPS(docs/https.md): WORKSPACE_HTTPS=on일 때만. 인증서는 WORKSPACE_HTTPS_CERT·KEY(사용자 것) 또는
+    # 보드 자체 서명(<데이터>/config/tls/, 없거나 만료 30일 안·주소가 바뀌면 다시 만듦)
+    TLS_ENV=()
+    if [[ "${WORKSPACE_HTTPS:-off}" == on ]]; then
+      tls_crt="${WORKSPACE_HTTPS_CERT:-}" tls_key="${WORKSPACE_HTTPS_KEY:-}"
+      if [[ -z "$tls_crt" ]]; then
+        tls_crt="$DATA/config/tls/workspace.crt" tls_key="$DATA/config/tls/workspace.key"
+        bash "$ROOT/gateway/nginx/make-cert.sh" "$DATA/config/tls" 2>&1 | sed 's/^/workspace-start: tls: /'
+        chown -R "$OWNER_UID:$OWNER_GID" "$DATA/config/tls" 2>/dev/null
+      elif ! openssl x509 -checkend 2592000 -noout -in "$tls_crt" >/dev/null 2>&1; then
+        log "https: certificate $tls_crt expires within 30 days or cannot be read"
+      fi
+      if setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups test -r "$tls_crt" -a -r "$tls_key"; then
+        TLS_ENV=(RENDER_TLS_LISTEN="${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_HTTPS_PORT:-8443}"
+                 RENDER_TLS_CERT="$tls_crt" RENDER_TLS_KEY="$tls_key" RENDER_REDIRECT="${WORKSPACE_HTTP_REDIRECT:-on}")
+      else
+        log "https: certificate or key not readable by the workspace account; plain HTTP only"
+      fi
+    fi
+    env ${TLS_ENV[@]+"${TLS_ENV[@]}"} bash "$ROOT/gateway/nginx/render.sh" "$NG_DIR/nginx.conf" "$NG_DIR" "$GW_SOCK" \
       "${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080}" "$ROOT" "${WORKSPACE_UI:-1}"
     chown -R "$OWNER_UID:$OWNER_GID" "$NG_DIR"
     if setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups \
@@ -291,7 +311,7 @@ if (( use_nginx )); then
   setpriv --reuid="$OWNER_UID" --regid="$OWNER_GID" --init-groups \
     "$NGINX_BIN" -p "$NG_DIR" -c "$NG_DIR/nginx.conf" -g 'daemon off;' &
   NGINX=$!
-  log "nginx started (pid $NGINX, listen ${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080})"
+  log "nginx started (pid $NGINX, listen ${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080}$( ((${#TLS_ENV[@]})) && echo ", https ${WORKSPACE_HTTPS_PORT:-8443}"))"
 fi
 
 code=0

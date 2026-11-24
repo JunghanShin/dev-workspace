@@ -311,3 +311,6 @@ input:disabled, select:disabled { opacity: .45; }
 .hint.warn { color: var(--warn); }
 @media (max-width: 560px) { .cfg-row { grid-template-columns: 1fr; } .cfg-h, .cfg-row > .cfg-err { grid-column: 1; } }
 .sim-badge { align-self: center; font-size: 11px; padding: 0 6px; border-radius: 8px; color: var(--text); border: 1px solid #9a7428; background: #45351a; }
+
+/* 건강 띠(머리, ui/system-panel.md 4장): 배지 둘을 묶은 링크 */
+.health-band { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; cursor: pointer; }

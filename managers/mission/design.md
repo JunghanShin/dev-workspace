@@ -39,6 +39,7 @@
 
 - **"설치돼 있다"를 아는 법:** 계약으로. 역할 `mission`(`io/mission.json`, 명령 `mission.send`)을 내보내는 워커가 있으면 그쪽으로. 게이트웨이는 판단하지 않고 계약대로 보낸다(이름을 박아 두지 않음)
 - **mission이 떠 있지 않으면:** 503 `unavailable "mission-manager is not running"`. 바로 보내면 순서 정리를 건너뛰므로 우회하지 않는다(공통 틀 9장 4)
+- **우선순위·명령 조건(0.74):** `priority.md`(보낸 곳 우선순위, 밀어내기, 잡아 두기), `conditions.md`(상태·지표·모드 조건, 안 맞으면 `forbidden`). 설정이 없으면 지금과 같음
 - **외부 연동 워커:** 0.73부터 mission을 거침(`external-link.md`): libworker가 `mission.send`로 감싸 보내고, mission이 `peers.json` `via`로 허락(운용 모드 범위 포함)을 본 뒤 같은 큐에. 읽기·`lease.renew`는 빠른 줄
 
 ## 3. 같은 역할에 동시에 온 명령

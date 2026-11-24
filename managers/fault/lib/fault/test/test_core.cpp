@@ -127,7 +127,97 @@ static void test_rules() {
     CHECK(fault::parse_rules(Json()).empty());
 }
 
+
+// 조합(all/any, 중첩): 시스템 전체로 한 번, 이름 = 규칙 id, status 없으면 모름(그대로 둠), 조합 안 이벤트는 hold_s
+static void test_combined() {
+    fault::Engine e(fault::parse_rules(Json::parse(R"([
+      {"id": "both", "when": {"all": [{"health": {"worker": "cam*", "is": "fault"}},
+                                      {"any": [{"metric": {"worker": "sys", "name": "temp", "above": 80}},
+                                               {"event": {"code": "link_down"}}]}]},
+       "for_s": 1, "hold_s": 5, "severity": "error"}])")));
+    e.set_system(sys("degraded", "fault"), 0);
+    e.set_metrics("sys", {{"temp", 50}});
+    CHECK(e.tick(0, true).events.empty());                   // 건강만 참
+    e.set_metrics("sys", {{"temp", 90}});
+    CHECK(e.tick(1 * S, true).events.empty());               // 둘 다 참, for_s 1 s 기다림
+    auto o = e.tick(2 * S, true);
+    CHECK(o.events.size() == 1 && o.events[0]["detail"]["fault"] == "both" && e.active() == 1);
+    CHECK(e.snapshot(2 * S)["active"]["both"]["worker"].is_null());
+    e.set_system(Json(), 3 * S);                             // status 끊김: 모름 → 그대로
+    o = e.tick(3 * S, true);
+    CHECK(e.snapshot(3 * S)["active"].contains("both"));
+    e.set_system(sys("degraded", "fault"), 4 * S);
+    e.set_metrics("sys", {{"temp", 50}});
+    o = e.tick(4 * S, true);
+    CHECK(!e.snapshot(4 * S)["active"].contains("both"));   // any가 거짓 → 내림
+    e.on_event("radio", {{"code", "link_down"}}, 4 * S);     // 이벤트로 any 참(5 s 유지)
+    e.tick(4 * S, true);
+    e.tick(5 * S, true);
+    CHECK(e.snapshot(5 * S)["active"].contains("both"));
+    e.tick(10 * S, true);                                    // hold_s 지남 → 내림
+    CHECK(!e.snapshot(10 * S)["active"].contains("both"));
+}
+
+// 단계: after_s마다 심각도·대응을 올림(단계마다 한 번), 풀리면 끝, 다시 올라가면 처음부터, 개발 모드는 건너뜀
+static void test_stages() {
+    fault::Engine e(fault::parse_rules(Json::parse(R"([
+      {"id": "cam", "when": {"health": {"worker": "cam1", "is": "fault"}}, "severity": "warning",
+       "do": [{"target": "payload-manager", "cmd": "payload.restart", "args": {"module": "cam1"}}],
+       "stages": [{"after_s": 5, "severity": "error", "text": "cam still lost",
+                   "do": [{"target": "payload-manager", "cmd": "payload.power", "args": {"module": "cam1", "on": false}}]},
+                  {"after_s": 20, "severity": "critical"}]}])")));
+    e.set_system(sys("degraded", "fault"), 0);
+    auto o = e.tick(0, true);
+    CHECK(o.sends.size() == 1 && o.sends[0].action.cmd == "payload.restart" && o.sends[0].index == 0);
+    CHECK(e.tick(4 * S, true).sends.empty());
+    o = e.tick(5 * S, true);
+    CHECK(o.sends.size() == 1 && o.sends[0].action.cmd == "payload.power" && o.sends[0].index == 1);
+    CHECK(o.events.size() == 1 && o.events[0]["code"] == "fault_escalated" && o.events[0]["severity"] == "error");
+    CHECK(o.events[0]["detail"]["stage"] == 1 && o.events[0]["text"] == "cam still lost (cam1)");
+    auto snap = e.snapshot(5 * S);
+    CHECK(snap["active"]["cam:cam1"]["stage"] == 1 && snap["active"]["cam:cam1"]["severity"] == "error" && snap["worst"] == "error");
+    CHECK(snap["active"]["cam:cam1"]["actions"][1]["stage"] == 1);
+    CHECK(e.tick(6 * S, true).sends.empty());              // 같은 단계는 다시 안 함
+    o = e.tick(30 * S, true);
+    CHECK(o.sends.empty() && o.events.size() == 1 && e.worst() == "critical");
+    e.action_result("cam:cam1", 1, true, Json());
+    CHECK(e.snapshot(30 * S)["active"]["cam:cam1"]["actions"][1]["ok"] == true);
+    e.set_system(sys("ok", "ok"), 31 * S);
+    o = e.tick(31 * S, true);
+    CHECK(o.events.size() == 1 && o.events[0]["code"] == "fault_cleared" && e.active() == 0);
+    // 다시: 처음 단계부터, 개발 모드면 건너뜀 표시
+    e.set_system(sys("degraded", "fault"), 40 * S);
+    e.tick(40 * S, false);
+    o = e.tick(46 * S, false);
+    CHECK(o.sends.empty() && e.snapshot(46 * S)["active"]["cam:cam1"]["stage"] == 1);
+    CHECK(e.snapshot(46 * S)["active"]["cam:cam1"]["actions"][1]["skipped"] == "development mode");
+}
+
+static void test_rules_v2() {
+    auto bad = [](const char* text) {
+        try {
+            fault::parse_rules(Json::parse(text));
+        } catch (const std::invalid_argument&) {
+            return true;
+        }
+        return false;
+    };
+    CHECK(bad(R"([{"id": "a", "when": {"all": []}}])"));
+    CHECK(bad(R"([{"id": "a", "when": {"any": [{"nope": {}}]}}])"));
+    CHECK(bad(R"([{"id": "a", "when": {"all": [{"all": [{"all": [{"all": [{"all": [{"system": {"is": "ok"}}]}]}]}]}]}}])"));
+    CHECK(bad(R"([{"id": "a", "when": {"system": {"is": "ok"}}, "stages": []}])"));
+    CHECK(bad(R"([{"id": "a", "when": {"system": {"is": "ok"}}, "stages": [{"after_s": 0, "severity": "error"}]}])"));
+    CHECK(bad(R"([{"id": "a", "when": {"system": {"is": "ok"}}, "stages": [{"after_s": 5, "severity": "error"}, {"after_s": 5, "severity": "error"}]}])"));
+    CHECK(bad(R"([{"id": "a", "when": {"system": {"is": "ok"}}, "severity": "error", "stages": [{"after_s": 5, "severity": "warning"}]}])"));
+    CHECK(bad(R"([{"id": "a", "when": {"system": {"is": "ok"}}, "stages": [{"after_s": 5, "severity": "error", "x": 1}]}])"));
+    CHECK(!bad(R"([{"id": "a", "when": {"any": [{"system": {"is": "fault"}}, {"all": [{"event": {"code": "x"}}, {"metric": {"name": "t", "below": 1}}]}]},
+                    "stages": [{"after_s": 2, "severity": "error", "do": [{"target": "w", "cmd": "c"}]}, {"after_s": 9, "severity": "critical"}]}])"));
+}
+
 int main() {
+    test_combined();
+    test_stages();
+    test_rules_v2();
     test_health_rule();
     test_dev_mode_and_many();
     test_metric_event_system();

@@ -5,6 +5,7 @@
 
 확인: 화면 파일은 nginx가 직접(게이트웨이가 꺼져도 나옴), 없는 경로(API·워커 패널 파일)는 게이트웨이로, Host 전달,
 스트림(SSE)은 버퍼링 없이 바로, 본문 상한(64 KiB) 넘으면 413, 명령 기록의 보낸 쪽 주소는 nginx가 넣은 값.
+HTTPS(docs/https.md): 보드 자체 서명 인증서(make-cert.sh)로 TLS·이름 확인, 화면·API·스트림, 평문 → HTTPS 넘김(보드 안 127.0.0.1은 그대로).
 nginx나 REST_BIN이 없으면 건너뛴다.
 """
 import json
@@ -20,6 +21,7 @@ import test_rest_accept as t
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDER = os.path.join(HERE, "..", "gateway", "nginx", "render.sh")
+MAKE_CERT = os.path.join(HERE, "..", "gateway", "nginx", "make-cert.sh")
 NGINX = shutil.which("nginx") or ("/usr/sbin/nginx" if os.path.exists("/usr/sbin/nginx") else None)
 
 
@@ -146,11 +148,111 @@ class NginxFront(unittest.TestCase):
                                      name="gw-front2", unix_only=self.sock)
 
 
+@unittest.skipUnless(t.REST_BIN and NGINX and shutil.which("openssl"), "C++ 게이트웨이(REST_BIN)·nginx·openssl이 있어야 함")
+class NginxHttps(unittest.TestCase):
+    """HTTPS(docs/https.md): 시작 셸과 같은 순서(make-cert.sh → render.sh에 RENDER_TLS_*)"""
+
+    @classmethod
+    def setUpClass(cls):
+        t.setUpModule()
+        cls.stream = t.FakeStreamWorker(os.path.join(t.T["data"], "run", "stream", "s2.sock"))
+        cls.sock = os.path.join(t.T["tmp"], "gw-tls.sock")
+        cls.gw = t.Server({"WORKSPACE_GATEWAY_SOCKET": cls.sock, "WORKSPACE_GATEWAY_TCP": "0"}, name="gw-tls",
+                          unix_only=cls.sock)
+        cls.port, cls.tport = t.free_port(), t.free_port()
+        prefix = os.path.join(t.T["tmp"], "nginx-tls")
+        os.makedirs(prefix, exist_ok=True)
+        cls.tls = os.path.join(prefix, "tls")
+        env = dict(os.environ, CERT_IPS="192.0.2.10")  # 문서용 주소(실제 보드 주소 아님)
+        out = subprocess.check_output(["bash", MAKE_CERT, cls.tls], env=env, text=True)
+        assert "made" in out, out
+        cls.crt = os.path.join(cls.tls, "workspace.crt")
+        conf = os.path.join(prefix, "nginx.conf")
+        subprocess.check_call(["bash", RENDER, conf, prefix, cls.sock, "127.0.0.1:%d" % cls.port, t.T["root"], "1"],
+                              env=dict(os.environ, RENDER_TLS_LISTEN="127.0.0.1:%d" % cls.tport, RENDER_TLS_CERT=cls.crt,
+                                       RENDER_TLS_KEY=os.path.join(cls.tls, "workspace.key")))
+        subprocess.check_call([NGINX, "-t", "-q", "-p", prefix, "-c", conf, "-g", "daemon off;"])
+        cls.ng_log = open(os.path.join(prefix, "nginx.log"), "wb")
+        cls.ng = subprocess.Popen([NGINX, "-p", prefix, "-c", conf, "-g", "daemon off;"], stdout=cls.ng_log, stderr=cls.ng_log)
+        assert t.wait_for(lambda: NginxFront._open(cls.tport) and NginxFront._open(cls.port), 5, 0.05), "nginx did not start"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.ng.send_signal(signal.SIGTERM)
+        try:
+            cls.ng.wait(5)
+        except subprocess.TimeoutExpired:
+            cls.ng.kill()
+        cls.ng_log.close()
+        cls.gw.stop()
+        cls.stream.close()
+        t.tearDownModule()
+
+    def https(self, method, path, body=None, headers=None):
+        import http.client
+        import ssl
+        ctx = ssl.create_default_context(cafile=self.crt)  # 인증서 확인 + 이름(localhost) 확인
+        c = http.client.HTTPSConnection("localhost", self.tport, timeout=10, context=ctx)
+        try:
+            c.request(method, path, body=None if body is None else json.dumps(body).encode(), headers=headers or {})
+            r = c.getresponse()
+            return r.status, {k.lower(): v for k, v in r.getheaders()}, r.read()
+        finally:
+            c.close()
+
+    def plain(self, path, source="127.0.0.1"):
+        import http.client
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10, source_address=(source, 0))
+        try:
+            c.request("GET", path)
+            r = c.getresponse()
+            return r.status, {k.lower(): v for k, v in r.getheaders()}, r.read()
+        finally:
+            c.close()
+
+    def test_tls_ui_api(self):
+        st, _, data = self.https("GET", "/")
+        self.assertEqual(st, 200)
+        self.assertIn("셸".encode(), data)
+        st, _, data = self.https("GET", "/api/board/workers")
+        self.assertEqual(st, 200)
+        self.assertIn("workers", json.loads(data))
+
+    def test_cert_names(self):
+        san = subprocess.check_output(["openssl", "x509", "-in", self.crt, "-noout", "-ext", "subjectAltName"], text=True)
+        for name in ("DNS:localhost", "IP Address:127.0.0.1", "IP Address:192.0.2.10"):
+            self.assertIn(name, san)
+        out = subprocess.check_output(["bash", MAKE_CERT, self.tls], env=dict(os.environ, CERT_IPS="192.0.2.10"), text=True)
+        self.assertIn("ok", out)  # 그대로면 다시 만들지 않음
+
+    def test_redirect_and_local_exempt(self):
+        st, _, _ = self.plain("/kit.js")  # 보드 안(127.0.0.1): SSH 터널처럼 평문 그대로
+        self.assertEqual(st, 200)
+        st, h, _ = self.plain("/api/board/workers?x=1", source="127.0.0.2")  # 바깥에서 온 것처럼
+        self.assertEqual(st, 308)
+        self.assertEqual(h["location"], "https://127.0.0.1:%d/api/board/workers?x=1" % self.tport)
+
+    def test_stream_over_tls(self):
+        import http.client
+        import ssl
+        ctx = ssl.create_default_context(cafile=self.crt)
+        c = http.client.HTTPSConnection("localhost", self.tport, timeout=5, context=ctx)
+        try:
+            c.request("GET", "/workers/s2/stream?hz=20")
+            r = c.getresponse()
+            self.assertEqual(r.status, 200)
+            self.assertIn("text/event-stream", r.getheader("Content-Type", ""))
+            line = r.fp.readline()  # 첫 줄이 버퍼링 없이 옴
+            self.assertTrue(line.strip(), line)
+        finally:
+            c.close()
+
+
 class Render(unittest.TestCase):
     """render.sh가 nginx 빌드에 맞춰 설정을 만드는지(nginx 없이: 가짜 nginx -V). 보드의 Ubuntu 22.04 nginx-light는
     limit_conn 모듈이 없어 설정 점검이 실패했던 일이 있다"""
 
-    def render(self, version_text):
+    def render(self, version_text, extra_env=None):
         import tempfile
         d = tempfile.mkdtemp(prefix="ngr")
         fake = os.path.join(d, "nginx")
@@ -159,10 +261,26 @@ class Render(unittest.TestCase):
         os.chmod(fake, 0o755)
         out = os.path.join(d, "nginx.conf")
         subprocess.check_call(["bash", RENDER, out, d, "/x/gw.sock", "127.0.0.1:1", "/ws", "1"],
-                              env=dict(os.environ, NGINX_BIN=fake))
+                              env=dict(os.environ, NGINX_BIN=fake, **(extra_env or {})))
         text = open(out).read()
         shutil.rmtree(d, ignore_errors=True)
         return text
+
+    def test_tls_and_redirect(self):
+        env = dict(RENDER_TLS_LISTEN="0.0.0.0:443", RENDER_TLS_CERT="/c/w.crt", RENDER_TLS_KEY="/c/w.key")
+        full = self.render("configure arguments: --with-http_ssl_module", env)
+        self.assertIn("listen 0.0.0.0:443 ssl;", full)
+        self.assertIn("ssl_certificate /c/w.crt;", full)
+        self.assertIn("return 308 https://$host$request_uri;", full)  # 443이면 포트 안 붙임
+        self.assertIn("$remote_addr = 127.0.0.1", full)
+        off = self.render("configure arguments: --with-http_ssl_module", dict(env, RENDER_REDIRECT="off"))
+        self.assertIn("listen 0.0.0.0:443 ssl;", off)
+        self.assertNotIn("return 308", off)
+        nossl = self.render("configure arguments: --without-http_limit_conn_module", env)
+        self.assertNotIn(" ssl;", nossl)
+        none = self.render("configure arguments: --with-http_ssl_module")
+        self.assertNotIn(" ssl;", none)
+        self.assertFalse([l for l in none.splitlines() if "@TLS@" in l and not l.lstrip().startswith("#")])
 
     def test_with_and_without_limit_conn(self):
         full = self.render("configure arguments: --with-http_ssl_module")

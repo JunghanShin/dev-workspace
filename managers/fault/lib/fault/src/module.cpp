@@ -159,6 +159,7 @@ void Module::evaluate() {
     auto out = engine_->tick(mono_ns(), access_mode_ != "development");
     for (const auto& e : out.events) {
         if (e.value("code", "") == "fault_raised") ++raised_;
+        if (e.value("code", "") == "fault_escalated") ++escalated_;
         event(e);
     }
     for (const auto& s : out.sends) {
@@ -244,6 +245,7 @@ void Module::metrics(worker::Metrics& m) const {
     m.set("active", static_cast<long long>(engine_ ? engine_->active() : 0));
     m.set("worst", engine_ ? severity_rank(engine_->worst()) : 0);
     m.set("raised", raised_);
+    m.set("escalated", escalated_);
     m.set("actions", actions_);
     m.set("action_failed", action_failed_);
     m.set("pm_link", pm_ && pm_->connected());

@@ -1,7 +1,7 @@
 {
   "name": "fault",
-  "version": "1.0",
-  "description": "이상 목록(managers/fault/design.md 3·4장). fault-manager가 낸다",
+  "version": "1.1",
+  "description": "이상 목록(managers/fault/design.md 3·4장, 조합·단계 escalate.md). fault-manager가 낸다. 이벤트 fault_raised·fault_escalated·fault_cleared·fault_action_failed",
   "topics": {
     "fault": {
       "description": "올라간 이상. 바뀌면 바로, 그대로면 1 s",
@@ -12,7 +12,8 @@
         "active": {"type": "object", "additionalProperties": {"type": "object", "required": ["rule", "severity", "text", "since_ns", "acked", "actions"],
           "properties": {"rule": {"type": "string"}, "worker": {"type": ["string", "null"]}, "severity": {"type": "string", "enum": ["warning", "error", "critical"]},
                          "text": {"type": "string"}, "since_ns": {"type": "integer", "unit": "ns"}, "age_ms": {"type": "integer", "unit": "ms"},
-                         "acked": {"type": "boolean"}, "actions": {"type": "array"}}}},
+                         "acked": {"type": "boolean"}, "actions": {"type": "array"},
+                         "stage": {"type": "integer", "description": "단계 대응에서 지금 단계(0 = 처음, escalate.md)"}}}},
         "counts": {"type": "object"},
         "worst": {"type": "string", "enum": ["none", "warning", "error", "critical"]}
       }

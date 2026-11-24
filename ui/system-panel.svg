@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" font-family="sans-serif" font-size="12">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="900" height="400" fill="#fff"/>
+  <g stroke="#555">
+    <rect x="20" y="20" width="200" height="300" rx="6" fill="#f4f6fa"/>
+    <rect x="340" y="80" width="200" height="180" rx="6" fill="#fff8e6"/>
+    <rect x="640" y="20" width="240" height="300" rx="6" fill="#e8eef9"/>
+    <rect x="660" y="60" width="200" height="40" rx="5" fill="#fff"/>
+    <rect x="660" y="120" width="200" height="40" rx="5" fill="#fff"/>
+    <rect x="660" y="180" width="200" height="120" rx="5" fill="#fff"/>
+  </g>
+  <g text-anchor="middle" fill="#222">
+    <text x="120" y="42" font-weight="bold">매니저(보드)</text>
+    <text x="120" y="72">status-manager · system</text>
+    <text x="120" y="102">fault-manager · fault</text>
+    <text x="120" y="132">mission-manager · mission</text>
+    <text x="120" y="162">payload-manager · payload</text>
+    <text x="120" y="192">config-manager · config</text>
+    <text x="120" y="222">record-manager · 지표</text>
+    <text x="120" y="252">워커 get_status · leases</text>
+    <text x="120" y="290" fill="#666">스트림 소켓 · 명령 소켓</text>
+    <text x="440" y="102" font-weight="bold">게이트웨이 :8080</text>
+    <text x="440" y="130">GET /workers · /workers/{id}/io</text>
+    <text x="440" y="155">GET /workers/{id}/stream (SSE)</text>
+    <text x="440" y="180">POST …/command get_status</text>
+    <text x="440" y="215" fill="#666">바꾸지 않음</text>
+    <text x="760" y="42" font-weight="bold">화면(ui/web)</text>
+    <text x="760" y="85">① system.js: 찾기 · 스트림</text>
+    <text x="760" y="145">③ 머리 건강 띠(shell.js)</text>
+    <text x="760" y="202">④ 패널 "시스템"</text>
+    <text x="760" y="225">상태 · 이상 · 명령</text>
+    <text x="760" y="247">기록 · 모듈 · 설정</text>
+    <text x="760" y="269">⑤ 명령 임대(5 s, 열려 있을 때)</text>
+  </g>
+  <g stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#a)">
+    <line x1="220" y1="140" x2="338" y2="140"/>
+    <line x1="540" y1="120" x2="658" y2="85"/>
+    <line x1="338" y1="200" x2="222" y2="245"/>
+    <line x1="658" y1="255" x2="542" y2="200"/>
+    <line x1="760" y1="100" x2="760" y2="118"/>
+    <polyline points="860,80 872,80 872,240 862,240"/>
+  </g>
+  <g font-size="11" fill="#444" text-anchor="middle">
+    <text x="279" y="132">주제(9.7)</text>
+    <text x="600" y="92">② SSE 2 Hz</text>
+    <text x="270" y="238">get_status</text>
+    <text x="612" y="248">⑤</text>
+  </g>
+  <g font-size="11" fill="#444">
+    <text x="20" y="350">매니저 찾기: kind manager 워커의 계약 provides 역할로(record는 type). 매니저마다 스트림 하나를 띠·패널이 함께 씀</text>
+    <text x="20" y="370">없는 매니저 = "설치 안 됨" · 꺼진 매니저 = "꺼짐" · 스트림 down = "끊김" · status-manager가 없으면 띠 없음</text>
+  </g>
+</svg>

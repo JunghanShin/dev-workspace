@@ -7,6 +7,7 @@
 // ctx.workerId로 어느 워커인지 받는다.
 
 import * as ui from "/kit.js";
+import * as sys from "/system.js";
 
 const HISTORY = 180;          // 워커별 지표 기록 개수(그래프용)
 const nav = document.getElementById("nav");
@@ -254,10 +255,12 @@ async function poll() {
       hist.push({ t, actual_state: w.actual_state, metrics: w.metrics, resources: w.resources });
       if (hist.length > HISTORY) hist.shift();
     }
+    sys.sync(state, api);
   } catch (e) {
     state = { ...state, connected: false, error: e.message };
   }
   renderTop();
+  renderHealth();
   renderNav();
   if (!current && state.connected && panels.length) { route(); return; }
   if (current && current.mod.update) {
@@ -288,6 +291,42 @@ function renderTop() {
   const d = new Date();
   document.getElementById("clock").textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
     .map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+// 건강 띠(ui/system-panel.md 4장): status-manager의 system 주제 health + fault 주제의 이상 수. 누르면 패널 "시스템".
+// status-manager가 없으면 띠 없음
+let healthEls = null;
+function renderHealth() {
+  const box = document.getElementById("health");
+  if (!box) return;
+  const s = sys.get("system");
+  if (!s) { if (healthEls) { box.replaceChildren(); healthEls = null; } return; }
+  if (!healthEls) {
+    healthEls = { main: ui.pill("info", "시스템 상태 모름", "idle"), faults: ui.pill("alert", "", "warn") };
+    const a = h("a", { href: "#/system", class: "health-band", title: "" }, healthEls.main, healthEls.faults);
+    healthEls.link = a;
+    box.replaceChildren(a);
+  }
+  const t = state.connected && s.state === "running" && s.up ? s.topic : null;
+  if (!t) {
+    healthEls.main.set("info", "시스템 상태 모름", "idle");
+    healthEls.link.title = s.state !== "running" ? `${s.worker} ${s.state || "꺼짐"}` : "스트림 기다리는 중";
+  } else {
+    const [icon, text, kind] = sys.HEALTH[t.health] || ["info", t.health, "idle"];
+    const n = (t.reasons || []).length;
+    healthEls.main.set(icon, `시스템 ${text}` + (t.health !== "ok" && n ? ` · ${n}` : ""), kind);
+    healthEls.link.title = (t.reasons || []).join("\n") || "모든 워커 정상";
+  }
+  const f = sys.get("fault");
+  const ft = f && f.up ? f.topic : null;
+  const count = ft && ft.active ? Object.keys(ft.active).length : 0;
+  if (count) {
+    const [, kind] = sys.SEVERITY[ft.worst] || ["", "warn"];
+    healthEls.faults.set("alert", `이상 ${count}`, kind);
+    healthEls.faults.style.display = "";
+  } else {
+    healthEls.faults.style.display = "none";
+  }
 }
 
 // ---- 왼쪽 목록 ---------------------------------------------------------------------------

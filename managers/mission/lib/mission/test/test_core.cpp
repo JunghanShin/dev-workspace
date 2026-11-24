@@ -96,7 +96,113 @@ static void test_access() {
     CHECK(mission::access_from_peers(Json()).listed.empty());
 }
 
+static mission::Request preq(uint64_t id, const std::string& origin, int prio, int64_t t) {
+    mission::Request r = req(id, "cam", "mount", t);
+    r.origin = origin;
+    r.priority = prio;
+    return r;
+}
+
+static void test_priority() {
+    using A = mission::Dispatcher::Admit;
+    // 규칙 읽기: 정확히·앞부분·기본
+    const auto rules = mission::priority_from_config(Json::parse(
+        R"({"default": 50, "origins": {"fault-manager": 100, "remote:*": 30, "remote:ops": 60}, "hold_ms": 0, "roles": {"mount": {"hold_ms": 1000}}})"));
+    CHECK(rules.priority_of("fault-manager") == 100 && rules.priority_of("remote:x") == 30 && rules.priority_of("remote:ops") == 60);
+    CHECK(rules.priority_of("screen") == 50 && rules.hold_of("mount") == 1000 * MS && rules.hold_of("other") == 0);
+    bool threw = false;
+    try { mission::priority_from_config(Json::parse(R"({"nope": 1})")); } catch (const std::exception&) { threw = true; }
+    CHECK(threw);
+    // 큐 순서: 높은 것이 먼저, 같으면 온 순서
+    mission::Dispatcher d(3);
+    CHECK(d.submit(preq(1, "screen", 50, 0)) == A::Send);
+    CHECK(d.submit(preq(2, "ext", 20, 1)) == A::Queued);
+    CHECK(d.submit(preq(3, "screen", 50, 2)) == A::Queued);
+    CHECK(d.submit(preq(4, "fault-manager", 100, 3)) == A::Queued);
+    // 큐가 참: 더 낮거나 같으면 busy, 더 높으면 가장 낮은 것(ext)을 밀어냄
+    CHECK(d.submit(preq(5, "ext2", 20, 4)) == A::Busy);
+    CHECK(d.submit(preq(6, "screen", 50, 5)) == A::Queued);
+    auto ref = d.refused();
+    CHECK(ref.size() == 1 && ref[0].first.id == 2 && ref[0].second.find("preempted") != std::string::npos);
+    auto n = d.done("cam.mount");
+    CHECK(n && n->id == 4);
+    n = d.done("cam.mount");
+    CHECK(n && n->id == 3);
+    n = d.done("cam.mount");
+    CHECK(n && n->id == 6);
+    // 규칙이 없으면 예전과 같음(모두 0, 온 순서)
+    mission::Dispatcher e(4);
+    CHECK(e.submit(req(1, "a", "r", 0)) == A::Send && e.submit(req(2, "a", "r", 1)) == A::Queued && e.submit(req(3, "a", "r", 2)) == A::Queued);
+    CHECK(e.done("a.r")->id == 2 && e.done("a.r")->id == 3);
+}
+
+static void test_hold() {
+    using A = mission::Dispatcher::Admit;
+    mission::Dispatcher d(4);
+    d.set_rules(mission::priority_from_config(Json::parse(R"({"roles": {"mount": {"hold_ms": 1000}}})")));
+    CHECK(d.submit(preq(1, "screen", 50, 0)) == A::Send);
+    CHECK(d.submit(preq(2, "ext", 20, 10 * MS)) == A::Queued);
+    CHECK(!d.done("cam.mount", 100 * MS));  // screen이 끝남 → 1 s 잡아 둠, 큐의 ext(낮음)는 held로 빠짐
+    auto ref = d.refused();
+    CHECK(ref.size() == 1 && ref[0].first.id == 2 && ref[0].second.find("held by screen") != std::string::npos);
+    CHECK(d.submit(preq(3, "ext", 20, 500 * MS)) == A::Held);       // 낮은 곳: 거절
+    CHECK(d.submit(preq(4, "screen", 50, 600 * MS)) == A::Send);    // 잡은 곳 자신: 됨
+    CHECK(!d.done("cam.mount", 700 * MS));                          // 다시 1 s(1700 ms까지)
+    CHECK(d.snapshot(800 * MS)["cam.mount"]["holder"]["origin"] == "screen");
+    CHECK(d.submit(preq(5, "fault-manager", 100, 900 * MS)) == A::Send);  // 더 높은 곳: 됨
+    CHECK(!d.done("cam.mount", 950 * MS));                          // 이제 fault가 잡음
+    CHECK(d.submit(preq(6, "screen", 50, 1000 * MS)) == A::Held);
+    CHECK(d.submit(preq(7, "ext", 20, 2000 * MS)) == A::Send);      // 기한 지남
+}
+
+static void test_conditions() {
+    const auto cs = mission::conditions_from_config(Json::parse(R"([
+        {"name": "arm-mode", "target": "fc", "cmd": "flight.set_mode", "except": ["fault-manager"],
+         "require": [{"metric": "armed", "op": "==", "value": 0}, {"worker": "gps", "state": "running"}], "message": "disarm first"},
+        {"name": "dev-only", "cmd": "debug.*", "require": [{"mode": "development"}]},
+        {"name": "soft", "target": "cam", "cmd": "*", "unknown": "allow", "require": [{"metric": "temp_c", "op": "<", "value": 80}]}])"));
+    CHECK(cs.size() == 3);
+    mission::World w;
+    w.state = {{"fc", "running"}, {"gps", "running"}};
+    w.metrics["fc"] = Json{{"armed", 1}};
+    w.mode = "operation";
+    mission::Request r;
+    r.target = "fc";
+    r.cmd = "flight.set_mode";
+    r.origin = "screen";
+    auto why = mission::check_conditions(cs, w, r);
+    CHECK(why && why->find("arm-mode") != std::string::npos && why->find("fc.armed is 1") != std::string::npos && why->find("disarm first") != std::string::npos);
+    r.origin = "fault-manager";
+    CHECK(!mission::check_conditions(cs, w, r));  // except
+    r.origin = "screen";
+    w.metrics["fc"]["armed"] = 0;
+    CHECK(!mission::check_conditions(cs, w, r));
+    w.state["gps"] = "stopped";
+    why = mission::check_conditions(cs, w, r);
+    CHECK(why && why->find("gps state is stopped") != std::string::npos);
+    w.state.erase("gps");
+    why = mission::check_conditions(cs, w, r);
+    CHECK(why && why->find("unknown") != std::string::npos);  // 모르면 막음(기본)
+    r.target = "x";
+    r.cmd = "debug.dump";
+    CHECK(mission::check_conditions(cs, w, r).has_value());
+    w.mode = "development";
+    CHECK(!mission::check_conditions(cs, w, r));
+    r.target = "cam";
+    r.cmd = "cam.zoom";
+    CHECK(!mission::check_conditions(cs, w, r));  // 지표 없음 + unknown allow
+    w.metrics["cam"] = Json{{"temp_c", 85}};
+    CHECK(mission::check_conditions(cs, w, r).has_value());
+    bool threw = false;
+    try { mission::conditions_from_config(Json::parse(R"([{"require": [{"metric": "a", "op": "~", "value": 1}]}])")); } catch (const std::exception&) { threw = true; }
+    CHECK(threw);
+    CHECK(mission::conditions_from_config(Json()).empty());
+}
+
 int main() {
+    test_priority();
+    test_hold();
+    test_conditions();
     test_access();
     test_roles();
     test_queue();

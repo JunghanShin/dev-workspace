@@ -4,6 +4,8 @@
 //   올림: 조건이 for_s 넘게 이어짐(event는 받는 즉시, hold_s 지나면 내림). 올릴 때 대응 한 번(운용 모드에서만)
 //   워커 글롭에 여럿이 맞으면 워커마다 따로(이상 이름 "<규칙>:<워커>")
 //   status가 3 s 넘게 끊기면 이상 status_lost(warning)를 스스로 올림
+//   조합·단계(managers/fault/escalate.md): when {"all"|"any": [조건...]}(중첩, 시스템 전체로 한 번 판정, 이름 = 규칙 id),
+//   stages [{after_s, severity, text?, do?}]: 올라간 뒤 after_s가 지나면 심각도를 올리고 그 단계 대응을 한 번
 #pragma once
 
 #include <cstdint>
@@ -20,7 +22,9 @@ namespace fault {
 using Json = nlohmann::json;
 
 struct Condition {
-    enum Kind { Health, Metric, Event, System } kind = Health;
+    enum Kind { Health, Metric, Event, System, All, Any } kind = Health;
+    std::vector<Condition> children;  // All·Any
+    int leaf = 0;                     // 조합 안 이벤트 조건 번호(규칙 안에서 1부터)
     std::string worker = "*";       // 워커 id 글롭(health·metric·event)
     std::set<std::string> is;       // health·system: 이 건강들 중 하나면 참
     std::string name;               // metric 이름
@@ -33,11 +37,19 @@ struct Action {
     Json args = Json::object();
 };
 
+struct Stage {
+    double after_s = 0;  // 올라간 때부터
+    std::string severity, text;  // text가 비면 그대로
+    std::vector<Action> actions;
+};
+
 struct Rule {
     std::string id, severity = "warning", text;
     Condition when;
     double for_s = 0, hold_s = 10;
     std::vector<Action> actions;
+    std::vector<Stage> stages;  // after_s 오름차순, 심각도는 내려가지 않음
+    bool combined() const { return when.kind == Condition::All || when.kind == Condition::Any; }
 };
 
 // 설정 config["rules"] → 규칙(틀리면 std::invalid_argument)
@@ -77,10 +89,16 @@ private:
         std::string rule, worker, severity, text;
         int64_t since = 0;
         bool acked = false;
+        size_t stage = 0;  // 0 = 처음, n = stages[n-1]까지 감
         Json actions = Json::array();
     };
+    enum class Tri { False, True, Unknown };
     void raise(const std::string& key, const Rule& r, const std::string& worker, int64_t now, bool operation, Out& out);
     void clear(const std::string& key, Out& out);
+    void add_actions(Active& a, const std::string& key, const std::vector<Action>& acts, size_t stage, bool operation, Out& out);
+    void escalate(int64_t now, bool operation, Out& out);
+    Tri eval(const Rule& r, const Condition& c, int64_t now) const;
+    void note_event(const Rule& r, const Condition& c, const std::string& src, const std::string& code, int64_t now);
 
     std::vector<Rule> rules_;
     Json health_ = Json();           // system.workers
@@ -89,6 +107,7 @@ private:
     int64_t status_lost_since_ = 0;  // 0이면 붙어 있음
     std::map<std::string, Json> metrics_;
     std::map<std::string, int64_t> event_at_;   // "<규칙>:<워커>" → 마지막 이벤트 시각
+    std::map<std::string, std::map<std::string, int64_t>> leaf_event_at_;  // 조합: "<규칙>#<번호>" → 워커 → 마지막 이벤트
     std::map<std::string, int64_t> true_since_; // 조건이 참이 된 시각
     std::map<std::string, Active> active_;
 };

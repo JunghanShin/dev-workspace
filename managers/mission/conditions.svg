@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" font-family="sans-serif" font-size="12">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="900" height="340" fill="#fff"/>
+  <g stroke="#555">
+    <rect x="20" y="30" width="200" height="56" rx="6" fill="#f4f6fa"/>
+    <rect x="20" y="150" width="150" height="40" rx="6" fill="#f4f6fa"/>
+    <rect x="260" y="110" width="400" height="140" rx="6" fill="#e8eef9"/>
+    <rect x="720" y="120" width="160" height="50" rx="6" fill="#eaf4ea"/>
+    <rect x="720" y="200" width="160" height="50" rx="6" fill="#fde8e8"/>
+  </g>
+  <g text-anchor="middle" fill="#222">
+    <text x="120" y="52" font-weight="bold">process-manager 구독</text>
+    <text x="120" y="72">워커 상태 · 지표 · 모드</text>
+    <text x="95" y="175">명령(mission.send)</text>
+    <text x="460" y="132" font-weight="bold">mission-manager</text>
+    <text x="460" y="156">① 알고 있기: 상태 · 지표 · access_mode</text>
+    <text x="460" y="178">② 맞는 규칙: target · cmd(* 앞부분), except 빼고</text>
+    <text x="460" y="200">③ require 모두 참? 모르면 막음(기본)</text>
+    <text x="460" y="230" fill="#666">허락(via) → 빠른 줄 → 조건 → 큐(우선순위)</text>
+    <text x="800" y="142" font-weight="bold">참: 큐로</text>
+    <text x="800" y="160">→ 대상 워커</text>
+    <text x="800" y="222" font-weight="bold">거짓: forbidden</text>
+    <text x="800" y="240">규칙 이름 + 이유</text>
+  </g>
+  <g stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#a)">
+    <line x1="220" y1="58" x2="330" y2="108"/>
+    <line x1="170" y1="170" x2="258" y2="170"/>
+    <line x1="660" y1="150" x2="718" y2="145"/>
+    <line x1="660" y1="210" x2="718" y2="225"/>
+  </g>
+  <g font-size="11" fill="#444">
+    <text x="20" y="290">설정 conditions가 없으면 검사 없음(지금과 같음) · 읽기 · lease.renew는 조건을 보지 않음</text>
+    <text x="20" y="310">이벤트 command_blocked · 지표 blocked · 거절 이유는 화면에 그대로 보임</text>
+  </g>
+</svg>

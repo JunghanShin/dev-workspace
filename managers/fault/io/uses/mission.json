@@ -1,6 +1,6 @@
 {
   "name": "mission",
-  "version": "1.1",
+  "version": "1.2",
   "description": "명령 입구(managers/mission/design.md 2·4장). 이 역할을 내보내는 워커가 있으면 게이트웨이가 읽기가 아닌 워커 명령을 이리로 보낸다",
   "topics": {
     "mission": {
@@ -12,9 +12,13 @@
         "queues": {"type": "object", "additionalProperties": {"type": "object", "required": ["waiting", "inflight"],
                    "properties": {"waiting": {"type": "integer"},
                                   "inflight": {"type": ["object", "null"], "properties": {"cmd": {"type": "string"}, "origin": {"type": "string"},
-                                                                                         "age_ms": {"type": "integer", "unit": "ms"}}}}}},
+                                                                                         "age_ms": {"type": "integer", "unit": "ms"}}},
+                                  "holder": {"type": "object", "description": "잡아 둔 곳(priority.md, 잡혀 있을 때만)", "properties": {"origin": {"type": "string"}, "priority": {"type": "integer"}, "left_ms": {"type": "integer", "unit": "ms"}}}}}},
         "sent": {"type": "integer"}, "busy": {"type": "integer"}, "timeouts": {"type": "integer"}, "unavailable": {"type": "integer"},
-        "forbidden": {"type": "integer", "description": "via 허락이 없어 거절한 수(external-link.md)"}
+        "forbidden": {"type": "integer", "description": "via 허락이 없어 거절한 수(external-link.md)"},
+        "preempted": {"type": "integer", "description": "더 높은 우선순위에 밀려난 수(priority.md)"},
+        "held": {"type": "integer", "description": "잡아 둔 역할이라 거절한 수(priority.md)"},
+        "blocked": {"type": "integer", "description": "명령 조건이 안 맞아 거절한 수(conditions.md)"}
       }
     }
   },

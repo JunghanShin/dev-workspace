@@ -162,7 +162,9 @@ static void test_fault() {
     });
     std::ofstream(inputs) << Json{{"inputs", {{"system", {{"stream", st}}}, {"mission", {{"command", ms}}}}}}.dump();
     const std::string rules = R"([{"id":"cam_lost","when":{"health":{"worker":"cam*","is":["fault"]}},"for_s":1,"severity":"error",
-                                   "do":[{"target":"payload-manager","cmd":"payload.power","args":{"module":"cam1","on":true}}]}])";
+                                   "do":[{"target":"payload-manager","cmd":"payload.power","args":{"module":"cam1","on":true}}],
+                                   "stages":[{"after_s":2,"severity":"critical","do":[{"target":"payload-manager","cmd":"payload.stop","args":{"module":"cam1"}}]}]},
+                                  {"id":"both","when":{"all":[{"health":{"worker":"cam*","is":"fault"}},{"system":{"is":"degraded"}}]},"severity":"warning"}])";
     const pid_t pid = spawn(R"({"id":"fault-manager","config_version":1,"config":{"fault":{"rules":)" + rules + "}}}",
                             {{"WORKSPACE_DATA", data}, {"WORKSPACE_MANAGER_SOCKET", g_dir + "/no-pm.sock"}, {"WORKSPACE_INPUTS_FILE", inputs}});
     const std::string sock = data + "/run/cmd/fault-manager.sock";
@@ -174,15 +176,25 @@ static void test_fault() {
     }
     CHECK(list.value("ok", false) && list["data"]["active"].contains("cam_lost:cam1"));
     CHECK(list.value("ok", false) && list["data"]["worst"] == "error");
-    std::this_thread::sleep_for(1500ms);  // 올라가 있는 동안 대응을 되풀이하지 않는지 볼 틈
+    CHECK(list.value("ok", false) && list["data"]["active"].contains("both"));  // 조합(시스템 전체)
+    // 단계: 올라간 뒤 2 s → critical, 그 단계 대응 한 번. 그 뒤로 되풀이하지 않음
+    for (int i = 0; i < 50; ++i) {
+        list = cmd(sock, {{"cmd", "fault.list"}, {"args", Json::object()}});
+        if (list.value("ok", false) && list["data"]["active"]["cam_lost:cam1"].value("stage", 0) == 1) break;
+        std::this_thread::sleep_for(100ms);
+    }
+    CHECK(list.value("ok", false) && list["data"]["active"]["cam_lost:cam1"]["stage"] == 1 && list["data"]["worst"] == "critical");
+    std::this_thread::sleep_for(1000ms);
     {
         std::lock_guard<std::mutex> lock(mu);
-        CHECK(got.size() == 1);
+        CHECK(got.size() == 2);
         CHECK(!got.empty() && got[0]["cmd"] == "mission.send" && got[0]["args"]["target"] == "payload-manager" &&
               got[0]["args"]["cmd"] == "payload.power" && got[0]["args"]["args"]["module"] == "cam1");
+        CHECK(got.size() == 2 && got[1]["args"]["cmd"] == "payload.stop");
     }
     list = cmd(sock, {{"cmd", "fault.list"}, {"args", Json::object()}});
     CHECK(list.value("ok", false) && list["data"]["active"]["cam_lost:cam1"]["actions"][0]["ok"] == true);
+    CHECK(list.value("ok", false) && list["data"]["active"]["cam_lost:cam1"]["actions"][1]["ok"] == true);
     const Json stj = cmd(sock, {{"cmd", "get_status"}, {"args", Json::object()}});
     CHECK(stj.value("ok", false) && stj["data"]["inputs"]["system"]["link"] == true && stj["data"]["inputs"]["mission"]["link"] == true);
     Json r = cmd(sock, {{"cmd", "fault.ack"}, {"args", {{"id", "cam_lost:cam1"}}}});
@@ -194,7 +206,7 @@ static void test_fault() {
     bool cleared = false;
     for (int i = 0; i < 50 && !cleared; ++i) {
         list = cmd(sock, {{"cmd", "fault.list"}, {"args", Json::object()}});
-        cleared = list.value("ok", false) && !list["data"]["active"].contains("cam_lost:cam1");
+        cleared = list.value("ok", false) && !list["data"]["active"].contains("cam_lost:cam1") && !list["data"]["active"].contains("both");
         std::this_thread::sleep_for(100ms);
     }
     CHECK(cleared);

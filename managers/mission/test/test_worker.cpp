@@ -280,6 +280,43 @@ static void test_external() {
     w.finish();
 }
 
+
+// 우선순위·명령 조건 설정(priority.md, conditions.md): 조건이 안 맞으면 forbidden(값 모름 = 막음), 잡아 두면 낮은 곳 busy
+static void test_rules() {
+    const std::string data = g_dir + "/data3";
+    (void)!std::system(("mkdir -p " + data + "/run/cmd " + data + "/run/stream").c_str());
+    FakeWorker w;
+    w.start(data + "/run/cmd/w1.sock");
+    const pid_t pid = spawn(R"({"id":"mission-manager","config_version":1,"config":{"mission":{
+        "priority": {"origins": {"screen": 50, "remote:*": 20}, "roles": {"fast": {"hold_ms": 1500}}},
+        "conditions": [{"name": "dev-only", "target": "w1", "cmd": "fast.dev", "require": [{"mode": "development"}]}]}}})",
+                            {{"WORKSPACE_DATA", data}, {"WORKSPACE_MANAGER_SOCKET", g_dir + "/no-pm.sock"}});
+    const std::string sock = data + "/run/cmd/mission-manager.sock";
+    for (int i = 0; i < 150 && connect_unix(sock) < 0; ++i) std::this_thread::sleep_for(100ms);
+    auto send_from = [&](const std::string& cmd, const std::string& from) {
+        const int fd = connect_unix(sock);
+        send_line(fd, Json{{"cmd", "mission.send"}, {"args", {{"target", "w1"}, {"cmd", cmd}, {"args", Json::object()}}}, {"from", from}}.dump());
+        const Json r = Json::parse(read_line(fd, 8000), nullptr, false);
+        close(fd);
+        return r;
+    };
+    const Json blocked = send_from("fast.dev", "screen");
+    CHECK(!blocked.value("ok", true) && blocked["error"]["code"] == "forbidden" &&
+          blocked["error"]["message"].get<std::string>().find("dev-only") != std::string::npos);
+    CHECK(send_from("fast.a", "screen").value("ok", false));          // screen이 fast를 1.5 s 잡음
+    const Json held = send_from("fast.b", "remote:t1");                // 낮은 곳: busy
+    CHECK(!held.value("ok", true) && held["error"]["code"] == "busy");
+    CHECK(send_from("fast.c", "screen").value("ok", false));          // 잡은 곳 자신은 됨
+    CHECK(send_from("slow.a", "remote:t1").value("ok", false));       // 다른 역할은 상관없음
+    kill(pid, SIGTERM);
+    CHECK(wait_exit(pid, 15000) == 0);
+    w.finish();
+    // 틀린 규칙: 뜨지 않음
+    const pid_t bad = spawn(R"({"id":"m2","config_version":1,"config":{"mission":{"priority": {"origins": {"x": "high"}}}}})",
+                            {{"WORKSPACE_DATA", data}});
+    CHECK(wait_exit(bad, 10000) != 0);
+}
+
 static void test_bad_config() {
     CHECK(wait_exit(spawn(R"({"id":"mission-manager","config":{"mission":{"nope":1}}})", {}), 15000) == 1);
     CHECK(wait_exit(spawn(R"({"id":"mission-manager","config":{"mission":{"command_timeout_ms":3000,"total_timeout_ms":1000}}})", {}), 15000) == 1);
@@ -296,6 +333,7 @@ int main(int argc, char** argv) {
     signal(SIGPIPE, SIG_IGN);
     test_mission();
     test_external();
+    test_rules();
     test_bad_config();
     (void)!std::system(("rm -rf " + g_dir).c_str());
     if (failures) {

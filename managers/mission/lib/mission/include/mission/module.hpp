@@ -5,7 +5,8 @@
 // 스레드: 코어(호스트 루프) · mission.pm(process-manager 구독: 워커 상태) · mission.io(계약 get_io를 10 s마다)
 //         · mc.<대상>.<역할>(명령 스레드, libworker CommandClient) · mission.pub(주제 mission)
 // 명령: send(운용 조작) {"target", "cmd", "args"} → 대상 워커의 응답 그대로. get_queues(읽기)
-// 지표: sent, busy, timeouts, unavailable, forbidden, fast_sent, queues, waiting
+// 지표: sent, busy, timeouts, unavailable, forbidden, fast_sent, preempted, held, blocked, queues, waiting
+// 우선순위·잡아 두기(priority.md), 명령 조건(conditions.md): 설정 priority·conditions
 // 외부 연동 워커(external-link.md): 허용 목록(WORKSPACE_PEERS_FILE) via로 허락, 읽기·lease.renew는 빠른 줄 mf.<대상>
 #pragma once
 
@@ -29,6 +30,8 @@ struct Settings {
     int command_timeout_ms = 2000;
     int total_timeout_ms = 2800;
     double idle_close_s = 60;
+    PriorityRules priority;              // priority.md(없으면 모두 같음)
+    std::vector<Condition> conditions;   // conditions.md(없으면 검사 없음)
 };
 
 class Module : public worker::Module {
@@ -66,6 +69,7 @@ private:
     void send_now(const Request& r);
     void send_fast(const Request& r);
     void refresh_access();
+    void flush_refused();
     void finish(uint64_t request_id, const Json& response);
     void event(const std::string& severity, const std::string& code, const std::string& text, const Json& detail);
     void publish(worker::TimePoint now, bool force);
@@ -81,6 +85,7 @@ private:
     worker::BoundedQueue<std::map<std::string, Contract>> io_got_{1, worker::Overflow::DropOldest};  // io → 코어
     std::map<std::string, Contract> contracts_;
     std::map<std::string, std::string> states_;  // 워커 id → actual_state
+    World world_;                                 // 명령 조건이 보는 것(상태·지표·모드)
     bool ids_changed_ = true;
     std::map<std::string, Lane> lanes_;               // (대상, 역할) → 명령 스레드
     std::map<std::string, FastLane> fast_;            // 대상 → 빠른 줄(읽기·lease.renew)
@@ -92,6 +97,7 @@ private:
     std::vector<Json> pending_events_;
     uint64_t next_id_ = 0, seq_ = 0, ev_seq_ = 0;
     uint64_t sent_ = 0, busy_ = 0, timeouts_ = 0, unavailable_ = 0, forbidden_ = 0, fast_sent_ = 0;
+    uint64_t preempted_ = 0, held_ = 0, blocked_ = 0;
     bool dirty_ = true;
     worker::TimePoint next_pub_{}, next_kf_{}, next_io_{};
 };

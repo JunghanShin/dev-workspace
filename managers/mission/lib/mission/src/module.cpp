@@ -31,7 +31,7 @@ double unix_s() { return std::chrono::duration<double>(std::chrono::system_clock
 }  // namespace
 
 void Module::configure(const worker::Json& config) {
-    worker::check_keys(config, {"queue", "command_timeout_ms", "total_timeout_ms", "idle_close_s"});
+    worker::check_keys(config, {"queue", "command_timeout_ms", "total_timeout_ms", "idle_close_s", "priority", "conditions"});
     Settings s;
     int queue = static_cast<int>(s.queue);
     worker::read(config, "queue", queue);
@@ -43,6 +43,14 @@ void Module::configure(const worker::Json& config) {
     worker::require(s.total_timeout_ms >= s.command_timeout_ms, "mission.total_timeout_ms must be >= command_timeout_ms");
     worker::require(s.idle_close_s > 0, "mission.idle_close_s must be > 0");
     s.queue = static_cast<size_t>(queue);
+    try {
+        s.priority = priority_from_config(config.contains("priority") ? config["priority"] : Json());
+        s.conditions = conditions_from_config(config.contains("conditions") ? config["conditions"] : Json());
+    } catch (const worker::ConfigError&) {
+        throw;
+    } catch (const std::exception& e) {
+        worker::require(false, e.what());
+    }
     s_ = s;
 }
 
@@ -50,6 +58,7 @@ void Module::start(worker::Host& host) {
     if (const char* pf = std::getenv("WORKSPACE_PEERS_FILE"); pf && *pf) peers_file_ = pf;
     host_ = &host;
     disp_ = std::make_unique<Dispatcher>(s_.queue, static_cast<int64_t>(s_.total_timeout_ms) * 1000000);
+    disp_->set_rules(s_.priority);
     worker::Publisher::Options po;
     po.thread_name = "mission.pub";
     pub_ = std::make_unique<worker::Publisher>(host.watch(), po);
@@ -107,8 +116,15 @@ void Module::drain() {
             if (id.empty()) continue;
             if (!states_.count(id)) ids_changed_ = true;
             states_[id] = d.value("actual_state", "");
+            world_.state[id] = states_[id];
+            if (d.contains("metrics") && d["metrics"].is_object()) world_.metrics[id] = d["metrics"];
+            else world_.metrics.erase(id);
+        } else if (e == "system" && ev->msg.contains("data") && ev->msg["data"].is_object()) {
+            world_.mode = ev->msg["data"].value("access_mode", world_.mode);
         } else if (e == "worker_removed" && ev->msg.contains("data")) {
             states_.erase(ev->msg["data"].value("id", ""));
+            world_.state.erase(ev->msg["data"].value("id", ""));
+            world_.metrics.erase(ev->msg["data"].value("id", ""));
             ids_changed_ = true;
         }
     }
@@ -128,7 +144,8 @@ void Module::drain() {
             }
             finish(rid, resp);
             dirty_ = true;
-            if (auto next = disp_->done(key)) send_now(*next);
+            if (auto next = disp_->done(key, mono_ns())) send_now(*next);
+            flush_refused();
         }
     }
     for (auto& [target, lane] : fast_) {
@@ -161,7 +178,7 @@ void Module::send_now(const Request& r) {
     const uint64_t cid = lane.client->send(r.cmd, r.args, envelope);
     if (cid == 0) {  // 큐가 참(일어나지 않아야 함: 한 번에 하나)
         finish(r.id, worker::error_reply("busy", r.key() + ": command thread busy"));
-        if (auto next = disp_->done(r.key())) send_now(*next);
+        if (auto next = disp_->done(r.key(), mono_ns())) send_now(*next);
         return;
     }
     lane.client_id = cid;
@@ -193,6 +210,18 @@ void Module::send_fast(const Request& r) {
     lane.pending[cid] = r.id;
     ++fast_sent_;
     dirty_ = true;
+}
+
+void Module::flush_refused() {
+    if (!disp_) return;
+    for (auto& [r, why] : disp_->refused()) {
+        const bool pre = why.rfind("preempted", 0) == 0;
+        ++(pre ? preempted_ : held_);
+        event("warning", pre ? "command_preempted" : "command_held", r.key() + ": " + r.cmd + " from " + r.origin + " " + why,
+              {{"lane", r.key()}, {"cmd", r.cmd}, {"origin", r.origin}});
+        finish(r.id, worker::error_reply("busy", r.key() + ": " + why));
+        dirty_ = true;
+    }
 }
 
 void Module::refresh_access() {
@@ -271,12 +300,27 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
     r.role = role_of(contract, r.cmd);
     r.id = ++next_id_;
     r.enq_ns = mono_ns();
+    r.priority = s_.priority.priority_of(r.origin);
     if (fast_command(contract, r.cmd)) {  // 큐를 기다리지 않음(external-link.md 5장)
         replies_[r.id] = std::move(reply);
         send_fast(r);
         return true;
     }
+    if (auto why = check_conditions(s_.conditions, world_, r)) {  // 명령 조건(conditions.md)
+        ++blocked_;
+        dirty_ = true;
+        event("warning", "command_blocked", r.target + " " + r.cmd + " from " + r.origin + ": " + *why,
+              {{"target", r.target}, {"cmd", r.cmd}, {"origin", r.origin}, {"reason", *why}});
+        reply(worker::error_reply("forbidden", *why));
+        return true;
+    }
     switch (disp_->submit(r)) {
+    case Dispatcher::Admit::Held:
+        ++held_;
+        event("warning", "command_held", r.key() + ": " + r.cmd + " from " + r.origin + " refused (held)",
+              {{"lane", r.key()}, {"cmd", r.cmd}, {"origin", r.origin}});
+        reply(worker::error_reply("busy", r.key() + ": held by a higher priority sender"));
+        return true;
     case Dispatcher::Admit::Busy:
         ++busy_;
         event("warning", "command_busy", r.key() + ": " + r.cmd + " from " + r.origin + " refused (queue full)",
@@ -286,6 +330,7 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
     case Dispatcher::Admit::Queued:
         replies_[r.id] = std::move(reply);
         dirty_ = true;
+        flush_refused();  // 밀려난 것이 있으면
         return true;
     case Dispatcher::Admit::Send:
         replies_[r.id] = std::move(reply);
@@ -345,7 +390,8 @@ void Module::publish(worker::TimePoint now, bool force) {
     const bool kf = pub_->keyframe_requested() || now >= next_kf_;
     if (kf) next_kf_ = now + std::chrono::seconds(5);
     const Json topic = {{"t_mono_ns", mono_ns()}, {"queues", disp_->snapshot(mono_ns())}, {"sent", sent_}, {"busy", busy_},
-                        {"timeouts", timeouts_}, {"unavailable", unavailable_}, {"forbidden", forbidden_}};
+                        {"timeouts", timeouts_}, {"unavailable", unavailable_}, {"forbidden", forbidden_},
+                        {"preempted", preempted_}, {"held", held_}, {"blocked", blocked_}};
     Json line = {{"seq", ++seq_}, {"kf", kf}, {"t", unix_s()}, {"topics", {{"mission", topic}}},
                  {"events", pending_events_}, {"events_next", 0}};
     pending_events_.clear();
@@ -364,6 +410,9 @@ void Module::metrics(worker::Metrics& m) const {
     m.set("unavailable", unavailable_);
     m.set("forbidden", forbidden_);
     m.set("fast_sent", fast_sent_);
+    m.set("preempted", preempted_);
+    m.set("held", held_);
+    m.set("blocked", blocked_);
     m.set("queues", static_cast<long long>(lanes_.size()));
     m.set("waiting", static_cast<long long>(disp_ ? disp_->waiting() : 0));
     m.set("pm_link", pm_ && pm_->connected());

@@ -58,7 +58,7 @@ private:
     std::vector<Json> pending_events_;
     std::string access_mode_ = "operation";
     bool dirty_ = true;
-    uint64_t seq_ = 0, ev_seq_ = 0, ticks_ = 0, raised_ = 0, actions_ = 0, action_failed_ = 0;
+    uint64_t seq_ = 0, ev_seq_ = 0, ticks_ = 0, raised_ = 0, escalated_ = 0, actions_ = 0, action_failed_ = 0;
     worker::TimePoint next_pub_{}, next_kf_{}, next_sync_{}, next_eval_{};
 };
 

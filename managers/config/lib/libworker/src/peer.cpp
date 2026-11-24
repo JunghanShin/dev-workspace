@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "worker/client.hpp"
+#include "worker/input_check.hpp"
 #include <sys/stat.h>
 #include <cstdlib>
 #include <fstream>
@@ -97,6 +98,7 @@ void Subscriber::run(WorkerThread& t) {
                 u.kf = j.value("kf", false);
                 if (j.contains("topics") && j["topics"].is_object()) u.topics = j["topics"];
                 if (j.contains("events") && j["events"].is_array()) u.events = j["events"];
+                input_check::observe(peer_, u.topics);  // 받은 칸 실행 중 검사(막지 않음, docs/input-check.md)
                 ++received_;
                 queue_.push(std::move(u));
             }

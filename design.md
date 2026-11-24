@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.73 |
+| 문서 버전 | 0.74 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1576,6 +1576,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.71 | **명령 검사 기본 `enforce`**(`docs/command-path.md` 5장 ②): 보드 워커·매니저 로그에 허용 목록 밖 명령이 없음을 확인(2026-11-24)하고 process-manager `command_guard` 기본을 `warn` → `enforce`. 허용 목록 밖의 읽기가 아닌 명령은 `forbidden`, 읽기는 그대로. 되돌리려면 데이터 `config/manager.json`에 `"command_guard": "warn"`. 보드 확인: 화면 명령은 mission을 거쳐 됨, 허용 목록 밖의 직접 제어 명령은 `forbidden`, 읽기는 그대로 |
 | 0.72 | **명령 임대**(`docs/command-lease.md`, 원칙 14): 역할 정의 명령 `lease_ms`·역할 `safe_state`(계약 점검이 짝 검사), libworker 0.15 호스트가 ok인 임대 명령의 기한을 재고 같은 명령·공통 명령 `lease.renew`로 갱신, 기한이 지나면 `safe_state`를 모듈에 넣고 이벤트 `lease_expired`(호스트 이벤트 큐 `take_events`), `get_status` `leases`·지표 `host_lease_*`(common 1.4). 틀 예 `source.boost`(임대 300 ms)·`source.normal`. 남은 일 목록 `docs/managers-next.md` |
 | 0.73 | **외부 연동 워커를 mission으로**(`managers/mission/external-link.md`, 그림 `external-link.svg`): `peers.json`에 `entry`(명령 입구)·`workers.<id>.via`(입구를 거쳐 보내도 되는 곳, `commanders`가 옮겨 옴), 입구가 있으면 워커 `allow`는 게이트웨이·입구만. libworker 0.16 `CommandClient`가 입구로 감쌈(`mission.send`), 기다리는 동안 맥박. mission이 `via`로 허락(`forbidden`, 이벤트 `command_forbidden`), 읽기·`lease.renew`는 빠른 줄 `mf.<대상>`. 역할 정의 `mission` 1.1 |
+| 0.74 | **남은 일 목록 3~8**(`docs/managers-next.md`, 항목마다 설계서·그림 따로, 초안 값으로 구현): 명령 **우선순위**·잡아 두기(`managers/mission/priority.md`, 설정 `priority`), **명령 조건**(`managers/mission/conditions.md`, 설정 `conditions`, 워커 상태·지표·모드, 막히면 `forbidden`+이유), fault **조건 조합·단계 대응**(`managers/fault/escalate.md`, `all`/`any`, `stages`, 역할 정의 `fault` 1.1), **받은 칸 실행 중 검사**(`docs/input-check.md`, libworker 0.17, 공통 1.5 `input_check`·`inputs_<입력>_bad`), 워크스페이스 화면 **건강 띠·패널 "시스템"**(`ui/system-panel.md`), **HTTPS**(`docs/https.md`, `WORKSPACE_HTTPS=on`, 기본 꺼짐, 자체 서명 또는 사용자 인증서). 역할 정의 `mission` 1.2. 새 동작은 설정이 없으면 지금과 같음(받은 칸 검사는 알리기만 해서 기본 켬) |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

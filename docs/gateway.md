@@ -134,6 +134,8 @@
 | 실행 | `dev/release-worker.sh gateway` → `gateway/bin/gateway`. 시작 셸: `WORKSPACE_REST_IMPL=cpp` 또는 `<데이터>/config/rest_impl`에 `cpp`(기본 Python). `WORKSPACE_GATEWAY_SOCKET`(Unix 소켓, nginx용), `WORKSPACE_GATEWAY_THREADS`(동시 요청 상한, 기본 48, SSE 포함). 신분 확인은 0.52부터(6.2, 시작 셸이 `workspace.env`의 `WORKSPACE_AUTH`를 넘김) |
 | 라이브러리 | cpp-httplib v0.18.3(MIT, 사본) |
 
+**HTTPS:** 설계·설정은 `docs/https.md`(`WORKSPACE_HTTPS`, 기본 꺼짐).
+
 **nginx 앞단(0.51):** `gateway/nginx/nginx.conf.in`(틀)·`render.sh`(시작 셸과 시험이 같이 씀). 시작 셸은 C++ 게이트웨이 + nginx가 있으면 `<데이터>/run/nginx/`에 설정을 만들고 `nginx -t`가 통과할 때만 워크스페이스 계정으로 띄운다(게이트웨이는 `WORKSPACE_GATEWAY_TCP=0`, `run/gateway.sock`). 없거나 실패하면 게이트웨이가 TCP로 직접. 끄기 `WORKSPACE_NGINX=off`. 설치: `sudo apt install nginx-light`, 시스템 nginx 서비스는 끔(`systemctl disable --now nginx`). Ubuntu 22.04 nginx-light(1.18)에는 limit_conn 모듈이 없어 `render.sh`가 그 줄을 뺀다(보드에서 처음 설정 점검 실패 → 게이트웨이가 TCP로 대신 받음, 대비대로). 1.18은 설정을 읽기 전에 기본 error.log를 열어 권한 경고 한 줄을 남긴다(무해). 시험 `rest/test_nginx_front.py`(화면 파일 직접·게이트웨이가 꺼져도 나옴, API·워커 패널은 게이트웨이로, Host 전달, 스트림 버퍼링 없음 1 s 안, 본문 64 KiB 넘으면 413).
 
 Python 판과 다른 점: HEAD·PATCH·OPTIONS는 JSON 501, Range 요청은 206, 워커 명령 시간 상한은 전체 시간으로 셈, Python이 예외로 답 없이 끊던 경우는 500·503으로 답함, 제품 빌드는 취소 중인 자식이 끝나기 전 새 시작을 막음(Python은 옛 상태가 섞였음), SSE 기준 상태를 잠금 안에서 넣어 드문 경합이 없어짐, 새로: 동시 요청 상한(넘으면 503), 받기·스트림 스레드 10 s 멈춤 → exit 4.

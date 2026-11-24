@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" font-family="sans-serif" font-size="12">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="900" height="360" fill="#fff"/>
+  <g stroke="#555">
+    <rect x="20" y="40" width="150" height="40" rx="6" fill="#fde8e8"/>
+    <rect x="20" y="100" width="150" height="40" rx="6" fill="#f4f6fa"/>
+    <rect x="20" y="160" width="150" height="40" rx="6" fill="#f4f6fa"/>
+    <rect x="20" y="220" width="150" height="40" rx="6" fill="#eaf4ea"/>
+    <rect x="230" y="40" width="170" height="220" rx="6" fill="#fff8e6"/>
+    <rect x="460" y="40" width="250" height="220" rx="6" fill="#e8eef9"/>
+    <rect x="760" y="110" width="120" height="70" rx="6" fill="#f4f6fa"/>
+  </g>
+  <g text-anchor="middle" fill="#222">
+    <text x="95" y="65">fault-manager · 100</text>
+    <text x="95" y="125">screen · 50</text>
+    <text x="95" y="185">remote:* · 30</text>
+    <text x="95" y="245">외부 연동 워커 · default</text>
+    <text x="315" y="64" font-weight="bold">① 우선순위 매기기</text>
+    <text x="315" y="90">origin → 숫자</text>
+    <text x="315" y="112">정확히 → 앞부분(*) → default</text>
+    <text x="315" y="150" font-weight="bold">④ 잡아 두기 검사</text>
+    <text x="315" y="174">잡힌 역할에 더 낮은 곳</text>
+    <text x="315" y="194">→ busy "held by …"</text>
+    <text x="315" y="232" fill="#666">설정 priority</text>
+    <text x="585" y="64" font-weight="bold">(대상, 역할) 큐</text>
+    <text x="585" y="90">② 높은 것이 먼저, 같으면 온 순서</text>
+    <text x="585" y="112">③ 차면 가장 낮은 것을 밀어냄</text>
+    <text x="585" y="132">→ busy "preempted by …"</text>
+    <text x="585" y="164">보낸 명령은 끊지 않음(한 번에 하나)</text>
+    <text x="585" y="196">끝나면 그 곳이 hold_ms 동안 잡음</text>
+    <text x="585" y="216">잡은 곳 자신 · 더 높은 곳은 됨</text>
+    <text x="585" y="246" fill="#666">읽기 · lease.renew는 빠른 줄(상관없음)</text>
+    <text x="820" y="140" font-weight="bold">대상 워커</text>
+    <text x="820" y="162">명령 하나씩</text>
+  </g>
+  <g stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#a)">
+    <line x1="170" y1="60" x2="228" y2="80"/>
+    <line x1="170" y1="120" x2="228" y2="120"/>
+    <line x1="170" y1="180" x2="228" y2="170"/>
+    <line x1="170" y1="240" x2="228" y2="215"/>
+    <line x1="400" y1="150" x2="458" y2="150"/>
+    <line x1="710" y1="145" x2="758" y2="145"/>
+  </g>
+  <g font-size="11" fill="#444">
+    <text x="20" y="300">설정이 없으면 모두 같은 우선순위 · 잡아 두기 없음 → 지금과 같음(온 순서, 차면 새것이 busy)</text>
+    <text x="20" y="320">거절은 모두 busy(9.6 code 그대로), 이벤트 command_preempted · command_held</text>
+  </g>
+</svg>

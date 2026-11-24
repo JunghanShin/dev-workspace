@@ -18,6 +18,7 @@
 
 #include "worker/child.hpp"
 #include "worker/command_server.hpp"
+#include "worker/input_check.hpp"
 #include "worker/io.hpp"
 #include "worker/runtime.hpp"
 
@@ -32,7 +33,8 @@ constexpr auto kReportPeriod = std::chrono::seconds(1);
 constexpr auto kMaxSleep = std::chrono::milliseconds(100);
 
 const std::set<std::string> kHostKeys = {"watchdog_sec", "stop_timeout_sec", "thread_stall_sec", "command_socket",
-                                         "stream_socket", "sim", "stages", "loop_budget_ms", "inputs"};
+                                         "stream_socket", "sim", "stages", "loop_budget_ms", "inputs", "input_check",
+                                         "input_check_period_s"};
 constexpr int kMaxConsecutiveErrors = 3;  // on_timer·on_poll 연속 예외가 이만큼이면 상태가 깨졌다고 본다
 constexpr size_t kMaxWarnings = 10;
 constexpr auto kSimRestart = std::chrono::seconds(2);
@@ -402,6 +404,12 @@ Json Host::status() const {
                         {"left_ms", std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(l.deadline - now).count())}};
         out["leases"] = ls;
     }
+    if (input_check::active()) {  // 받은 칸 검사(common 1.5)
+        Json ic = Json::object();
+        for (const auto& [in, s] : input_check::stats())
+            ic[in] = {{"checked", s.checked}, {"bad", s.bad}, {"last_error", s.last_error.empty() ? Json(nullptr) : Json(s.last_error)}};
+        out["input_check"] = ic;
+    }
     if (!inputs_.empty()) {  // 입력 주소와 연결 상태(design.md 6.6.7.5)
         Json ins = Json::object();
         for (const auto& [n, in] : inputs_) {
@@ -526,6 +534,8 @@ std::string Host::host_metrics() {
     std::string out = buf;
     if (!lease_cmds_.empty())
         out += " host_lease_active=" + std::to_string(leases_.size()) + " host_lease_expired=" + std::to_string(lease_expired_);
+    if (input_check::active())
+        for (const auto& [in, s] : input_check::stats()) out += " inputs_" + in + "_bad=" + std::to_string(s.bad);
     for (const auto& s : stages_)
         if (s) out += " " + s->metrics();
     for (const auto& [n, in] : inputs_) {  // 입력마다 연결(0/1)
@@ -642,6 +652,18 @@ int Host::run(int argc, char** argv) {
         std::string ioerr;
         const auto bundle = io_bundle(&ioerr);
         if (bundle.is_object() && bundle.contains("provides")) load_leases(Json::parse(bundle["provides"].dump()));
+        // 받은 칸 실행 중 검사(docs/input-check.md, 0.17): 설정 input_check "warn"(기본) · "off"
+        const std::string mode = host_cfg_.value("input_check", std::string("warn"));
+        const double period = host_cfg_.value("input_check_period_s", 1.0);
+        if (mode != "off" && mode != "warn")
+            std::fprintf(stderr, "%s: warning: config.input_check must be warn or off (got %s), using warn\n", program_.c_str(), mode.c_str());
+        input_check::Table table;
+        if (mode != "off" && bundle.is_object()) {
+            std::map<std::string, std::string> peers;
+            for (const auto& [n, in] : inputs_) peers[n] = in.worker;
+            table = input_check::table_from_bundle(Json::parse(bundle.dump()), peers);
+        }
+        input_check::set(std::move(table), period > 0.05 ? period : 0.05);
     }
     // 명령하는 곳 허용 목록(process-manager가 띄울 때 WORKSPACE_PEERS_FILE). 없으면 단독 실행: 보지 않음
     if (const char* pf = std::getenv("WORKSPACE_PEERS_FILE"); pf && *pf) set_peers_file(pf);
@@ -741,6 +763,11 @@ int Host::run(int argc, char** argv) {
         sim_tick(t);
         for (size_t i = 0; i < modules_.size(); ++i) guard(i, "on_timer", true, [&] { modules_[i]->on_timer(t); });
         lease_tick(t);
+        for (const auto& m : input_check::take_mismatches())  // 받은 칸이 정의와 다름(입력·주제마다 60 s에 한 번)
+            push_event("warning", "input_mismatch",
+                       "input " + m.value("input", "") + " topic " + m.value("topic", "") + ": " +
+                           (m["errors"].empty() ? std::string() : m["errors"][0].get<std::string>()),
+                       m);
         if (t >= next_report) {
             next_report = t + kReportPeriod;
             if (watch_->all_alive(t)) {

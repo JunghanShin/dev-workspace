@@ -21,6 +21,15 @@ cmake -S managers/fault -B ~/fault-build && cmake --build ~/fault-build -j && ct
 
 조건 `health` · `metric`(`name`, `above`/`below`) · `event`(`code` 글롭, `hold_s`) · `system`(`is`). 자세한 것은 `design.md` 2장.
 
+조합·단계(`escalate.md`): `when`에 `{"all": [...]}`·`{"any": [...]}`(중첩 4단까지, 시스템 전체로 한 번 판정, 이상 이름 = 규칙 id), `stages: [{"after_s", "severity", "text"?, "do"?}]`(올라간 뒤 시간이 지나면 심각도를 올리고 그 단계 대응을 한 번, 이벤트 `fault_escalated`).
+
+```json
+{"id": "cam_hot_lost", "when": {"all": [{"health": {"worker": "cam*", "is": "fault"}}, {"metric": {"worker": "system-monitor", "name": "temp_max_c", "above": 80}}]},
+ "for_s": 2, "severity": "warning", "do": [{"target": "payload-manager", "cmd": "payload.restart", "args": {"module": "cam1"}}],
+ "stages": [{"after_s": 30, "severity": "error", "do": [{"target": "payload-manager", "cmd": "payload.stop", "args": {"module": "cam1"}}]},
+            {"after_s": 120, "severity": "critical"}]}
+```
+
 ## 명령
 
 | 명령 | 뜻 |
