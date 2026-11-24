@@ -26,7 +26,7 @@ Json defaults() {
         "worker_defaults": {"start_timeout_sec": 10, "watchdog_sec": 3, "stop_timeout_sec": 5},
         "log": {"max_bytes": 10485760, "backups": 3},
         "tick_s": 0.2,
-        "command_guard": "warn"
+        "command_guard": "enforce"
     })");
 }
 

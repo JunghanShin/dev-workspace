@@ -109,7 +109,7 @@ process-manager가 연결 선언·계약·모드·지금 떠 있는 프로세스
 
 | 칸 | 뜻 |
 |---|---|
-| `guard` | `off`(보지 않음) · `warn`(어긋나면 기록만, **기본**) · `enforce`(거절). Manager 설정 `command_guard` |
+| `guard` | `off`(보지 않음) · `warn`(어긋나면 기록만) · `enforce`(거절, **기본**, 0.71). Manager 설정 `command_guard` |
 | `peers` | 명령하는 곳 → 알아볼 프로세스. 워커·매니저는 프로세스 그룹(`pgid`, process-manager가 새 그룹으로 띄움), 게이트웨이는 `pid`(게이트웨이가 `manager-rest.sock`에 붙을 때 커널이 알려 준 pid. 따로 등록하지 않음). `trusted_from`: 명령의 `from` 칸을 믿는 곳(게이트웨이만) |
 | `workers.<id>.read` | 늘 허용(읽기) |
 | `workers.<id>.allow` | 명령하는 곳 → 허용 명령. `"*"`는 전부. 운용 모드면 4.1의 역할 명령만(워커 이름만 적었으면 `operate` 명령도), 개발 모드면 그 워커의 모든 명령(`"*"`). 게이트웨이는 늘 `"*"`(모드 검사는 게이트웨이가 사용자 역할과 함께 함) |
@@ -145,7 +145,7 @@ process-manager가 연결 선언·계약·모드·지금 떠 있는 프로세스
 | 게이트웨이 | 수락 시험: 운용·개발 × 읽기·역할·전용·관리 조작의 답, 403 모양, 원격 토큰의 `from`, 기록 줄 `from`, 계약 없는 명령 |
 | process-manager | 수락 시험: `commanders` 검사, `peers.json` 내용(모드·워커 시작/정지·게이트웨이 다시 붙음에 따라), Manager API 쓰기 × 모드 |
 | libworker | 단위 시험: `WORKSPACE_PEERS_FILE` 없음 → 막지 않음, `warn` → 실행 + 기록, `enforce` → 허용·거절, `from` 믿기·무시, `last_command` |
-| 보드 | `warn`으로 며칠: 기록에 어긋난 접속이 없는지 → `enforce` |
+| 보드 | `warn`으로 지켜봄: 기록에 어긋난 접속이 없음(2026-11-24, 워커·매니저 로그 전부) → 0.71부터 기본 `enforce` |
 
 ## 8. 미결
 

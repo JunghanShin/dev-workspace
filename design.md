@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.70 |
+| 문서 버전 | 0.71 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1516,7 +1516,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 
 워크스페이스(개발 작업대와 제품 빌드)에서 정할 것은 없다(0.33).
 
-모듈화(층·계약·워커 분리)와 별개라 뒤로 미룬 것(0.61): 명령 임대(원칙 14, 매니저 층과 함께), 워커 소켓 검사를 `enforce`로 바꾸는 시점(보드 `warn` 기록을 보고), HTTPS 인증서(설치가 자체 서명으로 만들지 등), 받은 칸을 실행 중에도 검사할지(지금은 출력 대조). 모듈화 작업 중에는 꺼내지 않는다.
+모듈화(층·계약·워커 분리)와 별개라 뒤로 미룬 것(0.61): 명령 임대(원칙 14, 매니저 층과 함께), 워커 소켓 검사를 `enforce`로 바꾸는 시점(0.71에 바꿈)(보드 `warn` 기록을 보고), HTTPS 인증서(설치가 자체 서명으로 만들지 등), 받은 칸을 실행 중에도 검사할지(지금은 출력 대조). 모듈화 작업 중에는 꺼내지 않는다.
 
 예전 미결이 간 곳: 송출 인코더·프레임 버스 GPU 메모리(NvBufSurface) 전환은 영상 워커 설계서의 미결, 외부 운용 인터페이스 워커는 그 워커를 만들 때 그 설계서, 기존 워커 고도화 순서는 워커 작업에서 정한다. OS·보드 층 보호(디스크 암호화, 보안 부팅, 읽기 전용 루트, A/B 갱신)는 워크스페이스와 별개(보드 이미지 저장소). 전원 모드는 설치가 맞춘다(11.1 개발 보드 MAXN_SUPER, 11.4 제품은 빌드에서 고름). 워커 설정을 깃에 올리는 일은 사용자가 한다(6.3.1)
 
@@ -1573,6 +1573,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.68 | **payload-manager**(`managers/payload/design.md`): 모듈 = 매니저가 아닌 워커(역할은 계약, 건강은 status 주제 `system`), `payload.power`·`power_group`(규칙 `groups`)으로 process-manager에 start·stop 요청, 주제 `payload`. process-manager는 `"module_control": true` 매니저에게 쓰기 소켓을 주고 운용 모드에서도 매니저가 아닌 워커의 `start`·`stop`만 허용(매니저 대상은 늘 `forbidden`) |
 | 0.69 | **fault-manager**(`managers/fault/design.md`): 규칙(조건 health·metric·event·system → 심각도 → 대응 `do`)으로 이상 올림(`for_s`, 이벤트는 `hold_s`)·내림, 워커마다 따로, 올릴 때 대응을 mission에 `mission.send`로 한 번(개발 모드에서는 건너뜀), status가 3 s 끊기면 `status_lost`, 주제 `fault`·`fault.list`·`fault.ack`. 기본 규칙 없음. process-manager는 역할 `mission`을 쓰는 매니저를 명령 입구 매니저 허용 목록에 자동으로 넣음 |
 | 0.70 | **config-manager**(`managers/config/design.md`): 버전 목록(실행 파일 BUILD 커밋·sha256 대조 → `build_mismatch`, 워커 libworker, 설치 기록), 스냅숏(워커 설정·연결 선언·워크스페이스 설정 파일·버전, 시작할 때 바뀌었으면 자동, 20개·auto부터 지움)·diff·되돌리기(워커 설정·연결 선언만, `manager_api` 쓰기 소켓이라 개발 모드에서만), 주제 `config`. 매니저 6개가 모두 들어감. record-manager 폴더 다시 만들기 권한 고침(호스트 umask) |
+| 0.71 | **명령 검사 기본 `enforce`**(`docs/command-path.md` 5장 ②): 보드 워커·매니저 로그에 허용 목록 밖 명령이 없음을 확인(2026-11-24)하고 process-manager `command_guard` 기본을 `warn` → `enforce`. 허용 목록 밖의 읽기가 아닌 명령은 `forbidden`, 읽기는 그대로. 되돌리려면 데이터 `config/manager.json`에 `"command_guard": "warn"` |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

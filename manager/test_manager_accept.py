@@ -1128,7 +1128,7 @@ class CommandPath(unittest.TestCase):
         e.ok({"op": "ping"})  # 게이트웨이 자리: manager-rest.sock에 붙은 이 프로세스의 pid가 들어감
         p = wait_for(lambda: (lambda x: x if x and "gateway" in x["peers"] and "ext" in x["peers"] else None)(self.peers(e)), 5)
         self.assertTrue(p, self.peers(e))
-        self.assertEqual((p["version"], p["guard"], p["mode"]), (1, "warn", "operation"))
+        self.assertEqual((p["version"], p["guard"], p["mode"]), (1, "enforce", "operation"))  # 0.71부터 기본 enforce
         self.assertEqual(p["peers"]["gateway"], {"pid": os.getpid(), "trusted_from": True})
         self.assertEqual(p["peers"]["ext"], {"pgid": s_ext["pid"]})
         self.assertEqual(p["peers"]["gim"], {"pgid": s_gim["pid"]})
