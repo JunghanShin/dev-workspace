@@ -96,9 +96,12 @@ std::vector<Stamped> TopicRules::records(const std::string& src, const Json& top
             if (e.is_object() && e.contains("t_mono_ns") && e["t_mono_ns"].is_number_integer()) {
                 const std::string source = e.contains("source") && e["source"].is_string() ? e["source"].get<std::string>() : "";
                 const int64_t t = e["t_mono_ns"].get<int64_t>();
+                const int64_t seq = e.contains("seq") && e["seq"].is_number_integer() ? e["seq"].get<int64_t>() : -1;
                 auto& last = last_event_[{src, source}];
-                if (t <= last) continue;  // 이미 남긴 것(kf에 다시 실려 옴)
-                last = t;
+                const bool newer = t > last.t || (seq >= 0 && t == last.t && seq > last.seq);
+                if (!newer) continue;  // 이미 남긴 것(kf에 다시 실려 옴)
+                last.t = t;
+                last.seq = seq;
             }
             Json rec = Json::object();
             rec["type"] = "event";

@@ -170,6 +170,11 @@ static void test_topics() {
     CHECK(out.size() == 2 && out[0].rec["v"]["code"] == "link_up" && out[1].rec["v"]["code"] == "no_time");
     r.forget("cam1");  // 끊겨도 이벤트는 잊지 않음
     CHECK(r.records("cam1", Json(), ev, false, 10 * s + s / 2).empty());
+    // 한 번에 난 이벤트(같은 시각)는 seq로 가린다. 다시 실려 오면 버림. 낸 쪽이 다시 시작해 seq가 처음부터여도 시각이 늦으면 새것
+    auto same = Json::parse(R"([{"t_mono_ns":900,"seq":5,"source":"m.s","code":"a"},{"t_mono_ns":900,"seq":6,"source":"m.s","code":"b"}])");
+    CHECK(r.records("mgr", Json(), same, false, 0).size() == 2);
+    CHECK(r.records("mgr", Json(), same, true, 0).empty());
+    CHECK(r.records("mgr", Json(), Json::parse(R"([{"t_mono_ns":901,"seq":1,"source":"m.s","code":"restarted"}])"), false, 0).size() == 1);
     // kf는 늘(표시 kf)
     out = r.records("cam1", t, Json::array(), true, 10 * s + s / 2 + 1);
     CHECK(out.size() == 2 && out[0].rec["kf"] == true);
