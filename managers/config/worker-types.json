@@ -1,0 +1,16 @@
+{
+  "config-manager": {
+    "exec": ["@WORKSPACE_ROOT@/managers/config/bin/config-manager"],
+    "exec_candidates": [
+      "@WORKSPACE_ROOT@/managers/config/build/config-manager",
+      "@WORKSPACE_ROOT@/managers/config/build/jetson/install/bin/config-manager",
+      "@WORKSPACE_ROOT@/managers/config/bin/config-manager"
+    ],
+    "kind": "manager",
+    "manager_api": true,
+    "start_timeout_sec": 10,
+    "watchdog_sec": 5,
+    "stop_timeout_sec": 3,
+    "builtin": {"id": "config-manager", "autostart": true, "config": {}}
+  }
+}

@@ -1,0 +1,18 @@
+# 모듈 config: ① 코어 config_core(BUILD·sha256·스냅숏 비교·남기기. libworker 모름) ② 모듈 config_module(호스트에 붙임)
+add_library(config_core STATIC core/src/core.cpp)
+target_include_directories(config_core PUBLIC core/include ${CMAKE_CURRENT_SOURCE_DIR}/../libworker/third_party)
+target_compile_features(config_core PUBLIC cxx_std_17)
+target_compile_options(config_core PRIVATE -Wall -Wextra -Wpedantic)
+
+add_library(config_module STATIC src/module.cpp)
+target_include_directories(config_module PUBLIC include)
+target_link_libraries(config_module PUBLIC config_core worker)
+target_compile_options(config_module PRIVATE -Wall -Wextra -Wpedantic)
+
+if(BUILD_TESTING)
+    # 유닛 시험: sha256, BUILD 읽기·어긋남, 실행 파일 폴더 찾기, 스냅숏 diff, 남기기(auto부터)
+    add_executable(test_config_core test/test_core.cpp)
+    target_link_libraries(test_config_core PRIVATE config_core)
+    target_compile_options(test_config_core PRIVATE -Wall -Wextra)
+    add_test(NAME config_core COMMAND test_config_core)
+endif()

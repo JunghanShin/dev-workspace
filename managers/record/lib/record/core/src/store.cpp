@@ -45,7 +45,7 @@ void make_dirs(const std::string& dir) {
     std::string cur;
     for (size_t i = 0; i <= dir.size(); ++i) {
         if (i == dir.size() || dir[i] == '/') {
-            if (!cur.empty()) ::mkdir(cur.c_str(), 0755);
+            if (!cur.empty() && ::mkdir(cur.c_str(), 0755) == 0) ::chmod(cur.c_str(), 0755);  // 호스트 umask(0177)가 실행 비트를 빼므로 따로
         }
         if (i < dir.size()) cur += dir[i];
     }
