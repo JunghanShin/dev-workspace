@@ -166,6 +166,11 @@ static void test_system() {
     Json s = wait_system(sc, sbuf, [](const Json& j) { return j.value("health", "") == "ok"; }, events, 10000);
     CHECK(s.value("health", "") == "ok");
     CHECK(s.value("pm_link", false) == true);
+    // 구독자가 붙기 전에 난 이벤트(시작 → 건강 정해짐)도 처음 붙은 구독자가 받는다
+    bool start_ev = false;
+    for (const auto& c : events) start_ev |= c == "health_changed";
+    CHECK(start_ev);
+    events.clear();
     CHECK(s.contains("clock") && s["clock"].contains("t_unix") && s["clock"].contains("boot_id"));
     CHECK(s.contains("workers") && s["workers"].contains("a") && s["workers"]["a"]["required"] == true);
     // 링크 0 → degraded, 이벤트 둘

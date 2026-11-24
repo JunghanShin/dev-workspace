@@ -162,12 +162,15 @@ void Module::publish(worker::TimePoint now, bool force) {
     const bool changed = sig != signature_;
     signature_ = sig;
     current_ = sys;
-    if (!due && !changed && pending_events_.empty()) return;
-    next_pub_ = now + std::chrono::milliseconds(publish_ms_);
     if (!pub_ || !pub_->has_subscribers()) {
-        pending_events_.clear();  // 받을 곳이 없으면 버림
+        // 받을 곳이 없으면 최근 이벤트만 쌓아 두었다가 처음 붙는 구독자에게(시작 직후 record-manager가 붙기 전 등)
+        if (pending_events_.size() > kKeepEvents)
+            pending_events_.erase(pending_events_.begin(), pending_events_.end() - kKeepEvents);
+        if (due) next_pub_ = now + std::chrono::milliseconds(publish_ms_);
         return;
     }
+    if (!due && !changed && pending_events_.empty()) return;
+    next_pub_ = now + std::chrono::milliseconds(publish_ms_);
     const bool kf = pub_->keyframe_requested() || now >= next_kf_;
     if (kf) next_kf_ = now + std::chrono::seconds(5);
     Json line = {{"seq", ++seq_}, {"kf", kf}, {"t", unix_s()}, {"topics", {{"system", sys}}},

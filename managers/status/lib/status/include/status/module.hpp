@@ -57,6 +57,7 @@ private:
     std::string boot_id_;
     Json current_ = Json::object();
     Json signature_;  // 건강·연결만 모은 것(바뀌면 바로 발행)
+    static constexpr size_t kKeepEvents = 64;  // 구독자가 없을 때 쌓아 둘 최근 이벤트 수
     std::vector<Json> pending_events_;
     bool dirty_ = true;
     worker::TimePoint next_pub_{}, next_kf_{}, next_sync_{};
