@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | 확정·구현(2026-11-24, 0.69). 단위·통합·process-manager 수락 시험. 보드 확인(2026-11-24): 떠 있음, 이상 없음(status_lost 없음), 입력 연결을 알리지 않아 status가 degraded로 보던 것 고침 |
+| 상태 | 확정·구현(2026-11-24, 0.69). 단위·통합·process-manager 수락 시험. 보드 확인(2026-11-24): 떠 있음, 이상 없음(status_lost 없음), 입력 연결을 알리지 않아 status가 degraded로 보던 것 고침(다시 확인: 시스템 ok, 입력 link true) |
 | 대상 | **이상 판단**: 규칙으로 이상을 올리고 내리며(심각도), 올릴 때 정해 둔 대응을 mission-manager에 요청한다 |
 | 실행 파일 | `bin/fault-manager`(C++, libworker 호스트 + 모듈 `fault`). 소스 `src/`, `lib/fault/` |
 | 바탕 | `docs/managers.md`(공통 틀, 요청 방향 fault → mission), `docs/layers.md` 4장(다른 매니저가 죽어도 이상 판단은 돎), 원칙 15(장치 자체 안전장치가 최후, 매니저는 시스템 수준 감독)·원칙 18(엔진은 코드, 규칙은 데이터) |
