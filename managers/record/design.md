@@ -96,12 +96,12 @@
 | 명령 | `record.find`(읽기), `get_status` |
 | 주제 | `record`: `{"file": "<지금 파일>", "lines": n, "bytes": n, "drops": n, "disk_free_mb": n}` 1 s |
 | 이벤트 | `disk_low`(warning, 남은 공간 < 5%), `write_failed`(error), `pm_lost`(warning, process-manager 구독이 끊김) |
-| 지표 | `rec_lines`, `rec_bytes`, `rec_drops`, `rec_files`, `rec_disk_free_mb`, `rec_subs`(붙은 구독 수) |
+| 지표 | `record_lines`, `record_bytes`, `record_drops`, `record_files`, `record_write_errors`, `record_pm_link`, `record_disk_free_mb`, `record_finds`(모듈 접두어 `record_`, 구독 수는 3단계에서) |
 
 ## 4. 옮기는 순서
 
 1. record-manager가 `worker`·`removed`·`command`·`system`·`logger` 종류를 지금 logger와 같은 모양으로 씀. PC에서 둘을 나란히 돌려 줄을 비교(시험) — **됨(2026-11-24)**: `test_compare.py`(시각만 빼고 글자 그대로 같음), 단위·통합 시험·TSan
-2. 시작 셸이 logger를 띄우지 않음. 게이트웨이 `/history` 시험 그대로 통과 확인 — **됨(2026-11-24, 0.63)**: 기본 탑재(`worker-types.json`, `kind: manager`, `stop_order: 2`), process-manager 수락 시험 `test_managers`. 보드 확인 남음
+2. 시작 셸이 logger를 띄우지 않음. 게이트웨이 `/history` 시험 그대로 통과 확인 — **됨(2026-11-24, 0.63)**: 기본 탑재(`worker-types.json`, `kind: manager`, `stop_order: 2`), process-manager 수락 시험 `test_managers`. 보드 확인(2026-11-24): 떠 있음(RSS 3.6 MB, 스레드 4), 같은 파일에 이어 씀, `/history` 그대로. 끌 때 순서는 다음 재시작 때
 3. `topic`·`event` 종류 추가(`many` 입력 구현과 함께, process-manager 쪽)
 4. Python logger 삭제, 환경 변수 정리, 보드 확인
 
