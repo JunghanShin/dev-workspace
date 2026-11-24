@@ -78,7 +78,7 @@
 |---|---|---|---|---|
 | 시스템 | 장비 전체 | 장비 + 운용 장치 | — | 통합 시험(이 문서 밖) |
 | 서브시스템 | 보드 하나 = 워크스페이스 + 프로필 + 워커 묶음 | 장비 하나의 보드 | 프로필·워커 폴더가 구성을 정함 | `dev/system-check.sh`(보드) |
-| 워커(CSCI) | 기능 단위 하나, 폴더 하나 | 카메라, 센서, 모터 제어기 | 다른 워커와는 6.6.7 통로로만. ICD = 워커 design.md 3장 | `test/test_worker.cpp`(실행 파일) |
+| 워커(CSCI) | 기능 단위 하나, 폴더 하나 | 카메라, 짐벌, 센서 | 다른 워커와는 6.6.7 통로로만. ICD = 워커 design.md 3장 | `test/test_worker.cpp`(실행 파일) |
 | 모듈(CSC) | 워커 안 기능 묶음 `lib/<모듈>/` | source, processor | 다른 모듈과는 포트로만(6.6.3) | `lib/<모듈>/test/`(호스트 없이, 가짜 포트) |
 | 유닛(CSU) | 모듈 코어 `lib/<모듈>/core/` | Generator, Window | libworker를 모름(6.6.4) | `lib/<모듈>/test/`(코어만) |
 
@@ -623,7 +623,7 @@ dev/new-worker.sh [--video] <폴더> [type]    틀 복사·워커 이름 바꾸�
 | 워커 정의 | `io/self.json` | 이 워커 구현의 것: 모듈별 `get_status` 칸, 지표, 진단 주제, 역할에 없는 명령(정비용 등), 임대가 끊겼을 때의 안전 상태 | 정비 화면, record-manager, process-manager | 워커마다 다름(사본 없음) |
 | 공통 정의 | `lib/libworker/io/common.json`(libworker가 내보내는 칸이라 libworker 안, 원본은 틀의 사본. 0.61 전에는 `workers/_template/io/`) | 모든 워커가 같은 것: `get_status` 겉모양(`id`, `config_version`, `threads`, `runtime`), 공통 명령(임대 갱신 포함), 오류 code(9.6), heartbeat 형식(9.5), 스트림 겉모양(9.7), **이벤트**(시각·출처·심각도·코드·내용), **시각**(모든 주제의 `t_mono_ns`, 보드 CLOCK_MONOTONIC) | 모두 | 바뀌지 않음(플랫폼 버전) |
 
-**역할 정의는 역할 단위다.** 정의 이름은 워커 이름·type이 아니라 그 워커가 맡는 역할(예: 카메라, 위치 정보, 예제의 `example`)이다. 워커 하나가 정의를 여러 개 내보낼 수 있고, 같은 정의를 내보내는 워커끼리는 서로 바꿔 쓸 수 있다(쓰는 쪽은 사본도 연결도 그대로). 역할에 넣을지 워커 정의에 넣을지는 "다른 회사 장비로 바꿔도 같은 값이 나와야 하나"로 가른다(예: 카메라 프레임 정보는 역할, 장비별 링크 통계는 워커).
+**역할 정의는 역할 단위다.** 정의 이름은 워커 이름·type이 아니라 그 워커가 맡는 역할(예: 카메라, 짐벌, 위치 정보, 예제의 `example`)이다. 워커 하나가 정의를 여러 개 내보낼 수 있고, 같은 정의를 내보내는 워커끼리는 서로 바꿔 쓸 수 있다(쓰는 쪽은 사본도 연결도 그대로). 역할에 넣을지 워커 정의에 넣을지는 "다른 회사 장비로 바꿔도 같은 값이 나와야 하나"로 가른다(예: 카메라 프레임 정보는 역할, 장비별 링크 통계는 워커).
 
 ```text
 workers/<이름>/
@@ -810,7 +810,7 @@ workers/<이름>/
 
 | 장치 종류 | 프리셋 sim | 가짜 장치 |
 |---|---|---|
-| 네트워크·직렬 프로토콜 장치(모터 제어기, 센서 등) | 장치 주소를 127.0.0.1로(실제 출구와 다른 포트) | `tools/<이름>-sim`: 장치 프로토콜로 응답·발행(시험의 가짜 장치 헤더를 함께 씀) |
+| 네트워크·직렬 프로토콜 장치(짐벌, 모터 제어기 등) | 장치 주소를 127.0.0.1로(실제 출구와 다른 포트) | `tools/<이름>-sim`: 장치 프로토콜로 응답·발행(시험의 가짜 장치 헤더를 함께 씀) |
 | SDK로 붙는 장치(카메라 등) | SDK 라이브러리 경로를 `@EXEC_DIR@/libfake_<sdk>.so`로 | 가짜 SDK 라이브러리(프로그램 없음) |
 | 템플릿 | `example-sim`(틀: 시작·정지만) | 새 워커는 `tools/<이름>-sim.cpp`에 장치 흉내 |
 
@@ -1577,7 +1577,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.32 | **화면 제품 빌드와 제품 기본 화면(11.4).** 설정 > 워크스페이스 [제품 빌드]: 점검 → 진행(진행 막대·로그·취소) → 내려받기 모달, 보드가 스스로 컴파일(`build_product.py --local`, `--check`, `--profiles`, `--replace`, 진행 줄), REST `/system/product-build`(제품 모드 404), 마지막 묶음 하나 `<데이터>/dist/`. 제품 화면은 기본만: 시스템 모니터 + 워커 패널, 진단·설정 패널은 묶음에서 뺌, kit.js 제품 모드(`setProduct`, `settingsButton`: 설정 창·프리셋·시작/정지·자동 시작 없음). 고객용 화면은 REST로 별도 |
 | 0.31 | **데이터 버스 녹화·재생 워커(6.6.8).** `workers/replay`: 다른 워커의 데이터 버스를 순서대로 전부 녹화(파일 `meta.json` + `frames.bin`, 잘린 파일 안전), 원래 간격·배속·반복으로 자기 데이터 버스에 재생, 목록·삭제, 폴더 용량 상한, 패널 "녹화·재생". 미결 D8 해소. 제품 빌드: 워커 실행 파일·앱 실행 파일 심볼 제거(`strip --strip-unneeded`) |
 | 0.30 | **제품 빌드(11.4)와 Python 통신 도구.** `dev/build-product.sh <프로필>`: 개발 부품을 걷어낸 묶음 하나(확정 워커, Nuitka로 컴파일한 Manager·REST·logger·시스템 모니터, 잠근 설정, 프로필, 시작 셸, `install.sh`: `/opt/<이름>/releases` + `current`, 장비별 토큰, `Restart=always` 서비스, `--rollback`). 제품 모드: Manager 설정 잠금·`sim` 거부·개발 빌드 후보 안 씀(`WORKSPACE_PRODUCT`, `WORKSPACE_CONFIG_WRITE`), REST 토큰 인증(`WORKSPACE_REST_TOKEN`)·화면 옵션(`WORKSPACE_UI`)·깃 기능 없음, 화면 토큰 입력. 프로필 `product.json`. Python 도우미 py-1.1: `CommandServer`·`Publisher`·`CommandClient`·`Subscriber`·`FramebusConsumer`(C++과 같은 통로, `test_comm`으로 C++ 워커와 양방향 시험) |
-| 0.29 | **가짜 장치 모드(6.6.8).** libworker 0.8.0 호스트 키 `sim`(가짜 장치 프로그램 자식 실행·다시 띄우기, READY `sim=1`, `@EXEC_DIR@`), 워커 상태 `sim`, 화면 "가상" 배지, system-check 표시. 프로젝트 장치 워커마다 가짜 장치 프로그램. 워커 통합 시험에 가짜 장치 모드 단계 |
+| 0.29 | **가짜 장치 모드(6.6.8).** libworker 0.8.0 호스트 키 `sim`(가짜 장치 프로그램 자식 실행·다시 띄우기, READY `sim=1`, `@EXEC_DIR@`), 워커 상태 `sim`, 화면 "가상" 배지, system-check 표시. siyi `siyi-sim`, flight-control `mavlink-sim`, ximea 가짜 xiAPI 설치, 프리셋 `sim`, 템플릿 `example-sim`·new-worker 이름 바꾸기. 워커 통합 시험에 가짜 장치 모드 단계 |
 | 0.28 | 워커만 빠르게 반영(11.3): type `exec_candidates`(Manager가 띄울 때마다 실행 파일 고름), 워커 상태 `exec`, `dev/deploy-worker.sh`(빌드 → 보드 build/ → 그 워커만 다시 시작, `--revert`) |
 | 0.27 | 데이터 버스 동시성 검증(6.7): 동기화 방식 정리, 스트레스 시험 `test_framebus_stress`, `dev/check.sh`가 ThreadSanitizer로 실행. 데이터 폴더 정리(6.3, 11.2): 예전 소켓·빠진 워커 실행 설정·쓰지 않는 파일을 시작할 때 지움 |
 | 0.26 | **어댑터 개념 없앰.** 폴더 `adapters/rest` → `rest`. "어댑터 워커" → Manager API를 쓰는 워커(선언 `"manager_api": true`, 소켓 `manager-<워커 id>.sock`, `manager_call` 오류 `no_manager_api`, libworker 0.7.1). Manager 설정 `adapters` 없앰(플랫폼 클라이언트 rest·logger 고정). 상태 `clients`·`manager_api_workers`, 명령 이력 `client`. 장비 탑재는 제품용 실행 환경(당시 15장 D3, 0.30부터 제품 묶음 11.4) |

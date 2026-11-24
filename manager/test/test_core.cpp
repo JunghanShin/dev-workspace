@@ -270,9 +270,9 @@ TEST(json_python_semantics) {
 
 // ---- 설정 스키마 (test_schema.py와 같은 경우) -----------------------------------------------------
 
-Json mount() {
+Json gimbal() {
     Json g = J(R"({"groups": [
-        {"title": "카메라", "section": "cam1", "fields": [
+        {"title": "카메라", "section": "siyi", "fields": [
             {"key": "camera_ip", "type": "string", "format": "ipv4", "default": "192.168.144.25"},
             {"key": "center_pitch", "type": "number", "min": -90, "max": 90, "default": 0},
             {"key": "video_bitrate_kbps", "type": "int", "min": 256, "max": 20000},
@@ -290,24 +290,24 @@ const Json kLink = J(R"({"groups": [{"title": "장치 링크", "section": "link"
     {"key": "streams", "type": "map", "key_pattern": "^[A-Z][A-Z0-9_]*$", "value_type": "number", "min": 0, "max": 500}]}]})");
 
 TEST(schema_examples_well_formed) {
-    CHECK(pm::schema::check_schema(mount()).empty());
+    CHECK(pm::schema::check_schema(gimbal()).empty());
     CHECK(pm::schema::check_schema(kCamera).empty());
     CHECK(pm::schema::check_schema(kLink).empty());
 }
 
 TEST(schema_empty_and_unknown_keys) {
-    CHECK(pm::schema::check_config(mount(), J("{}")).empty());
-    CHECK(pm::schema::check_config(mount(), J(R"({"command_socket": "/tmp/x.sock"})")).empty());
+    CHECK(pm::schema::check_config(gimbal(), J("{}")).empty());
+    CHECK(pm::schema::check_config(gimbal(), J(R"({"command_socket": "/tmp/x.sock"})")).empty());
 }
 
 TEST(schema_scalar_errors) {
-    const Json e = pm::schema::check_config(mount(), J(R"({"cam1": {"camera_ip": "192.168.1", "center_pitch": 120,
+    const Json e = pm::schema::check_config(gimbal(), J(R"({"siyi": {"camera_ip": "192.168.1", "center_pitch": 120,
         "video_bitrate_kbps": 1.5, "time_sync": "yes", "video_codec": "mjpeg"}})"));
-    CHECK_EQ(keys(e), (std::set<std::string>{"cam1.camera_ip", "cam1.center_pitch", "cam1.video_bitrate_kbps",
-                                             "cam1.time_sync", "cam1.video_codec"}));
-    CHECK_EQ(e["cam1.center_pitch"], Json("-90 ~ 90 사이여야 합니다"));
-    CHECK_EQ(e["cam1.video_codec"], Json("선택지 중 하나여야 합니다: h264, h265"));
-    CHECK_EQ(e["cam1.video_bitrate_kbps"], Json("정수여야 합니다"));
+    CHECK_EQ(keys(e), (std::set<std::string>{"siyi.camera_ip", "siyi.center_pitch", "siyi.video_bitrate_kbps",
+                                             "siyi.time_sync", "siyi.video_codec"}));
+    CHECK_EQ(e["siyi.center_pitch"], Json("-90 ~ 90 사이여야 합니다"));
+    CHECK_EQ(e["siyi.video_codec"], Json("선택지 중 하나여야 합니다: h264, h265"));
+    CHECK_EQ(e["siyi.video_bitrate_kbps"], Json("정수여야 합니다"));
 }
 
 TEST(schema_enum_numeric_and_bool) {
@@ -318,8 +318,8 @@ TEST(schema_enum_numeric_and_bool) {
 }
 
 TEST(schema_list_items) {
-    const Json e = pm::schema::check_config(mount(), J(R"({"stream": {"streams": [
-        {"name": "main", "url": "rtsp://127.0.0.1:8554/cam1"},
+    const Json e = pm::schema::check_config(gimbal(), J(R"({"stream": {"streams": [
+        {"name": "main", "url": "rtsp://127.0.0.1:8554/siyi"},
         {"name": "main", "url": "http://x"},
         {"url": "rtsp://a:1/b", "bitrate_kbps": 10}]}})"));
     CHECK_EQ(keys(e), (std::set<std::string>{"stream.streams[1].name", "stream.streams[1].url",
@@ -361,15 +361,15 @@ TEST(schema_worker_id_and_refs) {
         {"section": "peer", "fields": [{"key": "peer", "type": "string", "format": "worker_id"}]},
         {"section": "multi", "fields": [{"key": "links", "type": "list", "item_key": "to", "fields": [
             {"key": "to", "type": "string", "format": "worker_id"}]}]}]})");
-    CHECK(pm::schema::check_config(schema, J(R"({"peer": {"peer": "cam1"}})")).empty());
+    CHECK(pm::schema::check_config(schema, J(R"({"peer": {"peer": "siyi"}})")).empty());
     CHECK(pm::schema::check_config(schema, J(R"({"peer": {"peer": ""}})")).empty());
-    for (const char* bad : {"Cam1", "a b", "../x"}) {
+    for (const char* bad : {"Siyi", "a b", "../x"}) {
         Json c = J(R"({"peer": {}})");
         c["peer"]["peer"] = bad;
         CHECK(pm::schema::check_config(schema, c).contains("peer.peer"));
     }
-    const Json cfg = J(R"({"peer": {"peer": "cam1"}, "multi": {"links": [{"to": "cam2"}, {"to": ""}]}})");
-    CHECK(pm::py_eq(pm::schema::worker_refs(schema, cfg), J(R"({"peer.peer": "cam1", "multi.links[0].to": "cam2"})")));
+    const Json cfg = J(R"({"peer": {"peer": "siyi"}, "multi": {"links": [{"to": "ximea"}, {"to": ""}]}})");
+    CHECK(pm::py_eq(pm::schema::worker_refs(schema, cfg), J(R"({"peer.peer": "siyi", "multi.links[0].to": "ximea"})")));
     CHECK(pm::schema::worker_refs(schema, J(R"({"peer": {"peer": ""}})")).empty());
 }
 
@@ -742,17 +742,17 @@ TEST(write_ops_and_errors) {
 
 // ---- 명령 길: 허용 목록(docs/command-path.md 4장) ----
 
-// cam1처럼 역할 둘(mount·camera) + 워커 전용 명령, ext-ops는 mount를 쓴다고 적은 연동 워커
+// siyi처럼 역할 둘(gimbal·camera) + 워커 전용 명령, ext-ops는 gimbal을 쓴다고 적은 연동 워커
 std::map<std::string, pm::WorkerCommands> peer_workers() {
     std::map<std::string, pm::WorkerCommands> w;
-    w["cam1"] = pm::commands_from_io(J(R"({
+    w["siyi"] = pm::commands_from_io(J(R"({
         "common": {"commands": {"get_status": {}, "__fault": {}}},
         "self": {"commands": {"stream.start": {"operate": true}, "diag.dump": {"read": true}}},
         "includes": {"lib/x.json": {"commands": {"tap.info": {"read": true}}}},
-        "provides": {"mount": {"commands": {"mount.angle": {}, "mount.get": {"read": true}}},
+        "provides": {"gimbal": {"commands": {"gimbal.angle": {}, "gimbal.get": {"read": true}}},
                      "camera": {"commands": {"camera.zoom": {}}}},
         "uses": {"position": {"from": "position"}}})"));
-    w["ext-ops"] = pm::commands_from_io(J(R"({"uses": {"g": {"from": "mount"}}})"));
+    w["ext-ops"] = pm::commands_from_io(J(R"({"uses": {"g": {"from": "gimbal"}}})"));
     w["bare"] = pm::commands_from_io(Json());  // 계약 없는 워커
     return w;
 }
@@ -789,7 +789,7 @@ TEST(connections_resolve) {
     CHECK_EQ(r.status["cam"]["pos"]["how"], Json(nullptr));
     CHECK(r.status["cam"]["pos"]["error"].get<std::string>().find("several workers") != std::string::npos);
     CHECK_EQ(r.status["cam"]["pos"]["ok"], Json(false));
-    // 선언: fc2는 큰 버전이 달라 오류(주소 안 넣음), fc는 됨
+    // 선언: loc2는 큰 버전이 달라 오류(주소 안 넣음), loc는 됨
     r = pm::resolve_connections(J(R"([{"to": "cam.pos", "from": "loc2"}])"), w);
     CHECK_EQ(r.status["cam"]["pos"]["how"], Json("declared"));
     CHECK_EQ(r.status["cam"]["pos"]["ok"], Json(false));
@@ -816,60 +816,60 @@ TEST(connections_resolve) {
 
 TEST(peers_commands_from_io) {
     const auto w = peer_workers();
-    CHECK_EQ(w.at("cam1").read, (std::set<std::string>{"get_status", "diag.dump", "tap.info", "mount.get"}));
-    CHECK_EQ(w.at("cam1").roles.size(), size_t(2));
-    CHECK_EQ(w.at("cam1").roles.at("mount"), (std::set<std::string>{"mount.angle", "mount.get"}));
-    CHECK_EQ(w.at("cam1").uses, (std::set<std::string>{"position"}));
-    CHECK_EQ(w.at("cam1").operate, (std::set<std::string>{"stream.start"}));
+    CHECK_EQ(w.at("siyi").read, (std::set<std::string>{"get_status", "diag.dump", "tap.info", "gimbal.get"}));
+    CHECK_EQ(w.at("siyi").roles.size(), size_t(2));
+    CHECK_EQ(w.at("siyi").roles.at("gimbal"), (std::set<std::string>{"gimbal.angle", "gimbal.get"}));
+    CHECK_EQ(w.at("siyi").uses, (std::set<std::string>{"position"}));
+    CHECK_EQ(w.at("siyi").operate, (std::set<std::string>{"stream.start"}));
     CHECK_EQ(w.at("bare").read, (std::set<std::string>{"get_status"}));
     CHECK(w.at("bare").roles.empty());
 }
 
 TEST(peers_shape_and_check) {
     CHECK_EQ(pm::commanders_shape_error(Json()), std::string(""));
-    CHECK_EQ(pm::commanders_shape_error(J(R"({"cam1.mount": ["ext-ops"], "cam1": []})")), std::string(""));
+    CHECK_EQ(pm::commanders_shape_error(J(R"({"siyi.gimbal": ["ext-ops"], "siyi": []})")), std::string(""));
     CHECK(!pm::commanders_shape_error(J("[]")).empty());
-    CHECK(!pm::commanders_shape_error(J(R"({"Cam1": ["a"]})")).empty());
-    CHECK(!pm::commanders_shape_error(J(R"({"cam1.": ["a"]})")).empty());
-    CHECK(!pm::commanders_shape_error(J(R"({"cam1": "ext-ops"})")).empty());
-    CHECK(!pm::commanders_shape_error(J(R"({"cam1": [1]})")).empty());
+    CHECK(!pm::commanders_shape_error(J(R"({"Siyi": ["a"]})")).empty());
+    CHECK(!pm::commanders_shape_error(J(R"({"siyi.": ["a"]})")).empty());
+    CHECK(!pm::commanders_shape_error(J(R"({"siyi": "ext-ops"})")).empty());
+    CHECK(!pm::commanders_shape_error(J(R"({"siyi": [1]})")).empty());
     const auto w = peer_workers();
     const Json c = pm::check_commanders(J(R"({
-        "cam1.mount": ["ext-ops"], "cam1.radar": ["ext-ops"], "nobody": ["ext-ops"], "bare": ["ext-ops"],
-        "cam1": ["ext-ops", "ghost", "cam1"]})"), w);
-    CHECK_EQ(c["cam1.mount"]["ok"], Json(true));
-    CHECK(c["cam1.mount"]["warnings"].empty());
-    CHECK_EQ(c["cam1.radar"]["ok"], Json(false));
+        "siyi.gimbal": ["ext-ops"], "siyi.radar": ["ext-ops"], "nobody": ["ext-ops"], "bare": ["ext-ops"],
+        "siyi": ["ext-ops", "ghost", "siyi"]})"), w);
+    CHECK_EQ(c["siyi.gimbal"]["ok"], Json(true));
+    CHECK(c["siyi.gimbal"]["warnings"].empty());
+    CHECK_EQ(c["siyi.radar"]["ok"], Json(false));
     CHECK_EQ(c["nobody"]["ok"], Json(false));
     CHECK_EQ(c["bare"]["ok"], Json(false));
-    CHECK_EQ(c["cam1"]["ok"], Json(true));
+    CHECK_EQ(c["siyi"]["ok"], Json(true));
     // ext-ops는 camera를 쓴다고 적지 않음(경고), ghost는 없는 워커(경고), 자기 자신(경고)
-    CHECK_EQ(c["cam1"]["warnings"].size(), size_t(3));
+    CHECK_EQ(c["siyi"]["warnings"].size(), size_t(3));
 }
 
 TEST(peers_build_operation_and_development) {
     const auto w = peer_workers();
-    const Json commanders = J(R"({"cam1.mount": ["ext-ops"], "cam1.radar": ["ext-ops"], "bare": ["ext-ops"]})");
+    const Json commanders = J(R"({"siyi.gimbal": ["ext-ops"], "siyi.radar": ["ext-ops"], "bare": ["ext-ops"]})");
     const std::vector<pm::PeerProcess> procs = {{"gateway", 812, 0, true}, {"ext-ops", 0, 1290, false}, {"x", 0, 0, false}};
     Json p = pm::build_peers(commanders, w, procs, "operation", "warn", Json("b1"));
     CHECK_EQ(p["guard"], Json("warn"));
     CHECK_EQ(p["mode"], Json("operation"));
     CHECK_EQ(p["peers"], J(R"({"gateway": {"pid": 812, "trusted_from": true}, "ext-ops": {"pgid": 1290}})"));
-    CHECK_EQ(p["workers"]["cam1"]["allow"], J(R"({"gateway": "*", "ext-ops": ["mount.angle", "mount.get"]})"));
-    CHECK_EQ(p["workers"]["cam1"]["read"], J(R"(["diag.dump", "get_status", "mount.get", "tap.info"])"));
+    CHECK_EQ(p["workers"]["siyi"]["allow"], J(R"({"gateway": "*", "ext-ops": ["gimbal.angle", "gimbal.get"]})"));
+    CHECK_EQ(p["workers"]["siyi"]["read"], J(R"(["diag.dump", "get_status", "gimbal.get", "tap.info"])"));
     CHECK_EQ(p["workers"]["bare"]["allow"], J(R"({"gateway": "*"})"));  // 계약 없는 워커: 연동 워커에 아무것도 안 열림
     CHECK_EQ(p["workers"]["ext-ops"]["allow"], J(R"({"gateway": "*"})"));
     // 개발 모드: 허용된 곳은 그 워커의 모든 명령
     p = pm::build_peers(commanders, w, procs, "development", "enforce", Json());
-    CHECK_EQ(p["workers"]["cam1"]["allow"], J(R"({"gateway": "*", "ext-ops": "*"})"));
+    CHECK_EQ(p["workers"]["siyi"]["allow"], J(R"({"gateway": "*", "ext-ops": "*"})"));
     CHECK_EQ(p["workers"]["bare"]["allow"], J(R"({"gateway": "*"})"));
     // 워커 이름만(모든 역할)
-    p = pm::build_peers(J(R"({"cam1": ["ext-ops"]})"), w, procs, "operation", "warn", Json());
-    CHECK_EQ(p["workers"]["cam1"]["allow"]["ext-ops"], J(R"(["camera.zoom", "mount.angle", "mount.get", "stream.start"])"));  // 워커 전체: operate도
+    p = pm::build_peers(J(R"({"siyi": ["ext-ops"]})"), w, procs, "operation", "warn", Json());
+    CHECK_EQ(p["workers"]["siyi"]["allow"]["ext-ops"], J(R"(["camera.zoom", "gimbal.angle", "gimbal.get", "stream.start"])"));  // 워커 전체: operate도
     // 선언 없음: 화면만
     p = pm::build_peers(Json(), w, {}, "operation", "off", Json());
     CHECK_EQ(p["peers"], Json::object());
-    CHECK_EQ(p["workers"]["cam1"]["allow"], J(R"({"gateway": "*"})"));
+    CHECK_EQ(p["workers"]["siyi"]["allow"], J(R"({"gateway": "*"})"));
 }
 
 }  // namespace

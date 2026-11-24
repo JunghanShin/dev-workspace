@@ -1006,12 +1006,12 @@ class CommandPath(unittest.TestCase):
             e.close()
 
     def make(self, connections=None, settings=None):
-        e = Env({"mnt": {"config": {}, "autostart": True},
+        e = Env({"gim": {"config": {}, "autostart": True},
                  "ext": {"config": {}, "autostart": True, "decl": {"manager_api": True}},
                  "bare": {"config": {}, "autostart": False}}, settings=settings)
         self.envs.append(e)
-        write_io(e, "mnt", provides={"mount": ["mount.angle", "mount.get"], "camera": ["camera.zoom"]})
-        write_io(e, "ext", uses={"g": {"from": "mount", "version": "1.0"}})
+        write_io(e, "gim", provides={"gimbal": ["gimbal.angle", "gimbal.get"], "camera": ["camera.zoom"]})
+        write_io(e, "ext", uses={"g": {"from": "gimbal", "version": "1.0"}})
         if connections is not None:
             write_json(os.path.join(e.data, "config", "connections.json"), connections)
         return e
@@ -1023,61 +1023,61 @@ class CommandPath(unittest.TestCase):
             return None
 
     def test_peers_file(self):
-        e = self.make({"connections": [], "commanders": {"mnt.mount": ["ext"]}}).start()
-        s_gim = e.wait_state("mnt", "running")
+        e = self.make({"connections": [], "commanders": {"gim.gimbal": ["ext"]}}).start()
+        s_gim = e.wait_state("gim", "running")
         s_ext = e.wait_state("ext", "running")
-        self.assertEqual(e.starts("mnt")[-1]["env"]["WORKSPACE_PEERS_FILE"], os.path.join(e.run_dir, "peers.json"))
+        self.assertEqual(e.starts("gim")[-1]["env"]["WORKSPACE_PEERS_FILE"], os.path.join(e.run_dir, "peers.json"))
         e.ok({"op": "ping"})  # 게이트웨이 자리: manager-rest.sock에 붙은 이 프로세스의 pid가 들어감
         p = wait_for(lambda: (lambda x: x if x and "gateway" in x["peers"] and "ext" in x["peers"] else None)(self.peers(e)), 5)
         self.assertTrue(p, self.peers(e))
         self.assertEqual((p["version"], p["guard"], p["mode"]), (1, "warn", "operation"))
         self.assertEqual(p["peers"]["gateway"], {"pid": os.getpid(), "trusted_from": True})
         self.assertEqual(p["peers"]["ext"], {"pgid": s_ext["pid"]})
-        self.assertEqual(p["peers"]["mnt"], {"pgid": s_gim["pid"]})
+        self.assertEqual(p["peers"]["gim"], {"pgid": s_gim["pid"]})
         self.assertNotIn("bare", p["peers"])  # 떠 있지 않음
         self.assertIsInstance(p["written_at_ms"], int)
-        self.assertEqual(p["workers"]["mnt"]["allow"], {"gateway": "*", "ext": ["mount.angle", "mount.get"]})
-        self.assertEqual(p["workers"]["mnt"]["read"], ["get_status", "mount.get"])
+        self.assertEqual(p["workers"]["gim"]["allow"], {"gateway": "*", "ext": ["gimbal.angle", "gimbal.get"]})
+        self.assertEqual(p["workers"]["gim"]["read"], ["get_status", "gimbal.get"])
         self.assertEqual(p["workers"]["bare"], {"read": ["get_status"], "allow": {"gateway": "*"}})
         # 개발 모드: 허용된 곳은 전부
         e.ok({"op": "set_access_mode", "mode": "development"})
         p = wait_for(lambda: (lambda x: x if x and x["mode"] == "development" else None)(self.peers(e)), 3)
-        self.assertEqual(p["workers"]["mnt"]["allow"], {"gateway": "*", "ext": "*"})
+        self.assertEqual(p["workers"]["gim"]["allow"], {"gateway": "*", "ext": "*"})
         e.ok({"op": "set_access_mode", "mode": "operation"})
         # 워커가 다시 뜨면 새 프로세스 그룹
         e.ok({"op": "stop", "id": "ext"})
         e.wait_state("ext", "stopped")
         self.assertTrue(wait_for(lambda: "ext" not in (self.peers(e) or {"peers": {"ext": 1}})["peers"], 4))
         # 손으로 바꾼 연결 선언도 따라감(1 s 주기)
-        write_json(os.path.join(e.data, "config", "connections.json"), {"commanders": {"mnt": ["ext"]}})
-        p = wait_for(lambda: (lambda x: x if x and isinstance(x["workers"]["mnt"]["allow"].get("ext"), list)
-                              and "camera.zoom" in x["workers"]["mnt"]["allow"]["ext"] else None)(self.peers(e)), 4)
+        write_json(os.path.join(e.data, "config", "connections.json"), {"commanders": {"gim": ["ext"]}})
+        p = wait_for(lambda: (lambda x: x if x and isinstance(x["workers"]["gim"]["allow"].get("ext"), list)
+                              and "camera.zoom" in x["workers"]["gim"]["allow"]["ext"] else None)(self.peers(e)), 4)
         self.assertTrue(p, self.peers(e))
 
     def test_connections_ops(self):
-        e = self.make({"commanders": {"mnt.mount": ["ext"], "mnt.radar": ["ext"], "mnt.camera": ["ext"]}},
+        e = self.make({"commanders": {"gim.gimbal": ["ext"], "gim.radar": ["ext"], "gim.camera": ["ext"]}},
                       settings={"command_guard": "enforce"}).start()
         d = e.call("manager.sock", {"op": "get_connections"})["data"]
         self.assertEqual(d["path"], os.path.join(e.data, "config", "connections.json"))
         self.assertEqual((d["guard"], d["access_mode"], d["error"]), ("enforce", "operation", None))
-        self.assertEqual(d["check"]["mnt.mount"], {"ok": True, "error": None, "warnings": []})
-        self.assertEqual(d["check"]["mnt.radar"]["ok"], False)
-        self.assertEqual(d["check"]["mnt.camera"]["ok"], True)
-        self.assertEqual(len(d["check"]["mnt.camera"]["warnings"]), 1)  # ext는 camera를 쓴다고 적지 않음
-        for bad in (None, [], {"commanders": {"mnt": "ext"}}, {"commanders": {"Bad Key": []}}):
+        self.assertEqual(d["check"]["gim.gimbal"], {"ok": True, "error": None, "warnings": []})
+        self.assertEqual(d["check"]["gim.radar"]["ok"], False)
+        self.assertEqual(d["check"]["gim.camera"]["ok"], True)
+        self.assertEqual(len(d["check"]["gim.camera"]["warnings"]), 1)  # ext는 camera를 쓴다고 적지 않음
+        for bad in (None, [], {"commanders": {"gim": "ext"}}, {"commanders": {"Bad Key": []}}):
             r = e.rest({"op": "set_connections", "connections": bad})
             self.assertEqual((r["ok"], r["error"]["code"]), (False, "bad_request"), bad)
         self.assertFalse(e.call("manager.sock", {"op": "set_connections", "connections": {}})["ok"])  # 읽기 전용 소켓
-        d = e.ok({"op": "set_connections", "connections": {"connections": [], "commanders": {"mnt": ["ext"]}}})
-        self.assertEqual(list(d["check"]), ["mnt"])
-        self.assertEqual(read_json(d["path"]), {"connections": [], "commanders": {"mnt": ["ext"]}})
+        d = e.ok({"op": "set_connections", "connections": {"connections": [], "commanders": {"gim": ["ext"]}}})
+        self.assertEqual(list(d["check"]), ["gim"])
+        self.assertEqual(read_json(d["path"]), {"connections": [], "commanders": {"gim": ["ext"]}})
         self.assertEqual(self.peers(e)["guard"], "enforce")
         # 깨진 파일: 직전 값을 쓰고 오류를 보임
         with open(d["path"], "w") as f:
             f.write("{broken")
         self.assertTrue(wait_for(lambda: e.call("manager.sock", {"op": "get_connections"})["data"]["error"], 4))
         d = e.call("manager.sock", {"op": "get_connections"})["data"]
-        self.assertEqual(d["connections"], {"connections": [], "commanders": {"mnt": ["ext"]}})
+        self.assertEqual(d["connections"], {"connections": [], "commanders": {"gim": ["ext"]}})
 
     def test_inputs(self):
         """입력 연결(design.md 6.6.7.4): 둘이 내보내면 선언 필요 → 선언하면 그 워커만 다시 시작, 주소 파일·상태"""
@@ -1099,12 +1099,12 @@ class CommandPath(unittest.TestCase):
         self.assertEqual(s["inputs"]["pos"]["how"], None)
         self.assertIn("several workers", s["inputs"]["pos"]["error"])
         self.assertEqual(e.status("loc")["inputs"], {})
-        # 선언: fc2는 버전 1.0이라 사본 1.1과 안 맞음(주소 안 넣음, 다시 시작 안 함)
+        # 선언: loc2는 버전 1.0이라 사본 1.1과 안 맞음(주소 안 넣음, 다시 시작 안 함)
         d = e.ok({"op": "set_connections", "connections": {"connections": [{"to": "cam.pos", "from": "loc2"}]}})
         self.assertEqual((d["inputs"]["cam"]["pos"]["how"], d["inputs"]["cam"]["pos"]["ok"]), ("declared", False))
         time.sleep(1)
         self.assertEqual(e.status("cam")["pid"], s["pid"])
-        # fc로 선언: 주소가 바뀌어 cam만 다시 시작
+        # loc로 선언: 주소가 바뀌어 cam만 다시 시작
         d = e.ok({"op": "set_connections", "connections": {"connections": [{"to": "cam.pos", "from": "loc"}]}})
         self.assertEqual(d["inputs"]["cam"]["pos"], {"required": False, "from": "loc", "how": "declared", "ok": True, "error": None})
         s2 = wait_for(lambda: (lambda x: x if x and x["actual_state"] == "running" and x["pid"] != s["pid"] else None)(e.status("cam")), 10)

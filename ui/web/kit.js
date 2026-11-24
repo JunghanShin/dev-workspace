@@ -17,7 +17,7 @@
 //   media(opts)                    16:9 영상 틀(iframe). .setUrl(url) .setMessage(text), onPoint(xr, yr) 클릭 위치(0~1)
 //   panelHead(opts)                패널 머리: 제목, 배지 자리, 오른쪽 아이콘 버튼 자리
 //   formRows(rows)                 [[이름, 입력 요소, 단위?]...] 설정 폼
-//   block(title, ...children)      오른쪽 열(side)의 제목 달린 묶음. 제목은 짧게(예: "구동", "줌 · 초점")
+//   block(title, ...children)      오른쪽 열(side)의 제목 달린 묶음. 제목은 짧게(예: "짐벌", "줌 · 초점")
 //   section(title, ...children)    대화창 안의 제목 달린 묶음
 //   card(title, ...children)       본문의 제목 달린 판(표·목록·그래프)
 //   tile(label, unit)              요약 숫자 판. .set(value, digits). tiles(...)로 한 줄에 배치

@@ -3,7 +3,7 @@
 # 워크스페이스에서 Manager가 하는 일(실행, 끝나면 다시 실행, 정지 시 정리)을 단순하게 대신한다. heartbeat 감시는 없다.
 #
 #   run-workers.sh <실행 파일> <설정 파일> [<실행 파일> <설정 파일> ...]
-#   예) run-workers.sh workers/cam/build/cam-worker cam.json \
+#   예) run-workers.sh workers/siyi/build/siyi-worker siyi.json \
 #                      workers/video/build/video-worker video-0.json \
 #                      workers/video/build/video-worker video-0-proc.json
 #

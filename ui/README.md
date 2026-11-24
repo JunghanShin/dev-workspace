@@ -89,7 +89,7 @@ export default {
 
 | 패널 종류 | 배치 |
 |---|---|
-| 영상이 있는 장비(카메라 등) | `panelHead` + `.lay-media`: 왼쪽 `media`(16:9), 오른쪽 `.side` 한 열에 `block`들(맨 위는 제목 없는 큰 숫자 `readout` 3개) |
+| 영상이 있는 장비(카메라, 짐벌) | `panelHead` + `.lay-media`: 왼쪽 `media`(16:9), 오른쪽 `.side` 한 열에 `block`들(맨 위는 제목 없는 큰 숫자 `readout` 3개) |
 | 상태·목록(시스템 모니터, 이력) | `panelHead` + `tiles(tile...)` + `card(표 또는 kvList)` |
 | 도구(로그) | `panelHead`의 actions에 선택·검색·아이콘 버튼, 본문은 내용 하나 |
 

@@ -15,14 +15,14 @@
 ## 쓰는 법
 
 1. 워크스페이스에 replay 워커를 하나 만들고(id 예: `replay`) 시작
-2. 패널 "녹화·재생"에서 받을 워커 id(예: `cam1`)를 넣고 녹화 → 멈춤
+2. 패널 "녹화·재생"에서 받을 워커 id(예: `ximea`)를 넣고 녹화 → 멈춤
 3. 받는 워커(처리 워커)의 설정 상대 워커(peer)를 `replay`로 바꾸고, 녹화 목록에서 ▶(배속·반복 선택)
 
 명령으로:
 
 ```bash
 curl -s -X POST localhost:8080/api/board/workers/replay/command -H 'Content-Type: application/json' \
-  -d '{"cmd":"replay.record_start","args":{"source":"cam1","name":"run1","seconds":30}}'
+  -d '{"cmd":"replay.record_start","args":{"source":"ximea","name":"run1","seconds":30}}'
 ```
 
 ## 설정 (`config.replay`, 프리셋 `workspace/presets/`)

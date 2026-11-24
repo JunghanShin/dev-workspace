@@ -208,7 +208,7 @@ int main() {
         x.input = "framebus";
         x.source = fb;
         x.mode = "encode";
-        x.url = "rtsp://srv:8554/cam2";
+        x.url = "rtsp://srv:8554/ximea";
         x.ffmpeg = fake_ffmpeg(dir + "/x");
         x.gst_launch = fake_gst(dir + "/x", true);
         video::Streams s;
