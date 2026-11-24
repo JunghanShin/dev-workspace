@@ -857,6 +857,20 @@ static void host_guard_and_last_command() {
     CHECK(r["ok"] == false && r["error"]["code"] == "forbidden");
     st = call(R"({"cmd":"get_status"})", static_cast<int>(getpid()))["data"];
     CHECK(st["last_command"]["cmd"] == "alpha.nope");
+    // origin(0.14): 믿는 곳(명령 입구 매니저)이면 from은 그 곳, origin은 봉투 것. 믿지 않는 곳의 origin은 버림
+    const std::string me = std::to_string(getpid());
+    write_text(peers, R"({"guard": "enforce", "peers": {"mission-manager": {"pid": )" + me + R"(, "trusted_from": true}},
+                         "workers": {"w1": {"read": ["get_status"], "allow": {"gateway": "*", "mission-manager": "*"}}}})");
+    host.set_peers_file(peers);
+    CHECK(call(R"({"cmd":"alpha.echo","origin":"screen"})", static_cast<int>(getpid()))["ok"] == true);
+    st = call(R"({"cmd":"get_status"})", static_cast<int>(getpid()))["data"];
+    CHECK(st["last_command"]["from"] == "mission-manager" && st["last_command"]["origin"] == "screen");
+    write_text(peers, R"({"guard": "warn", "peers": {"ext": {"pid": )" + me + R"(}},
+                         "workers": {"w1": {"read": ["get_status"], "allow": {"gateway": "*", "ext": "*"}}}})");
+    host.set_peers_file(peers);
+    call(R"({"cmd":"alpha.echo","origin":"forged","from":"screen"})", static_cast<int>(getpid()));
+    st = call(R"({"cmd":"get_status"})", static_cast<int>(getpid()))["data"];
+    CHECK(st["last_command"]["from"] == "ext" && !st["last_command"].contains("origin"));
     std::remove(cfg.c_str());
     std::remove(peers.c_str());
     rmdir(dir);

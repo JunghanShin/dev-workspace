@@ -36,6 +36,7 @@ struct AppConfig {
     std::string run_dir, logs_dir, notify_path;
     std::set<std::string> api_workers;
     std::set<std::string> manager_clients;  // 매니저 읽기 전용 소켓 manager-<id>.sock
+    std::set<std::string> command_entries;  // 명령 입구 매니저(허용 목록에서 게이트웨이처럼)
     bool product = false, config_write = true;
     // 명령 길(docs/command-path.md 4장)
     std::string connections_path, peers_path;

@@ -92,6 +92,8 @@ public:
     void stop();
     // 명령을 큐에 넣는다. 번호(1부터)를 돌려준다. 큐가 차면 0
     uint64_t send(const std::string& cmd, const nlohmann::json& args = nlohmann::json::object());
+    // 봉투에 칸을 더해 보낸다(예: {"origin": "screen"}, 명령 입구 매니저가 넘길 때. libworker 0.14)
+    uint64_t send(const std::string& cmd, const nlohmann::json& args, const nlohmann::json& envelope);
     int wake_fd() const { return replies_.wake_fd(); }
     std::optional<Reply> next() { return replies_.try_pop(); }
 
@@ -104,6 +106,7 @@ private:
         uint64_t id;
         std::string cmd;
         nlohmann::json args;
+        nlohmann::json envelope;  // 봉투에 더할 칸(없으면 null)
     };
     void run(WorkerThread& t);
     std::string peer_, path_;

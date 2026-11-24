@@ -986,7 +986,7 @@ class Accept(unittest.TestCase):
     def test_managers(self):
         """매니저(docs/managers.md): managers/*/ 기본 탑재 찾기, kind, 운용 모드에서 정지·설정 막기, 끌 때 순서"""
         e = self.env({"w": {"autostart": True}},
-                     builtins={"managers/mgr": ("mgr_t", {"kind": "manager",
+                     builtins={"managers/mgr": ("mgr_t", {"kind": "manager", "command_entry": True,
                                                           "builtin": {"id": "mgr", "autostart": True}}),
                                "managers/rec": ("rec_t", {"kind": "manager", "stop_order": 2,
                                                           "builtin": {"id": "rec", "autostart": True}})}).start()
@@ -1002,6 +1002,18 @@ class Accept(unittest.TestCase):
         self.assertTrue(e.call("manager-mgr.sock", {"op": "list"})["ok"])
         r = e.call("manager-mgr.sock", {"op": "stop", "id": "w"})
         self.assertEqual((r["error"]["code"], r["error"]["message"]), ("forbidden", "mgr is read-only"))
+        # 명령 입구 매니저(command_entry, managers/mission/design.md 5장): 허용 목록에서 게이트웨이처럼
+        def peers():
+            try:
+                d = read_json(os.path.join(e.run_dir, "peers.json"))
+                return d if d and "mgr" in d["peers"] and "w" in d["workers"] else None
+            except (OSError, ValueError):
+                return None
+        pj = wait_for(peers, 5)
+        self.assertTrue(pj)
+        self.assertTrue(pj["peers"]["mgr"].get("trusted_from"))
+        self.assertEqual(pj["workers"]["w"]["allow"].get("mgr"), "*")
+        self.assertNotIn("trusted_from", pj["peers"].get("rec", {}))
         # 운용 모드: 매니저 정지·설정 바꾸기는 막음(게이트웨이도), 워커는 그대로
         for req in ({"op": "stop", "id": "mgr"}, {"op": "set_config", "id": "rec", "config": {"a": 1}},
                     {"op": "set_autostart", "id": "mgr", "autostart": False}):

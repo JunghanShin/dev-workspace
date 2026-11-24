@@ -155,6 +155,7 @@ class FakeManager(UnixServer):
         self.requests = []
         self.subs = 0      # 구독 시도(C++ 게이트웨이의 캐시 gw.mgr). 이 가짜는 구독을 모른다고 답해 캐시가 쓰이지 않는다
         self.mode = None   # None | "slow" | "garbage" | "close" | "huge"
+        self.mission = False  # 명령 입구 매니저 "mm"이 있다고 답함(managers/mission/design.md 2장)
         super().__init__(path)
 
     def handle(self, c):
@@ -185,7 +186,13 @@ class FakeManager(UnixServer):
         if op == "system":
             return {"ok": True, "data": {"uptime": 12.5, "이름": "보드"}}
         if op == "list":
+            if self.mission:  # 진짜 process-manager처럼 상태 목록(kind 칸)
+                return {"ok": True, "data": [{"id": w, "kind": "worker"} for w in sorted(WORKERS)] + [{"id": "mm", "kind": "manager"}]}
             return {"ok": True, "data": {"workers": sorted(WORKERS)}}
+        if self.mission and wid == "mm" and op == "get_io":
+            return {"ok": True, "data": {"id": "mm", "provides": {"mission": {"commands": {"mission.send": {"operate": True}}}}}}
+        if self.mission and wid == "mm" and op == "get_config":
+            return {"ok": True, "data": {"config": {}, "preset": "default"}}
         if isinstance(wid, str) and wid.startswith("e_"):
             code = wid[2:]
             return {"ok": False, "error": {"code": code, "message": "fake %s" % code, "fields": {"a": "b"}}}
@@ -2018,6 +2025,36 @@ class CommandPathModes(unittest.TestCase):
             self.assertEqual(s.json("POST", "/workers/w2/command", {"cmd": "diag.dump"})[0], 403)  # 운용 모드
         finally:
             srv.stop()
+
+
+class MissionRoute(unittest.TestCase):
+    """명령 입구(managers/mission/design.md 2장): 역할 mission을 내보내는 매니저가 있으면 읽기가 아닌 워커 명령은 그리로"""
+
+    def test_through_mission(self):
+        T["mgr"].mission = True
+        mm = None
+        srv = Server(name="mission")
+        try:
+            # 설치됐는데 떠 있지 않음(명령 소켓 없음): 503, 우회하지 않음. 읽기 명령은 늘 바로
+            st, obj, _ = srv.json("POST", "/workers/w2/command", {"cmd": "source.set_rate", "args": {"hz": 1}})
+            self.assertEqual((st, obj["error"]["code"]), (503, "unavailable"))
+            self.assertIn("mm is not running", obj["error"]["message"])
+            n = len(T["w2"].requests)
+            self.assertEqual(srv.json("POST", "/workers/w2/command", {"cmd": "source.get"})[0], 200)
+            self.assertEqual(T["w2"].requests[n:], [{"cmd": "source.get", "args": {}, "from": "screen"}])
+            # 떠 있음: mission.send로 넘기고 그 답을 그대로
+            mm = FakeCommandWorker(os.path.join(T["data"], "run", "cmd", "mm.sock"), "mm")
+            st, obj, _ = srv.json("POST", "/workers/w2/command", {"cmd": "source.set_rate", "args": {"hz": 2}})
+            self.assertEqual(st, 200)
+            self.assertEqual(mm.requests[-1], {"cmd": "mission.send", "from": "screen",
+                                               "args": {"target": "w2", "cmd": "source.set_rate", "args": {"hz": 2}}})
+            self.assertEqual(obj["cmd"], "mission.send")
+            self.assertEqual(len(T["w2"].requests), n + 1)  # 워커에 바로 가지 않음
+        finally:
+            T["mgr"].mission = False
+            srv.stop()
+            if mm:
+                mm.close()
 
 
 @unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(명령 기록)")

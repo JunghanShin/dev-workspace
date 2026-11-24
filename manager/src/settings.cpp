@@ -273,6 +273,18 @@ std::set<std::string> manager_api_workers(const Json& types) {
     return out;
 }
 
+std::set<std::string> command_entries(const Json& types) {
+    // 명령 입구 매니저(type "kind": "manager" + "command_entry": true, managers/mission/design.md 5장):
+    // 허용 목록에서 게이트웨이처럼 모든 워커에 "*", 봉투의 from·origin을 믿음
+    std::set<std::string> out;
+    for (auto it = types.begin(); it != types.end(); ++it) {
+        if (it->value("kind", Json()) != Json("manager") || it->value("command_entry", Json()) != Json(true)) continue;
+        const Json wid = it->value("_worker_id", Json());
+        if (wid.is_string() && !wid.get<std::string>().empty()) out.insert(wid.get<std::string>());
+    }
+    return out;
+}
+
 std::set<std::string> manager_clients(const Json& types, const std::set<std::string>& api_workers) {
     // 매니저(type "kind": "manager")는 읽기 전용 클라이언트 소켓 manager-<id>.sock을 받는다(managers/status/design.md 4장).
     // 쓰기가 필요한 매니저는 manager_api로 선언(그쪽이 이김)

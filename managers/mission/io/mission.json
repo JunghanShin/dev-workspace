@@ -1,0 +1,30 @@
+{
+  "name": "mission",
+  "version": "1.0",
+  "description": "명령 입구(managers/mission/design.md 2·4장). 이 역할을 내보내는 워커가 있으면 게이트웨이가 읽기가 아닌 워커 명령을 이리로 보낸다",
+  "topics": {
+    "mission": {
+      "description": "(대상, 역할)마다 대기 큐와 보낸 명령. 바뀌면 바로, 그대로면 1 s",
+      "type": "object",
+      "required": ["t_mono_ns", "queues", "sent", "busy", "timeouts"],
+      "properties": {
+        "t_mono_ns": {"type": "integer", "unit": "ns"},
+        "queues": {"type": "object", "additionalProperties": {"type": "object", "required": ["waiting", "inflight"],
+                   "properties": {"waiting": {"type": "integer"},
+                                  "inflight": {"type": ["object", "null"], "properties": {"cmd": {"type": "string"}, "origin": {"type": "string"},
+                                                                                         "age_ms": {"type": "integer", "unit": "ms"}}}}}},
+        "sent": {"type": "integer"}, "busy": {"type": "integer"}, "timeouts": {"type": "integer"}, "unavailable": {"type": "integer"}
+      }
+    }
+  },
+  "commands": {
+    "mission.send": {"description": "대상 워커에 명령을 넘김. 답은 대상 워커의 응답 그대로(mission 자신의 오류: busy·timeout·unavailable)",
+                     "operate": true,
+                     "args": {"type": "object", "required": ["target", "cmd"],
+                              "properties": {"target": {"type": "string"}, "cmd": {"type": "string"}, "args": {"type": "object"}}},
+                     "reply": {"type": "object", "additionalProperties": true},
+                     "errors": ["bad_request", "busy", "timeout", "unavailable"]},
+    "mission.get_queues": {"description": "지금 대기 큐", "read": true, "args": {"type": "object"},
+                           "reply": {"type": "object", "additionalProperties": true}, "errors": []}
+  }
+}

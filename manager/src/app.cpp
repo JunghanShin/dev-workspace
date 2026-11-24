@@ -244,7 +244,7 @@ void App::write_peers(bool force) {
     peers_dirty_ = false;
     std::vector<PeerProcess> procs;
     if (gateway_pid_ > 0) procs.push_back({"gateway", gateway_pid_, 0, true});
-    for (const auto& [id, pid] : sup_.pids_by_id()) procs.push_back({id, 0, pid, false});
+    for (const auto& [id, pid] : sup_.pids_by_id()) procs.push_back({id, 0, pid, cfg_.command_entries.count(id) > 0});
     Json doc = build_peers(connections_.value("commanders", Json()), cmds_, procs, access_mode_, cfg_.command_guard,
                            cfg_.boot_id);
     const std::string text = dump_file(doc);

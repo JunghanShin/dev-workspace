@@ -184,6 +184,7 @@ int main(int argc, char** argv) {
     ac.notify_path = notify_path;
     ac.api_workers = api_workers;
     ac.manager_clients = mgr_clients;
+    ac.command_entries = pm::command_entries(types);
     ac.product = product;
     ac.config_write = config_write;
     // 명령 길(docs/command-path.md): 연결 선언(설정 폴더의 connections.json) → run/peers.json

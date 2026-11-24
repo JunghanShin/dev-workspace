@@ -83,6 +83,7 @@ CommandGuard::Decision CommandGuard::check(int pid, const std::string& cmd, cons
             trusted = p.trusted_from;
             break;
         }
+    d.trusted = trusted;
     if (who.empty()) d.from = "unknown:" + std::to_string(pid);
     else if (trusted) d.from = claimed_from.empty() ? who : claimed_from;
     else d.from = who;  // 믿지 않는 곳이 적은 from은 무시

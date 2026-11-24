@@ -202,12 +202,16 @@ public:
     // 입력 주소(워크스페이스 design.md 6.6.7.3·6.6.7.5, inputs.hpp). 없거나 이어지지 않은 입력이면 nullptr.
     // configure 뒤(start()에서) 쓴다. 모듈은 붙었는지를 input_link로 알린다(지표 inputs_<입력>_link, get_status "inputs")
     const InputAddress* uses(const std::string& name) const;
+    // 지금 처리 중인 명령을 보낸 곳(검사를 거친 from: screen, remote:<이름>, 워커 id). 모듈 handle() 안에서만, 밖에서는 빈 글
+    // (libworker 0.14, 명령 입구 매니저가 넘길 때 origin으로 씀)
+    const std::string& current_from() const { return current_from_; }
     void input_link(const std::string& name, bool up);
     const std::map<std::string, InputAddress>& inputs() const { return inputs_; }
     Json status() const;
     std::string metrics() const;
 
 private:
+    std::string current_from_;  // current_from()
     Json read_config(const std::string& path, std::string* id, long* version);
     Json host_keys(const Json& cfg) const;
     StageOptions stage_options(const std::string& name, StageOptions defaults) const;

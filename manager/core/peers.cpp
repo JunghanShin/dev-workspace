@@ -134,6 +134,8 @@ Json build_peers(const Json& commanders, const std::map<std::string, WorkerComma
         // 명령하는 곳 → 허용 명령(집합으로 모은 뒤 배열로. "*"는 전부)
         std::map<std::string, std::set<std::string>> allow;
         std::set<std::string> star = {"gateway"};
+        for (const auto& p : procs)  // 믿는 곳(게이트웨이처럼 넘겨받은 명령을 이미 검사한 곳: 명령 입구 매니저)은 전부
+            if (p.trusted_from && !p.id.empty()) star.insert(p.id);
         if (commanders.is_object())
             for (const auto& [key, list] : commanders.items()) {
                 const auto [wk, role] = split_key(key);

@@ -279,7 +279,10 @@ void Host::dispatch(const std::string& line, Reply reply, int peer_pid) {
     else {
         g.read = cmd == "get_status";
         g.from = claimed;
+        g.trusted = true;  // 단독 실행: 검사하지 않음
     }
+    // 처음 보낸 곳(origin): 믿는 곳이 넘겨준 것만(명령 입구 매니저가 화면 명령을 넘길 때, managers/mission/design.md 2장)
+    const std::string origin = g.trusted && req.contains("origin") && req["origin"].is_string() ? req["origin"].get<std::string>() : "";
     if (g.violation) {
         const std::string key = g.from + std::string("\x1f") + cmd;
         const auto now = Clock::now();
@@ -295,6 +298,7 @@ void Host::dispatch(const std::string& line, Reply reply, int peer_pid) {
     if (!g.read) {  // 마지막 명령(get_status 공통 칸 last_command): 응답이 오면 ok를 채운다
         const auto t = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
         last_command_ = {{"cmd", cmd}, {"from", g.from.empty() ? Json(nullptr) : Json(g.from)}, {"t_mono_ns", t}, {"ok", nullptr}};
+        if (!origin.empty()) last_command_["origin"] = origin;
         reply = [this, t, inner = std::move(reply)](const Json& resp) {
             if (last_command_.is_object() && last_command_.value("t_mono_ns", int64_t(0)) == t)
                 last_command_["ok"] = resp.is_object() && resp.value("ok", false);
@@ -318,6 +322,11 @@ void Host::dispatch(const std::string& line, Reply reply, int peer_pid) {
     }
     for (const auto& m : modules_) {
         if (m->name() != mod) continue;
+        current_from_ = g.from;  // handle 안에서만 뜻이 있음(명령 입구 매니저가 넘길 때 origin으로)
+        struct Clear {
+            std::string& s;
+            ~Clear() { s.clear(); }
+        } clear{current_from_};
         try {
             if (m->handle(sub, args, reply)) return;
         } catch (const Fatal& e) {

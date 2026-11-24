@@ -810,6 +810,28 @@ Reply Gateway::command(const std::string& id, const std::function<Body()>& body,
     ctx.cmd = b.value["cmd"].get<std::string>();  // 기록에는 명령 이름만(인자는 넣지 않음)
     // 운용 모드: 읽기·역할 명령만(워커 전용·계약에 없는 명령은 개발 모드에서, docs/command-path.md 3장)
     if (mode().mode != "development" && kinds_of(id).of(ctx.cmd) == CmdKind::Other) return development_required();
+    const Json& args = get_or(b.value, "args", Json(nullptr));
+    // 읽기가 아닌 명령은 명령 입구(mission-manager)가 있으면 그리로(managers/mission/design.md 2장). 떠 있지 않으면 503(우회 안 함)
+    if (kinds_of(id).of(ctx.cmd) != CmdKind::Read) {
+        const std::string entry = mission_entry();
+        if (!entry.empty() && entry != id) {
+            Json mresp;
+            try {
+                mresp = mgr_.call(Json{{"op", "get_config"}, {"id", entry}});
+            } catch (const ManagerUnavailable& e) {
+                return json_error(503, "unavailable", std::string("manager unavailable: ") + e.what());
+            }
+            Json mreq = Json::object();
+            mreq["cmd"] = "mission.send";
+            mreq["args"] = Json{{"target", id}, {"cmd", b.value["cmd"]}, {"args", py_truthy(args) ? args : Json::object()}};
+            mreq["from"] = ctx.from;
+            const std::string mpath = socket_path(mresp, "command_socket", cfg_.data_dir, "cmd", entry);
+            const CommandResult mr = worker_command(mpath, mreq, 1.0, cfg_.command_timeout);
+            if (mr.kind == CommandResult::NoSocket)
+                return json_error(503, "unavailable", entry + " is not running (commands go through it)");
+            return finish_command(entry, mr);
+        }
+    }
     // 소켓 위치는 워커 설정(command_socket), 없으면 기본 위치 (design.md 9.6)
     Json resp;
     try {
@@ -821,10 +843,13 @@ Reply Gateway::command(const std::string& id, const std::function<Body()>& body,
     const std::string path = socket_path(resp, "command_socket", cfg_.data_dir, "cmd", id);
     Json request = Json::object();
     request["cmd"] = b.value["cmd"];
-    const Json& args = get_or(b.value, "args", Json(nullptr));
     request["args"] = py_truthy(args) ? args : Json::object();
     request["from"] = ctx.from;  // 워커는 게이트웨이(믿는 곳)가 붙인 것만 쓴다(docs/command-path.md 5장)
     const CommandResult r = worker_command(path, request, 1.0, cfg_.command_timeout);
+    return finish_command(id, r);
+}
+
+Reply Gateway::finish_command(const std::string& id, const CommandResult& r) {
     switch (r.kind) {
         case CommandResult::NoSocket:
             return json_error(503, "unavailable", "worker " + id + " is not running (no command socket)");
@@ -838,6 +863,34 @@ Reply Gateway::command(const std::string& id, const std::function<Body()>& body,
     if (py_truthy(get_or(r.reply, "ok", Json(nullptr)))) return json_reply(200, get_or(r.reply, "data", Json(nullptr)));
     const Json& err = get_or(r.reply, "error", Json::object());
     return json_reply(command_status(get_or(err, "code", Json(nullptr))), Json{{"error", err}});
+}
+
+std::string Gateway::mission_entry() {
+    const double now = mono_now();
+    {
+        std::lock_guard<std::mutex> lock(kinds_mu_);
+        if (now - mission_.first < 10.0) return mission_.second;
+    }
+    std::string found;
+    try {
+        const Json list = mgr_.call(Json{{"op", "list"}});
+        const Json data = get_or(list, "data", Json::array());
+        for (const auto& w : data.is_array() ? data : Json::array()) {
+            if (get_or(w, "kind", Json(nullptr)) != Json("manager")) continue;  // 매니저만 본다(목록 거르기)
+            const std::string wid = py_str(get_or(w, "id", Json("")));
+            const Json io = mgr_.call(Json{{"op", "get_io"}, {"id", wid}});
+            const Json prov = get_or(get_or(io, "data", Json::object()), "provides", Json::object());
+            if (prov.is_object() && prov.contains("mission")) {
+                found = wid;
+                break;
+            }
+        }
+    } catch (const std::exception&) {
+        return "";  // Manager가 없으면 기억하지 않음(뒤에서 어차피 503)
+    }
+    std::lock_guard<std::mutex> lock(kinds_mu_);
+    mission_ = {now, found};
+    return found;
 }
 
 CommandKinds Gateway::kinds_of(const std::string& id) {

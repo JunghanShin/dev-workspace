@@ -23,6 +23,7 @@ public:
         bool read = false;     // 읽기 명령(get_status, 계약 "read": true)
         std::string from;      // 보낸 곳(screen, remote:이름, 워커 id, unknown:<pid>)
         std::string reason;    // 위반 이유(기록용)
+        bool trusted = false;  // 믿는 곳(게이트웨이·명령 입구 매니저): 봉투의 from·origin을 쓴다
     };
 
     // path가 비면 검사하지 않는다(단독 실행). worker_id는 표에서 자기 칸을 찾을 때

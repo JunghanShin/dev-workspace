@@ -60,6 +60,7 @@ cmd_->start();
 // on_poll:     while (auto u = sub_->next()) { if (!u->down) last_ = u->topics; }
 //              while (auto r = cmd_->next()) { /* r->id로 대기 중 요청을 찾아 reply(r->response) */ }
 // 보내기:      uint64_t id = cmd_->send("source.set_rate", {{"hz", 20}});   // 0이면 큐가 참
+//              cmd_->send(cmd, args, {{"origin", "screen"}});   // 봉투에 칸 더하기(0.14, 명령 입구 매니저)
 ```
 
 상대가 없거나 다시 시작해도 살아서 다시 붙는다(`connected()`, `reachable()` → 지표 `<모듈>_link`). 본보기: 틀의 `lib/peer`.

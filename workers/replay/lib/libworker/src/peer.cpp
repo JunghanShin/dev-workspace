@@ -128,7 +128,12 @@ void CommandClient::stop() {
 
 uint64_t CommandClient::send(const std::string& cmd, const Json& args) {
     const uint64_t id = next_id_++;
-    return requests_.push(Request{id, cmd, args}) ? id : 0;
+    return requests_.push(Request{id, cmd, args, Json()}) ? id : 0;
+}
+
+uint64_t CommandClient::send(const std::string& cmd, const Json& args, const Json& envelope) {
+    const uint64_t id = next_id_++;
+    return requests_.push(Request{id, cmd, args, envelope}) ? id : 0;
 }
 
 void CommandClient::run(WorkerThread& t) {
@@ -137,7 +142,15 @@ void CommandClient::run(WorkerThread& t) {
         t.beat();
         if (!r) continue;
         // 응답을 기다리는 동안 beat가 멈추므로, timeout은 thread_stall_sec보다 짧게 둔다(기본 2 s)
-        Json resp = send_command(path_, r->cmd, r->args, std::chrono::milliseconds(opt_.timeout_ms));
+        Json resp;
+        if (r->envelope.is_object() && !r->envelope.empty()) {
+            Json req = r->envelope;
+            req["cmd"] = r->cmd;
+            req["args"] = r->args;
+            resp = send_request(path_, req, std::chrono::milliseconds(opt_.timeout_ms));
+        } else {
+            resp = send_command(path_, r->cmd, r->args, std::chrono::milliseconds(opt_.timeout_ms));
+        }
         const auto code = resp.value("error", Json::object()).value("code", std::string());
         reachable_ = code != "connect" && code != "timeout";
         replies_.push(Reply{r->id, r->cmd, std::move(resp)});

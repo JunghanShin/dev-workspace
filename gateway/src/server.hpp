@@ -134,6 +134,9 @@ private:
     };
     // 워커 명령 종류(계약에서, 10 s 동안 기억). 계약을 못 읽으면 get_status만 읽기
     CommandKinds kinds_of(const std::string& id);
+    // 명령 입구(역할 "mission"을 내보내는 워커, managers/mission/design.md 2장). 없으면 빈 글. 10 s 기억
+    std::string mission_entry();
+    Reply finish_command(const std::string& who, const CommandResult& r);
     bool start_tcp(std::string& err);
     bool start_unix(std::string& err);
     Reply dispatch(const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
@@ -168,6 +171,7 @@ private:
     std::mutex mode_mu_;  // mode_ (I/O 없음)
     std::mutex kinds_mu_;  // kinds_ (I/O 없음: Manager 호출은 잠금 밖)
     std::map<std::string, std::pair<double, CommandKinds>> kinds_;
+    std::pair<double, std::string> mission_ = {-1e9, ""};  // kinds_mu_로 보호
     Mode mode_;
     double last_mode_push_ = -1e9;  // gw.mgr만
 

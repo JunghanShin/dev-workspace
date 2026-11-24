@@ -894,6 +894,12 @@ TEST(peers_build_operation_and_development) {
     p = pm::build_peers(Json(), w, {}, "operation", "off", Json());
     CHECK_EQ(p["peers"], Json::object());
     CHECK_EQ(p["workers"]["siyi"]["allow"], J(R"({"gateway": "*"})"));
+    // 명령 입구 매니저(trusted, managers/mission/design.md 5장): 게이트웨이처럼 모든 워커에 "*"
+    const std::vector<pm::PeerProcess> with_mission = {{"gateway", 812, 0, true}, {"mission-manager", 0, 1400, true}};
+    p = pm::build_peers(Json(), w, with_mission, "operation", "warn", Json());
+    CHECK_EQ(p["peers"]["mission-manager"], J(R"({"pgid": 1400, "trusted_from": true})"));
+    CHECK_EQ(p["workers"]["siyi"]["allow"], J(R"({"gateway": "*", "mission-manager": "*"})"));
+    CHECK_EQ(p["workers"]["bare"]["allow"], J(R"({"gateway": "*", "mission-manager": "*"})"));
 }
 
 }  // namespace
