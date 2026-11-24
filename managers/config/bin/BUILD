@@ -1,6 +1,6 @@
 # config 워커 실행 파일(Jetson aarch64). dev/release-worker.sh가 만든다. 손으로 고치지 않는다
-source_commit: 1cc9812
+source_commit: cc3ca25
 build_env: jetson-dev 2.1
-built: 2026-11-24 16:50
+built: 2026-11-24 19:29
 sha256:
-  5fc10e7adaf7d158e3b33e49d85d4ee50163eaf33830fc7f802a7bfd1be42a64  config-manager
+  d8a180a7fb673e63db465fe9598507f2c431f84427e5a098ea6475a4952e23d6  config-manager
