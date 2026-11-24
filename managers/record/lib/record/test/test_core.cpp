@@ -162,9 +162,14 @@ static void test_topics() {
     CHECK(out[0].t_mono_ns == 777);        // 잰 시각
     CHECK(out[1].t_mono_ns == 10 * s);     // 없으면 받은 시각
     CHECK(out[2].rec["type"] == "event" && out[2].t_mono_ns == 555);
-    // 간격 안: 주제는 안 남기고 이벤트는 모두
+    // 간격 안: 주제는 안 남김. 같은 이벤트(kf에 다시 실려 옴)도 안 남김, 새 이벤트는 남김
     out = r.records("cam1", t, ev, false, 10 * s + s / 2);
-    CHECK(out.size() == 1 && out[0].rec["type"] == "event");
+    CHECK(out.empty());
+    auto ev2 = Json::parse(R"([{"t_mono_ns":555,"source":"cam1.link","code":"link_down"},{"t_mono_ns":556,"source":"cam1.link","code":"link_up"},{"code":"no_time"}])");
+    out = r.records("cam1", Json(), ev2, false, 10 * s + s / 2);
+    CHECK(out.size() == 2 && out[0].rec["v"]["code"] == "link_up" && out[1].rec["v"]["code"] == "no_time");
+    r.forget("cam1");  // 끊겨도 이벤트는 잊지 않음
+    CHECK(r.records("cam1", Json(), ev, false, 10 * s + s / 2).empty());
     // kf는 늘(표시 kf)
     out = r.records("cam1", t, Json::array(), true, 10 * s + s / 2 + 1);
     CHECK(out.size() == 2 && out[0].rec["kf"] == true);
