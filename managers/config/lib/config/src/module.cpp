@@ -237,7 +237,7 @@ Module::Done Module::work(const Job& j) {
     const std::string id = j.args.value("id", "");
     std::string text;
     if (id.empty() || id.find('/') != std::string::npos || !read_text(dir + "/" + id + ".json", text)) {
-        d.result = worker::error_reply("not_found", "no snapshot " + id);
+        d.result = worker::error_reply("bad_request", "no snapshot " + id);
         return d;
     }
     const Json snap = Json::parse(text, nullptr, false);

@@ -217,7 +217,7 @@ static void test_config() {
     for (const auto& c : d.value("data", Json::object()).value("changes", Json::array()))
         fps_changed |= c["path"] == "workers.cam1.config.fps" && c["from"] == 30 && c["to"] == 15;
     CHECK(fps_changed);
-    CHECK(cmd(sock, "config.diff", {{"id", "nope"}}).value("error", Json::object()).value("code", "") == "not_found");
+    CHECK(cmd(sock, "config.diff", {{"id", "nope"}}).value("error", Json::object()).value("code", "") == "bad_request");
     Json r = cmd(sock, "config.snapshot", {{"label", "mine"}});
     CHECK(r.value("ok", false) && r["data"]["saved"] == true);
     // 되돌리기 → set_config fps 30

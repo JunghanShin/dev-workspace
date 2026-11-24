@@ -226,7 +226,7 @@ static void test_payload() {
     r = cmd(sock, {{"cmd", "payload.power"}, {"args", {{"module", "mission-manager"}, {"on", false}}}});
     CHECK(r.contains("error") && r["error"]["code"] == "forbidden");
     r = cmd(sock, {{"cmd", "payload.power"}, {"args", {{"module", "nope"}, {"on", true}}}});
-    CHECK(r.contains("error") && r["error"]["code"] == "not_found");
+    CHECK(r.contains("error") && r["error"]["code"] == "bad_request");
     r = cmd(sock, {{"cmd", "payload.power_group"}, {"args", {{"group", "cams"}, {"on", true}}}});
     CHECK(r.value("ok", false) && r["data"]["results"]["cam1"]["ok"] == true && r["data"]["results"]["cam2"]["desired_state"] == "running");
     {

@@ -24,6 +24,6 @@
                    "reply": {"type": "object", "additionalProperties": true}, "errors": []},
     "fault.ack": {"description": "사람이 봤다는 표시(조건이 남아 있으면 이상은 그대로)", "operate": true,
                   "args": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
-                  "reply": {"type": "object", "additionalProperties": true}, "errors": ["not_found"]}
+                  "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request"]}
   }
 }

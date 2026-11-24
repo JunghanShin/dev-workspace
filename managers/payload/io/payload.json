@@ -23,10 +23,10 @@
     "payload.power": {"description": "모듈 켜고 끄기(process-manager start·stop 요청). 답은 요청이 받아들여졌는지(desired_state)",
                       "operate": true,
                       "args": {"type": "object", "required": ["module", "on"], "properties": {"module": {"type": "string"}, "on": {"type": "boolean"}}},
-                      "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request", "not_found", "forbidden", "busy"]},
+                      "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request", "forbidden", "busy"]},
     "payload.power_group": {"description": "묶음의 모듈마다 켜고 끄기. 답은 모듈별 결과",
                             "operate": true,
                             "args": {"type": "object", "required": ["group", "on"], "properties": {"group": {"type": "string"}, "on": {"type": "boolean"}}},
-                            "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request", "not_found"]}
+                            "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request"]}
   }
 }

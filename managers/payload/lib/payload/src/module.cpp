@@ -192,7 +192,7 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
     if (group) {
         const std::string g = args.value("group", "");
         if (!mods_->has_group(g)) {
-            reply(worker::error_reply("not_found", "no group " + g + " (config payload.groups)"));
+            reply(worker::error_reply("bad_request", "no group " + g + " (config payload.groups)"));
             return true;
         }
         targets = mods_->members(g);
@@ -203,7 +203,7 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
     } else {
         const std::string id = args.value("module", "");
         if (!mods_->known(id)) {
-            reply(worker::error_reply("not_found", "no module " + id));
+            reply(worker::error_reply("bad_request", "no module " + id));
             return true;
         }
         if (mods_->is_manager(id)) {

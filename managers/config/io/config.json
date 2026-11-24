@@ -19,12 +19,12 @@
     "config.snapshots": {"description": "남긴 스냅숏 목록", "read": true, "args": {"type": "object"}, "reply": {"type": "object", "additionalProperties": true}, "errors": ["busy"]},
     "config.diff": {"description": "그 스냅숏과 지금의 다른 점", "read": true,
                     "args": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
-                    "reply": {"type": "object", "additionalProperties": true}, "errors": ["not_found", "unavailable", "busy"]},
+                    "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request", "unavailable", "busy"]},
     "config.snapshot": {"description": "지금 것을 남김(바꾸는 것 없음)", "operate": true,
                         "args": {"type": "object", "properties": {"label": {"type": "string"}}},
                         "reply": {"type": "object", "additionalProperties": true}, "errors": ["unavailable", "internal", "busy"]},
     "config.restore": {"description": "워커 설정·연결 선언을 스냅숏대로(개발 모드에서만: process-manager가 검사). 워크스페이스 설정 파일은 되돌리지 않음",
                        "args": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "workers": {"type": "array", "items": {"type": "string"}}}},
-                       "reply": {"type": "object", "additionalProperties": true}, "errors": ["not_found", "busy"]}
+                       "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request", "busy"]}
   }
 }

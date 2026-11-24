@@ -200,7 +200,7 @@ static void test_fault() {
     Json r = cmd(sock, {{"cmd", "fault.ack"}, {"args", {{"id", "cam_lost:cam1"}}}});
     CHECK(r.value("ok", false));
     r = cmd(sock, {{"cmd", "fault.ack"}, {"args", {{"id", "nope"}}}});
-    CHECK(r.contains("error") && r["error"]["code"] == "not_found");
+    CHECK(r.contains("error") && r["error"]["code"] == "bad_request");
     // 풀림 → 내림
     cam_fault = 0;
     bool cleared = false;

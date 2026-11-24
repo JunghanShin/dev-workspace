@@ -226,7 +226,7 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
     if (cmd == "ack") {
         const std::string id = args.is_object() ? args.value("id", "") : "";
         if (!engine_->ack(id)) {
-            reply(worker::error_reply("not_found", "no active fault " + id));
+            reply(worker::error_reply("bad_request", "no active fault " + id));
             return true;
         }
         dirty_ = true;
