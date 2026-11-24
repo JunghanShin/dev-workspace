@@ -1,5 +1,5 @@
 # 모듈 record: ① 코어 record_core(플랫폼 기록 규칙·기록 파일·찾기. libworker 모름) ② 모듈 record_module(호스트에 붙임)
-add_library(record_core STATIC core/src/platform.cpp core/src/store.cpp)
+add_library(record_core STATIC core/src/platform.cpp core/src/store.cpp core/src/topics.cpp)
 target_include_directories(record_core PUBLIC core/include ${CMAKE_CURRENT_SOURCE_DIR}/../libworker/third_party)
 target_compile_features(record_core PUBLIC cxx_std_17)
 target_compile_options(record_core PRIVATE -Wall -Wextra -Wpedantic)

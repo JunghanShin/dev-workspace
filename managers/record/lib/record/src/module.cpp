@@ -2,6 +2,7 @@
 
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -10,6 +11,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <set>
 #include <thread>
 
 #include "worker/config.hpp"
@@ -76,13 +79,21 @@ Settings read_settings(const worker::Json& config) {
     s.interval_s = env_num("WORKSPACE_LOGGER_INTERVAL_S", s.interval_s);
     s.max_file_mb = env_num("WORKSPACE_LOGGER_MAX_FILE_MB", s.max_file_mb);
     s.max_total_mb = env_num("WORKSPACE_LOGGER_MAX_TOTAL_MB", s.max_total_mb);
-    worker::check_keys(config, {"dir", "manager_socket", "interval_s", "max_file_mb", "max_total_mb", "fsync_s"});
+    worker::check_keys(config, {"dir", "manager_socket", "interval_s", "max_file_mb", "max_total_mb", "fsync_s", "topics", "exclude"});
     worker::read(config, "dir", s.dir);
     worker::read(config, "manager_socket", s.manager_socket);
     worker::read(config, "interval_s", s.interval_s);
     worker::read(config, "max_file_mb", s.max_file_mb);
     worker::read(config, "max_total_mb", s.max_total_mb);
     worker::read(config, "fsync_s", s.fsync_s);
+    if (config.contains("topics")) s.topics = Json::parse(config["topics"].dump());
+    if (config.contains("exclude")) s.exclude = Json::parse(config["exclude"].dump());
+    try {
+        TopicRules check;
+        check.configure(s.topics, s.exclude);
+    } catch (const std::invalid_argument& e) {
+        throw worker::ConfigError(e.what());
+    }
     worker::require(!s.dir.empty(), "record.dir must not be empty");
     worker::require(s.interval_s > 0, "record.interval_s must be > 0");
     worker::require(s.max_file_mb > 0 && s.max_total_mb >= s.max_file_mb, "record.max_total_mb must be >= max_file_mb > 0");
@@ -93,10 +104,15 @@ Settings read_settings(const worker::Json& config) {
 Module::Module() = default;
 Module::~Module() { stop(); }
 
-void Module::configure(const worker::Json& config) { s_ = read_settings(config); }
+void Module::configure(const worker::Json& config) {
+    s_ = read_settings(config);
+    rules_.configure(s_.topics, s_.exclude);
+}
 
 void Module::start(worker::Host& host) {
+    host_ = &host;
     boot_ = boot_id();
+    if (const char* f = std::getenv("WORKSPACE_INPUTS_FILE"); f && *f) inputs_file_ = f;
     platform_ = std::make_unique<PlatformRecorder>(s_.interval_s);
     file_ = std::make_unique<RecordFile>(s_.dir, static_cast<uint64_t>(s_.max_file_mb * 1048576),
                                          static_cast<uint64_t>(s_.max_total_mb * 1048576), s_.fsync_s, boot_);
@@ -117,16 +133,61 @@ void Module::start(worker::Host& host) {
     write_thread_->start();
     find_thread_->start();
     pm_thread_->start();
+    sync_subs();
 }
 
-void Module::put(const Json& rec) {
-    std::string line = make_line(rec, now_iso(), mono_ns());
+void Module::put(const Json& rec) { put(rec, mono_ns()); }
+
+void Module::put(const Json& rec, int64_t t_mono_ns) {
+    std::string line = make_line(rec, now_iso(), t_mono_ns);
     if (!write_q_.push(std::move(line))) drops_.fetch_add(1);
+}
+
+void Module::sync_subs() {
+    if (inputs_file_.empty() || !host_) return;
+    struct stat st {};
+    const long long mt = ::stat(inputs_file_.c_str(), &st) == 0 ? static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL + st.st_mtim.tv_nsec : -2;
+    if (mt == inputs_mtime_ns_) return;
+    inputs_mtime_ns_ = mt;
+    std::set<std::string> want;
+    if (mt >= 0) {
+        std::ifstream in(inputs_file_);
+        const Json doc = Json::parse(in, nullptr, false);
+        const Json list = doc.is_object() && doc.contains("many") && doc["many"].is_object() && doc["many"].contains("streams")
+                              ? doc["many"]["streams"] : Json::array();
+        for (const auto& x : list.is_array() ? list : Json::array())
+            if (x.is_object() && x.contains("worker") && x["worker"].is_string() && x["worker"] != host_->id())
+                want.insert(x["worker"].get<std::string>());
+    }
+    for (auto it = subs_.begin(); it != subs_.end();) {
+        if (want.count(it->first)) {
+            ++it;
+            continue;
+        }
+        it->second->stop();
+        rules_.forget(it->first);
+        it = subs_.erase(it);
+    }
+    for (const auto& id : want) {
+        if (subs_.count(id)) continue;
+        worker::Subscriber::Options o;
+        o.thread_name = ("rs." + id).substr(0, 15);
+        o.retry_sec = 1.0;
+        auto sub = std::make_unique<worker::Subscriber>(host_->watch(), id, o);
+        sub->start();
+        subs_[id] = std::move(sub);
+    }
+}
+
+void Module::on_timer(worker::TimePoint now) {
+    (void)now;
+    sync_subs();
 }
 
 void Module::add_pollfds(std::vector<pollfd>& fds) {
     fds.push_back({pm_q_.wake_fd(), POLLIN, 0});
     fds.push_back({found_q_.wake_fd(), POLLIN, 0});
+    for (const auto& [id, sub] : subs_) fds.push_back({sub->wake_fd(), POLLIN, 0});
 }
 
 void Module::on_poll(const std::vector<pollfd>& fds, worker::TimePoint now) {
@@ -149,6 +210,19 @@ void Module::drain() {
         case PmEvent::Line:
             for (const auto& r : platform_->handle(ev->msg, mono_s())) put(r);
             break;
+        }
+    }
+    for (auto& [id, sub] : subs_) {
+        while (auto u = sub->next()) {
+            if (u->down) {
+                rules_.forget(id);  // 다시 붙으면 kf부터 바로 남김
+                continue;
+            }
+            const Json topics = Json::parse(u->topics.dump()), events = Json::parse(u->events.dump());
+            for (auto& r : rules_.records(id, topics, events, u->kf, mono_ns())) {
+                (r.rec["type"] == "event" ? events_ : topics_) += 1;
+                put(r.rec, r.t_mono_ns);
+            }
         }
     }
     while (auto res = found_q_.try_pop()) {
@@ -297,6 +371,12 @@ void Module::metrics(worker::Metrics& m) const {
     m.set("pm_link", pm_link_.load());
     m.set("disk_free_mb", disk_free_mb_.load());
     m.set("finds", finds_.load());
+    int up = 0;
+    for (const auto& [id, sub] : subs_) up += sub->connected() ? 1 : 0;
+    m.set("subs", static_cast<long long>(subs_.size()));
+    m.set("subs_up", up);
+    m.set("topics", topics_);
+    m.set("events", events_);
 }
 
 bool Module::failed(std::string* why) const {
@@ -310,6 +390,9 @@ bool Module::failed(std::string* why) const {
 }
 
 void Module::stop() {
+    for (auto& [id, sub] : subs_) sub->stop();
+    if (platform_) drain();  // 구독에서 이미 받은 것도 남긴다
+    subs_.clear();
     if (pm_thread_) {
         pm_thread_->request_stop();
         pm_thread_->join();

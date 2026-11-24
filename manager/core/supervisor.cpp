@@ -956,6 +956,30 @@ std::vector<std::string> Supervisor::restart_changed_inputs() {
     return out;
 }
 
+std::vector<std::string> Supervisor::rewrite_changed_many() {
+    std::vector<std::string> out;
+    if (!many_for || cfg_.inputs_dir.empty()) return out;
+    std::vector<FileOp> ops;
+    for (auto& w : workers_) {
+        if (!w->has_proc() || w->stop_reason || w->spawning) continue;
+        Json now = many_for(w->id);
+        if (!now.is_object()) now = Json::object();
+        if (now == w->many_injected) continue;
+        w->many_injected = now;
+        FileOp in;
+        in.path = cfg_.inputs_dir + "/" + w->id + ".json";
+        Json doc = Json::object();
+        doc["inputs"] = w->inputs_injected;
+        if (!now.empty()) doc["many"] = now;
+        in.text = dump_file(doc);
+        ops.push_back(in);
+        PM_INFO("%s: many inputs changed, inputs file rewritten", w->id.c_str());
+        out.push_back(w->id);
+    }
+    if (!ops.empty()) submit_quiet(std::move(ops), "inputs file");
+    return out;
+}
+
 void Supervisor::apply_resources(const std::map<int, Json>& by_pgid) {
     for (auto& w : workers_) {
         if (!w->has_proc()) continue;
@@ -1032,10 +1056,13 @@ void Supervisor::spawn(Worker& w, const Json& /*t*/) {
     if (!cfg_.inputs_dir.empty()) {
         w.inputs_injected = inputs_for ? inputs_for(w.id) : Json::object();
         if (!w.inputs_injected.is_object()) w.inputs_injected = Json::object();
+        w.many_injected = many_for ? many_for(w.id) : Json::object();
+        if (!w.many_injected.is_object()) w.many_injected = Json::object();
         FileOp in;
         in.path = cfg_.inputs_dir + "/" + w.id + ".json";
         Json doc = Json::object();
         doc["inputs"] = w.inputs_injected;
+        if (!w.many_injected.empty()) doc["many"] = w.many_injected;
         in.text = dump_file(doc);
         ops.push_back(in);
     }

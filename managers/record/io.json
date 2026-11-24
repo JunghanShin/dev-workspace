@@ -1,0 +1,6 @@
+{
+  "provides": [],
+  "uses": {
+    "streams": {"from": "*", "many": true, "description": "기록할 스트림: 자기 말고 모든 워커·매니저(docs/managers.md 5장)"}
+  }
+}

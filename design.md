@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.63 |
+| 문서 버전 | 0.64 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1561,6 +1561,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.61 | **`--io`**(6.6.7.1): libworker 0.12 `worker_io()`·`--io`, 공통 정의를 `lib/libworker/io/common.json`으로 옮김(process-manager `get_io`는 워커의 libworker 사본 것을 먼저). **설정 칸 `unique`**(6.10): process-manager에 박혀 있던 칸 이름 `device_sn` 검사를 걷어내고, 스키마 칸 표시 `"unique": true`로 일반화(묶음 `section` 안도 봄. 예전 검사는 맨 위 키만 봐서 묶음 안 시리얼은 걸리지 않았음). 15장에 모듈화와 별개로 미룬 것 목록 |
 | 0.62 | **매니저 공통 설계**(`docs/managers.md`): 정한 것 ① 6개 모두 공개 저장소(시스템마다 다른 것은 규칙 데이터뿐) ② process-manager가 기본 탑재(`builtin`, `"kind": "manager"`)로 띄움 ③ 역할 명령은 게이트웨이 → mission-manager → 워커(생기기 전까지 바로) ④ 순서 record → status → mission → payload → fault → config. 함께 정함: 폴더 `managers/<용도>/`, 운용 모드에서 매니저 정지 막음, 여러 워커 입력 `uses` `many: true`, mission 다시 켜지는 중 `unavailable`, `from` + `origin`, mission은 허용 목록에 자동. 그림 `docs/managers.svg`(배치·외부 연동 워커 입구)·`docs/managers-inside.svg`(매니저 안 큐 구조) |
 | 0.63 | **record-manager 기본 탑재**(`managers/record/design.md` 4장 1~2단계): process-manager가 `managers/*/worker-types.json`도 기본 탑재로 찾고 상태에 `kind`(worker·manager), 운용 모드에서 매니저 정지·설정 바꾸기 `forbidden`(`need: development`), 끌 때 type `stop_order` 순서(워커 0 → 매니저 1 → record 2). 시작 셸은 Python logger를 띄우지 않음(PC `workspace-dev.sh`는 매니저를 저장소 안 `build/`에 빌드). 제품 묶음에 매니저 실행 파일. `dev/release-worker.sh record` |
+| 0.64 | **여러 워커 입력 `many`**(`docs/managers.md` 5장): `io.json` `uses`의 `"many": true`(`"from": "*"`이면 자기 말고 모두) → process-manager가 검사를 통과한 워커 목록을 입력 파일 `"many"` 칸에(예전 libworker 보호), 상태 `inputs`에 `how: "many"`. 목록만 바뀌면 다시 시작하지 않고 파일만 다시 씀. record-manager 3단계: 워커·매니저 스트림의 주제(규칙 `topics`·`exclude`, 솎기, kf는 늘)·이벤트(모두)를 `topic`·`event` 줄로 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

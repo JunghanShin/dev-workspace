@@ -53,6 +53,7 @@ WorkerIo worker_io_from(const Json& io, const Json& config) {
             e.commands = list_of(u, "commands");
             e.data = list_of(u, "data");
             e.required = u.value("required", false);
+            e.many = u.value("many", false);
             w.uses[input] = e;
         }
     if (io.contains("provides") && io["provides"].is_object())
@@ -106,9 +107,40 @@ InputResolution resolve_connections(const Json& connections, const std::map<std:
     for (const auto& [id, w] : workers) {
         Json st = Json::object();
         Json inj = Json::object();
+        Json many = Json::object();
         for (const auto& [input, u] : w.uses) {
             Json e = Json::object();
             e["required"] = u.required;
+            if (u.many) {  // 여러 워커: 내보내는 워커 전부(검사 통과만). "*"이면 자기 말고 모두
+                Json list = Json::array(), from = Json::array(), skipped = Json::object();
+                for (const auto& [pid, p] : workers) {
+                    if (pid == id) continue;
+                    if (u.role != "*") {
+                        const auto pr = p.provides.find(u.role);
+                        if (pr == p.provides.end()) continue;
+                        bool lacks = false;
+                        for (const auto& t : u.topics) lacks |= !pr->second.topics.count(t);
+                        if (!u.version.empty() && !version_compatible(u.version, pr->second.version)) {
+                            skipped[pid] = u.role + " " + pr->second.version + " does not match " + u.version;
+                            continue;
+                        }
+                        if (lacks) {
+                            skipped[pid] = "lacks topics";
+                            continue;
+                        }
+                    }
+                    list.push_back(Json{{"worker", pid}});
+                    from.push_back(pid);
+                }
+                e["from"] = from;
+                e["how"] = "many";
+                e["ok"] = !(u.required && list.empty());
+                e["error"] = u.required && list.empty() ? Json("required input not connected") : Json(nullptr);
+                if (!skipped.empty()) e["skipped"] = skipped;
+                many[input] = list;
+                st[input] = e;
+                continue;
+            }
             std::string from, how, error;
             const auto d = declared.find(id + "." + input);
             if (d != declared.end()) {
@@ -160,6 +192,7 @@ InputResolution resolve_connections(const Json& connections, const std::map<std:
         }
         r.status[id] = st;
         r.inject[id] = inj;
+        if (!many.empty()) r.many[id] = many;
     }
     return r;
 }

@@ -97,6 +97,9 @@ App::App(AppConfig cfg, Supervisor& sup, StoreThread& store, Publisher& pub, Res
     sup_.inputs_status = [this](const std::string& id) {
         return inputs_res_.status.contains(id) ? inputs_res_.status[id] : Json::object();
     };
+    sup_.many_for = [this](const std::string& id) {
+        return inputs_res_.many.contains(id) ? inputs_res_.many[id] : Json::object();
+    };
 }
 
 App::~App() {
@@ -262,11 +265,12 @@ void App::write_peers(bool force) {
 
 void App::resolve_inputs() {
     InputResolution r = resolve_connections(connections_.value("connections", Json()), ios_);
-    const bool changed = r.inject != inputs_res_.inject || r.status != inputs_res_.status;
+    const bool changed = r.inject != inputs_res_.inject || r.status != inputs_res_.status || r.many != inputs_res_.many;
     inputs_res_ = std::move(r);
     if (!changed) return;
     for (const auto& e : inputs_res_.errors) PM_WARN("connections: %s", py_str(e).c_str());
     sup_.restart_changed_inputs();  // 넣어 줄 주소가 바뀐 워커만(설정 바뀜과 같음, 6.6.7.4)
+    sup_.rewrite_changed_many();    // 여러 워커 입력 목록만 바뀐 워커: 파일만(docs/managers.md 5장)
 }
 
 Json App::connections_view() {

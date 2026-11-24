@@ -8,6 +8,10 @@
 // 검사(선언·자동): 상대가 그 역할을 내보내나, 버전이 이어지나(같은 큰 버전, 상대 작은 버전 ≥ 사본),
 // 쓰는 주제·명령·데이터가 상대 정의에 있나. 틀리면 그 입력만 오류(주소를 넣지 않음), 워커 기동은 막지 않는다.
 // 통로를 만들거나 데이터를 나르지 않는다(이름을 풀고 검사할 뿐).
+//
+// 여러 워커 입력(docs/managers.md 5장): uses에 "many": true면 그 역할을 내보내는 워커 전부("from": "*"이면 자기 말고
+// 모든 워커)를 목록으로. 버전·주제 검사를 통과한 것만 넣는다. 주소는 inject가 아니라 many 칸(예전 libworker가
+// 목록을 몰라 파일을 버리지 않게, run/inputs/<id>.json "many"). 목록이 바뀌어도 워커를 다시 시작하지 않는다
 #pragma once
 
 #include <map>
@@ -22,6 +26,7 @@ struct UsesEntry {
     std::string role, version;
     std::set<std::string> topics, commands, data;
     bool required = false;
+    bool many = false;  // 여러 워커(목록)
 };
 
 struct ProvidedRole {
@@ -44,6 +49,7 @@ bool version_compatible(const std::string& uses, const std::string& provided);
 struct InputResolution {
     Json status = Json::object();  // 워커 → {입력 → {from, how, ok, error, required}}
     Json inject = Json::object();  // 워커 → {입력 → {"worker": 상대}}(선언·자동 중 검사 통과만)
+    Json many = Json::object();    // 워커 → {입력 → [{"worker": 상대}, ...]}(many 입력)
     Json errors = Json::array();   // 선언 자체의 오류(없는 워커·입력, 같은 입력에 둘)
 };
 

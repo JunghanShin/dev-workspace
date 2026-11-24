@@ -2,6 +2,7 @@
 //   1) start → connected → worker(바뀜·간격)·command·system → SIGTERM → stop, exit 0. 줄 모양은 예전 logger와 같음
 //   2) process-manager가 끊김 → disconnected 한 줄, 다시 붙으면 connected
 //   3) 잘못된 설정·모르는 키 → exit 1
+//   4) 여러 워커 입력(입력 파일 many.streams): 워커 스트림의 주제(솎기·kf)·이벤트를 남기고, 목록에서 빠지면 구독을 끊음
 //
 //   test_worker [에뮬레이터...] <record-manager 경로>
 #include <poll.h>
@@ -73,7 +74,7 @@ static void send_line(int fd, const std::string& s) {
     (void)!write(fd, l.data(), l.size());
 }
 
-static pid_t spawn(const std::string& config) {
+static pid_t spawn(const std::string& config, const std::vector<std::pair<std::string, std::string>>& env = {}) {
     const std::string path = g_dir + "/config.json";
     std::ofstream(path) << config;
     const pid_t pid = fork();
@@ -85,6 +86,8 @@ static pid_t spawn(const std::string& config) {
         argv.push_back(nullptr);
         unsetenv("WORKSPACE_DATA");
         unsetenv("NOTIFY_SOCKET");
+        unsetenv("WORKSPACE_INPUTS_FILE");
+        for (const auto& [k, v] : env) setenv(k.c_str(), v.c_str(), 1);
         execvp(argv[0], argv.data());  // 에뮬레이터는 이름만 올 수 있다(PATH에서 찾음)
         _exit(127);
     }
@@ -194,10 +197,59 @@ static void test_reconnect() {
     CHECK(count(rs, "logger", "disconnected") == 1);
 }
 
+static void write_inputs(const std::string& path, const std::string& many) {
+    const std::string tmp = path + ".tmp";
+    std::ofstream(tmp) << R"({"inputs": {}, "many": {"streams": )" + many + "}}";
+    ::rename(tmp.c_str(), path.c_str());
+}
+
+static void test_streams() {
+    const std::string data = g_dir + "/data", rec = g_dir + "/rec4", pm = g_dir + "/pm4.sock", inputs = g_dir + "/inputs.json";
+    (void)!std::system(("mkdir -p " + data + "/run/stream").c_str());
+    const int pfd = listen_unix(pm);
+    const int sfd = listen_unix(data + "/run/stream/cam1.sock");
+    CHECK(pfd >= 0 && sfd >= 0);
+    write_inputs(inputs, R"([{"worker": "cam1"}, {"worker": "record-manager"}])");  // 자기 자신은 뺀다
+    const pid_t pid = spawn(config(rec, pm), {{"WORKSPACE_DATA", data}, {"WORKSPACE_INPUTS_FILE", inputs}});
+    const int pc = accept_for(pfd, 15000);
+    read_line(pc, 10000);
+    send_line(pc, R"({"ok":true})");
+    const int sc = accept_for(sfd, 15000);
+    CHECK(sc >= 0);
+    send_line(sc, R"({"seq":1,"kf":true,"t":1.0,"topics":{"camera":{"fps":30,"t_mono_ns":123},"mount":{"yaw":2}},)"
+                  R"("events":[{"t_mono_ns":99,"source":"cam1.link","severity":"warning","code":"link_down","text":"x"}]})");
+    send_line(sc, R"({"seq":2,"kf":false,"t":1.1,"topics":{"camera":{"fps":29}}})");  // 간격(1 s) 안: 안 남김
+    std::this_thread::sleep_for(1000ms);
+    // 목록에서 빠짐 → 1 s 안에 파일을 다시 읽고 구독을 끊는다(상대 쪽에서 끊김이 보임)
+    write_inputs(inputs, "[]");
+    char c;
+    pollfd p{sc, POLLIN, 0};
+    bool closed = false;
+    for (int i = 0; i < 60 && !closed; ++i)
+        if (poll(&p, 1, 100) > 0) closed = read(sc, &c, 1) == 0;
+    CHECK(closed);
+    kill(pid, SIGTERM);
+    CHECK(wait_exit(pid, 15000) == 0);
+    close(sc);
+    close(pc);
+    close(sfd);
+    close(pfd);
+    const auto rs = records(rec);
+    CHECK(count(rs, "topic") == 2);
+    CHECK(count(rs, "event") == 1);
+    for (const auto& r : rs) {
+        if (!r.is_object()) continue;
+        if (r.value("type", "") == "topic" && r.value("topic", "") == "camera")
+            CHECK(r["t_mono_ns"] == 123 && r["src"] == "cam1" && r["kf"] == true && r["v"]["fps"] == 30);
+        if (r.value("type", "") == "event") CHECK(r["t_mono_ns"] == 99 && r["v"]["code"] == "link_down");
+    }
+}
+
 static void test_bad_config() {
     const std::string rec = g_dir + "/rec3";
     CHECK(wait_exit(spawn(config(rec, "/nonexistent.sock", R"(,"nope":1)")), 15000) == 1);
     CHECK(wait_exit(spawn(config(rec, "/nonexistent.sock", R"(,"max_total_mb":1,"max_file_mb":5)")), 15000) == 1);
+    CHECK(wait_exit(spawn(config(rec, "/nonexistent.sock", R"(,"topics":[{"interval_ms":5}])")), 15000) == 1);
 }
 
 int main(int argc, char** argv) {
@@ -211,6 +263,7 @@ int main(int argc, char** argv) {
     signal(SIGPIPE, SIG_IGN);
     test_basic();
     test_reconnect();
+    test_streams();
     test_bad_config();
     (void)!std::system(("rm -rf " + g_dir).c_str());
     if (failures) {

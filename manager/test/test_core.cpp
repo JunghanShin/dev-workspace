@@ -814,6 +814,30 @@ TEST(connections_resolve) {
     CHECK_EQ(r.status["cam"]["need"]["error"], Json("required input not connected"));
 }
 
+TEST(connections_many) {
+    // 여러 워커 입력(docs/managers.md 5장): 역할 하나를 내보내는 워커 전부, "*"이면 자기 말고 모두. 주소는 many 칸
+    auto w = conn_workers();
+    w["loc2"] = pm::worker_io_from(J(R"({"provides": {"position": {"version": "2.0", "topics": {"pose": {}}}}})"), Json::object());
+    w["rec"] = pm::worker_io_from(J(R"({"uses": {"streams": {"from": "*", "many": true},
+                                                   "pos": {"from": "position", "version": "1.0", "many": true}}})"),
+                                  Json::object());
+    auto r = pm::resolve_connections(Json(), w);
+    CHECK_EQ(r.many["rec"]["streams"], J(R"([{"worker": "cam"}, {"worker": "loc"}, {"worker": "loc2"}])"));
+    CHECK_EQ(r.many["rec"]["pos"], J(R"([{"worker": "loc"}])"));  // loc2는 큰 버전이 달라 뺌
+    CHECK_EQ(r.status["rec"]["pos"]["how"], Json("many"));
+    CHECK_EQ(r.status["rec"]["pos"]["from"], J(R"(["loc"])"));
+    CHECK(r.status["rec"]["pos"]["skipped"].contains("loc2"));
+    CHECK_EQ(r.status["rec"]["streams"]["ok"], Json(true));
+    CHECK_EQ(r.inject["rec"], Json::object());  // inputs 칸에는 넣지 않음(예전 libworker 보호)
+    CHECK(!r.many.contains("cam"));
+    // 필수인데 아무도 없으면 ok false
+    w["rec"].uses["pos"].required = true;
+    w.erase("loc");
+    r = pm::resolve_connections(Json(), w);
+    CHECK_EQ(r.many["rec"]["pos"], Json::array());
+    CHECK_EQ(r.status["rec"]["pos"]["ok"], Json(false));
+}
+
 TEST(peers_commands_from_io) {
     const auto w = peer_workers();
     CHECK_EQ(w.at("siyi").read, (std::set<std::string>{"get_status", "diag.dump", "tap.info", "gimbal.get"}));

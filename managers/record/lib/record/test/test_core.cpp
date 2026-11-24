@@ -12,6 +12,7 @@
 
 #include "record/platform.hpp"
 #include "record/store.hpp"
+#include "record/topics.hpp"
 
 using record::Json;
 
@@ -150,7 +151,48 @@ static void test_find() {
     (void)!std::system(("rm -rf " + dir).c_str());
 }
 
+static void test_topics() {
+    record::TopicRules r;  // 기본: 모든 주제 1 s에 하나
+    const int64_t s = 1000000000;
+    auto t = Json::parse(R"({"camera":{"fps":30,"t_mono_ns":777},"mount":{"yaw":1}})");
+    auto ev = Json::parse(R"([{"t_mono_ns":555,"source":"cam1.link","severity":"warning","code":"link_down","text":"x"}])");
+    auto out = r.records("cam1", t, ev, false, 10 * s);
+    CHECK(out.size() == 3);
+    CHECK(out[0].rec.dump() == R"({"type":"topic","src":"cam1","topic":"camera","v":{"fps":30,"t_mono_ns":777}})");
+    CHECK(out[0].t_mono_ns == 777);        // 잰 시각
+    CHECK(out[1].t_mono_ns == 10 * s);     // 없으면 받은 시각
+    CHECK(out[2].rec["type"] == "event" && out[2].t_mono_ns == 555);
+    // 간격 안: 주제는 안 남기고 이벤트는 모두
+    out = r.records("cam1", t, ev, false, 10 * s + s / 2);
+    CHECK(out.size() == 1 && out[0].rec["type"] == "event");
+    // kf는 늘(표시 kf)
+    out = r.records("cam1", t, Json::array(), true, 10 * s + s / 2 + 1);
+    CHECK(out.size() == 2 && out[0].rec["kf"] == true);
+    // 간격 지남
+    CHECK(r.records("cam1", t, Json(), false, 12 * s).size() == 2);
+    // 다른 보낸 곳은 따로
+    CHECK(r.records("cam2", t, Json(), false, 12 * s).size() == 2);
+    // forget: 다시 붙으면 바로
+    r.forget("cam1");
+    CHECK(r.records("cam1", t, Json(), false, 12 * s + 1).size() == 2);
+    // 규칙: 위에서부터 처음 맞는 것, 0이면 모두, exclude
+    r.configure(Json::parse(R"([{"match":"*.camera","interval_ms":0},{"match":"cam1.*","interval_ms":2000}])"),
+                Json::parse(R"(["*.secret"])"));
+    CHECK(r.take("cam1", "camera", 1, false) && r.take("cam1", "camera", 2, false));
+    CHECK(r.take("cam1", "mount", s, false) && !r.take("cam1", "mount", 2 * s, false) && r.take("cam1", "mount", 3 * s, false));
+    CHECK(!r.take("cam1", "secret", 5 * s, true));
+    CHECK(!r.take("cam9", "mount", 5 * s, false));  // 어느 규칙에도 안 맞음
+    bool threw = false;
+    try {
+        r.configure(Json::parse(R"([{"match":1}])"), Json());
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
 int main() {
+    test_topics();
     test_platform();
     test_line();
     test_file();

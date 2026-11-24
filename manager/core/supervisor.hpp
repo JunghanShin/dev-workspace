@@ -99,6 +99,7 @@ struct Worker {
     Json metrics, resources;
     bool spawning = false;       // 설정 파일 쓰기를 기다리는 중(이 동안 다시 띄우지 않음)
     Json inputs_injected = Json::object();  // 마지막으로 띄울 때 넣어 준 입력 주소(바뀌면 다시 시작)
+    Json many_injected = Json::object();    // 마지막으로 파일에 쓴 여러 워커 입력 목록(바뀌면 파일만 다시)
 
     bool has_proc() const { return pid > 0; }
 };
@@ -120,6 +121,7 @@ public:
     // 입력 연결(design.md 6.6.7.4, App이 연결 선언·계약으로 푼 것): 띄울 때 넣어 줄 주소, 상태의 inputs
     std::function<Json(const std::string& id)> inputs_for;
     std::function<Json(const std::string& id)> inputs_status;
+    std::function<Json(const std::string& id)> many_for;  // 여러 워커 입력 목록(run/inputs/<id>.json "many")
 
     // ---- 조회(ApiError) ----
     Json list();
@@ -148,6 +150,8 @@ public:
     std::vector<std::string> ids() const;           // 등록된 워커 id(순서대로)
     // 입력 주소가 띄울 때와 달라진 떠 있는 워커를 다시 시작한다(설정 바뀜과 같음). 다시 시작한 워커 id
     std::vector<std::string> restart_changed_inputs();
+    // 여러 워커 입력 목록만 바뀐 떠 있는 워커: 입력 파일만 다시 쓴다(다시 시작하지 않음, 워커가 파일을 다시 읽음)
+    std::vector<std::string> rewrite_changed_many();
     Json config_of(const std::string& id) const;    // 지금 설정(없으면 빈 객체)
 
     // ---- 끝내기(desired_state는 그대로 두어 다시 시작하면 복원) ----

@@ -102,7 +102,7 @@
 
 1. record-manager가 `worker`·`removed`·`command`·`system`·`logger` 종류를 지금 logger와 같은 모양으로 씀. PC에서 둘을 나란히 돌려 줄을 비교(시험) — **됨(2026-11-24)**: `test_compare.py`(시각만 빼고 글자 그대로 같음), 단위·통합 시험·TSan
 2. 시작 셸이 logger를 띄우지 않음. 게이트웨이 `/history` 시험 그대로 통과 확인 — **됨(2026-11-24, 0.63)**: 기본 탑재(`worker-types.json`, `kind: manager`, `stop_order: 2`), process-manager 수락 시험 `test_managers`. 보드 확인(2026-11-24): 떠 있음(RSS 3.6 MB, 스레드 4), 같은 파일에 이어 씀, `/history` 그대로. 끌 때 순서는 다음 재시작 때
-3. `topic`·`event` 종류 추가(`many` 입력 구현과 함께, process-manager 쪽)
+3. `topic`·`event` 종류 추가(`many` 입력 구현과 함께, process-manager 쪽) — **됨(2026-11-24, 0.64)**: `io.json` `uses.streams`(`from: "*"`, `many`), 구독 스레드 `rs.<id>`, 규칙 `topics`·`exclude`. 단위·통합 시험(가짜 워커 스트림, 목록에서 빠지면 구독 끊음)
 4. Python logger 삭제, 환경 변수 정리, 보드 확인
 
 ## 5. 끝날 때

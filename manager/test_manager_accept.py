@@ -1012,6 +1012,21 @@ class Accept(unittest.TestCase):
         e.ok({"op": "start", "id": "mgr"})
         e.wait_state("mgr", "running")
         e.ok({"op": "set_access_mode", "mode": "operation"})
+        # 여러 워커 입력(docs/managers.md 5장): rec의 io.json uses many → 입력 파일 "many"(자기 말고 모두), 상태 inputs
+        self.assertEqual(read_json(os.path.join(e.data, "run", "inputs", "rec.json")).get("many"), None)  # io.json 전
+        write_json(os.path.join(e.root, "managers", "rec", "io.json"),
+                   {"provides": [], "uses": {"streams": {"from": "*", "many": True}}})
+        e.ok({"op": "set_access_mode", "mode": "development"})
+        e.ok({"op": "stop", "id": "rec"})
+        e.wait_state("rec", "stopped")
+        e.ok({"op": "start", "id": "rec"})  # 계약은 주기마다 다시 읽음: 다시 띄울 때 들어감
+        e.ok({"op": "set_access_mode", "mode": "operation"})
+        def many():
+            d = read_json(os.path.join(e.data, "run", "inputs", "rec.json"))
+            return d.get("many") if d and e.status("rec")["actual_state"] == "running" else None
+        self.assertEqual(wait_for(many, 20), {"streams": [{"worker": "mgr"}, {"worker": "w"}]})
+        st = e.status("rec")["inputs"]["streams"]
+        self.assertEqual((st["how"], st["from"], st["ok"]), ("many", ["mgr", "w"], True))
         # 끌 때: 워커 → 매니저 → rec(stop_order 2)
         e.stop()
         t = {n: [x["t"] for x in e.events(n) if x["ev"] == "stop"][-1] for n in ("w", "mgr", "rec")}

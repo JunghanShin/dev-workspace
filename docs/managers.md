@@ -94,10 +94,13 @@
 워커의 입력(`io.json` `uses`)은 입력 하나에 상대 하나다. 매니저는 "이 역할을 내보내는 워커 **전부**"를 받아야 한다(status·record는 거의 모든 역할). 그래서 입력에 하나를 더한다.
 
 ```json
-{"uses": {"camera": {"definition": "camera", "version": "1.0", "many": true}}}
+{"uses": {"camera": {"from": "camera", "version": "1.0", "many": true},
+          "streams": {"from": "*", "many": true}}}
 ```
 
-- `many: true`: process-manager가 그 역할을 내보내는 워커를 모두 찾아 주소 목록으로 넣어 준다(`inputs.camera = [{"worker": "cam1"}, {"worker": "cam2"}]`). 워커가 늘거나 줄면 매니저를 다시 시작하지 않고 목록만 다시 알린다(SIGHUP 또는 파일 다시 읽기)
+- `many: true`: process-manager가 그 역할을 내보내는 워커를 모두 찾아(버전·주제 검사를 통과한 것만, `"from": "*"`이면 자기 말고 모든 워커) 주소 목록을 넣어 준다. 목록은 입력 파일(`run/inputs/<id>.json`)의 **`"many"` 칸**에 따로 둔다: `{"inputs": {...}, "many": {"camera": [{"worker": "cam1"}, {"worker": "cam2"}]}}`. `"inputs"` 칸에 목록을 넣으면 예전 libworker가 파일 전체를 버리기 때문이다(구현 0.64)
+- 워커가 늘거나 줄면 매니저를 다시 시작하지 않고 파일만 다시 쓴다. 매니저는 1 s마다 파일이 바뀌었나 보고 구독을 더하고 뺀다(record-manager). 상태 `inputs`에는 `how: "many"`, `from: [목록]`, 검사에서 뺀 것은 `skipped`
+- libworker에는 아직 읽는 도구가 없다(record-manager가 직접 읽음). 둘째 매니저(status)를 만들 때 libworker로 옮긴다
 - 매니저는 목록의 워커마다 `Subscriber`를 하나씩 만든다. 받은 줄에는 어느 워커에서 왔는지 붙는다
 - 워커 쪽은 바뀌는 것이 없다(구독자가 하나 더 붙을 뿐)
 
