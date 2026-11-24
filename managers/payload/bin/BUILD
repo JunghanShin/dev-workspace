@@ -1,6 +1,6 @@
 # payload 워커 실행 파일(Jetson aarch64). dev/release-worker.sh가 만든다. 손으로 고치지 않는다
-source_commit: bb6dd5c
+source_commit: 3cad9b8
 build_env: jetson-dev 2.1
-built: 2026-11-24 14:33
+built: 2026-11-24 15:29
 sha256:
-  c0cb62a94cb80e54ce082b4804eac225f978e6cbb6660d0962d34b08d0fa9c05  payload-manager
+  3882a0adacdcd9b19aba0bf4f956a8685f811c0de4c5bebd6398494e6268fc30  payload-manager
