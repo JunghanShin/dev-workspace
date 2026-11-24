@@ -1,9 +1,8 @@
-| 0.61 | **`--io`**(6.6.7.1): libworker 0.12 `worker_io()`·`--io`, 공통 정의를 `lib/libworker/io/common.json`으로 옮김(process-manager `get_io`는 워커의 libworker 사본 것을 먼저). **설정 칸 `unique`**(6.10): process-manager에 박혀 있던 칸 이름 `device_sn` 검사를 걷어내고, 스키마 칸 표시 `"unique": true`로 일반화(묶음 `section` 안도 봄. 예전 검사는 맨 위 키만 봐서 묶음 안 시리얼은 걸리지 않았음). 15장에 모듈화와 별개로 미룬 것 목록 |
 # 워크스페이스 설계서
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.61 |
+| 문서 버전 | 0.62 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -168,6 +167,8 @@
 6개 모두 어느 시스템에나 들어가는 기본 매니저다(워크스페이스는 공용 개발 플랫폼, 특정 장비 전용이 아님). 장비·시스템마다 다른 것은 규칙 데이터(프로파일, 원칙 18)뿐이고, 그것은 프로젝트 저장소에 둔다
 
 매니저도 워커와 같은 프로세스 계약(9장)을 따른다. 이름은 `<용도>-manager`이고, 이 문서에서 "Manager"는 process-manager를 뜻한다.
+
+**매니저 공통 틀(0.62, `docs/managers.md`):** 매니저는 워커와 같은 틀(libworker 호스트 + 모듈)로 만들고 공개 저장소에 둔다. process-manager가 기본 탑재로 늘 띄우고 감시한다. 역할 명령은 게이트웨이 → mission-manager → 워커로 가며, mission-manager가 생기기 전까지는 게이트웨이가 바로 보낸다. 만드는 순서는 record → status → mission → payload → fault → config.
 
 ## 5. 설계 원칙
 
@@ -1537,6 +1538,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 설치·사용법, 프로필 만들기 | README.md, install/README.md |
 | 데이터 폴더 설정 파일 하나하나 | docs/config.md |
 | 계층과 매니저(규칙·책임·순서) | docs/layers.md |
+| 매니저 공통 틀(배치·입력·명령 길) | docs/managers.md |
 | 화면 패널 만들기, 디자인 규칙 | ui/README.md |
 | 새 워커·모듈 만들기 | workers/_template/README.md |
 | libworker API | workers/_template/lib/libworker/README.md |
@@ -1555,6 +1557,8 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.58 | **Python 판 process-manager 삭제**: 시작 셸은 C++ 실행 파일만(없으면 끝냄, `manager_impl` 없어짐), `manager/workspace_manager/`·`test_notify_race.py` 삭제, 수락 시험은 C++ 전용(`MANAGER_BIN` 없으면 건너뜀), 저장소 설정 점검 `test_schema.py`는 기준 코드 `manager/reference_schema.py`로 |
 | 0.59 | **연결 화면**(6.6.7.4): 공용 패널 `connections`(설정 묶음): 연결 그림, 입력마다 상대 고르기(자동·내보내는 워커, 저장은 `PUT /connections`, 개발 모드에서만), 명령하는 곳 보기. 서버 기능은 더하지 않음(있는 경로만) |
 | 0.60 | **시스템 모니터 C++**(`monitor/`, 설계 `monitor/design.md`): Python sysmon을 libworker 워커로(코어 `lib/sysmon/core`는 libworker 없음, tegrastats 해석은 옛 정규식 그대로·같은 입력 3008줄에서 출력 글자까지 같음). 확정 실행 파일 `monitor/bin/sysmon`(`dev/release-worker.sh monitor`), 제품 묶음은 Nuitka 대신 이 실행 파일. 지표 이름·뜻 그대로. 설정은 `{"sysmon": {"interval_ms"}}`(옛 맨 위 `interval_ms`도 읽음). logger는 record-manager 때 정리 |
+| 0.61 | **`--io`**(6.6.7.1): libworker 0.12 `worker_io()`·`--io`, 공통 정의를 `lib/libworker/io/common.json`으로 옮김(process-manager `get_io`는 워커의 libworker 사본 것을 먼저). **설정 칸 `unique`**(6.10): process-manager에 박혀 있던 칸 이름 `device_sn` 검사를 걷어내고, 스키마 칸 표시 `"unique": true`로 일반화(묶음 `section` 안도 봄. 예전 검사는 맨 위 키만 봐서 묶음 안 시리얼은 걸리지 않았음). 15장에 모듈화와 별개로 미룬 것 목록 |
+| 0.62 | **매니저 공통 설계**(`docs/managers.md`): 정한 것 ① 6개 모두 공개 저장소(시스템마다 다른 것은 규칙 데이터뿐) ② process-manager가 기본 탑재(`builtin`, `"kind": "manager"`)로 띄움 ③ 역할 명령은 게이트웨이 → mission-manager → 워커(생기기 전까지 바로) ④ 순서 record → status → mission → payload → fault → config. 함께 정함: 폴더 `managers/<용도>/`, 운용 모드에서 매니저 정지 막음, 여러 워커 입력 `uses` `many: true`, mission 다시 켜지는 중 `unavailable`, `from` + `origin`, mission은 허용 목록에 자동. 그림 `docs/managers.svg`(배치·외부 연동 워커 입구)·`docs/managers-inside.svg`(매니저 안 큐 구조) |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

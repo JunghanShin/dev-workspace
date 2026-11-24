@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="620" viewBox="0 0 900 620" role="img" font-family="'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif">
+<title>매니저 배치와 데이터 흐름</title>
+<desc>화면과 외부 운용은 게이트웨이로 요청하고, 게이트웨이는 역할 명령을 mission-manager로 보낸다. 외부 장비의 명령은 외부 연동 워커가 역할 명령으로 바꿔 같은 mission-manager로 보낸다(허용 목록). mission-manager가 워커에 명령하고 응답을 받는다. 워커의 역할 주제와 이벤트는 status, record, fault, payload가 구독한다. fault는 mission에 비상 대응을 요청하고, mission과 payload는 서로 요청한다. payload는 process-manager에 모듈(워커) 켜고 끄기를 요청한다. config는 규칙 데이터를 관리한다. process-manager는 모든 매니저와 워커를 띄우고 감시한다</desc>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="0" y="0" width="900" height="620" fill="#ffffff"/>
+
+<!-- 위층 -->
+<rect x="50" y="30" width="200" height="54" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+<text x="150" y="53" text-anchor="middle" font-size="13" font-weight="500" fill="#444441">화면 · 외부 운용</text>
+<text x="150" y="72" text-anchor="middle" font-size="10.5" fill="#5F5E5A">요청만, 판단 없음</text>
+<rect x="365" y="30" width="170" height="54" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8"/>
+<text x="450" y="53" text-anchor="middle" font-size="13" font-weight="500" fill="#444441">게이트웨이</text>
+<text x="450" y="72" text-anchor="middle" font-size="10.5" fill="#5F5E5A">신분 · 모드 · from</text>
+<line x1="250" y1="57" x2="363" y2="57" stroke="#5F5E5A" stroke-width="1.2" marker-end="url(#a)"/>
+<text x="306" y="50" text-anchor="middle" font-size="10.5" fill="#5F5E5A">HTTP</text>
+<rect x="640" y="30" width="180" height="54" rx="10" fill="#FAECE7" stroke="#993C1D" stroke-width="0.8"/>
+<text x="730" y="53" text-anchor="middle" font-size="13" font-weight="500" fill="#712B13">외부 연동 워커</text>
+<text x="730" y="72" text-anchor="middle" font-size="10.5" fill="#993C1D">외부 프로토콜 ↔ 역할 명령</text>
+<line x1="895" y1="57" x2="822" y2="57" stroke="#993C1D" stroke-width="1.2" marker-end="url(#a)"/>
+<text x="858" y="50" text-anchor="middle" font-size="10.5" fill="#993C1D">외부 장비</text>
+<polyline points="730,84 730,124 520,124 520,148" fill="none" stroke="#534AB7" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="738" y="106" font-size="10.5" fill="#3C3489">역할 명령(허용 목록)</text>
+
+<!-- 매니저 영역 -->
+<rect x="30" y="118" width="840" height="240" rx="16" fill="none" stroke="#534AB7" stroke-width="1.2" stroke-dasharray="6 4"/>
+<text x="46" y="138" font-size="12.5" font-weight="500" fill="#3C3489">매니저 6개 (기능 평면 · 판단 · 공개 저장소 · C++ · libworker 틀)</text>
+
+<rect x="50" y="150" width="170" height="56" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+<text x="135" y="173" text-anchor="middle" font-size="13" font-weight="500" fill="#3C3489">fault-manager</text>
+<text x="135" y="192" text-anchor="middle" font-size="10.5" fill="#534AB7">이상 판단 · 대응 요청</text>
+
+<rect x="365" y="150" width="170" height="56" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.4"/>
+<text x="450" y="173" text-anchor="middle" font-size="13" font-weight="500" fill="#3C3489">mission-manager</text>
+<text x="450" y="192" text-anchor="middle" font-size="10.5" fill="#534AB7">명령 송수신 · 순서 · 모드</text>
+
+<rect x="680" y="150" width="170" height="56" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+<text x="765" y="173" text-anchor="middle" font-size="13" font-weight="500" fill="#3C3489">payload-manager</text>
+<text x="765" y="192" text-anchor="middle" font-size="10.5" fill="#534AB7">들어간 모듈 운용</text>
+
+<rect x="50" y="280" width="170" height="56" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+<text x="135" y="303" text-anchor="middle" font-size="13" font-weight="500" fill="#3C3489">config-manager</text>
+<text x="135" y="322" text-anchor="middle" font-size="10.5" fill="#534AB7">규칙 데이터 · 검증 · 백업</text>
+
+<rect x="250" y="280" width="170" height="56" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+<text x="335" y="303" text-anchor="middle" font-size="13" font-weight="500" fill="#3C3489">status-manager</text>
+<text x="335" y="322" text-anchor="middle" font-size="10.5" fill="#534AB7">시스템 상태 하나 · 모두 구독</text>
+
+<rect x="680" y="280" width="170" height="56" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8"/>
+<text x="765" y="303" text-anchor="middle" font-size="13" font-weight="500" fill="#3C3489">record-manager</text>
+<text x="765" y="322" text-anchor="middle" font-size="10.5" fill="#534AB7">같은 시간축 기록 · 찾기</text>
+
+<!-- 게이트웨이 → mission -->
+<line x1="450" y1="84" x2="450" y2="148" stroke="#534AB7" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="442" y="108" text-anchor="end" font-size="10.5" fill="#3C3489">역할 명령(from 그대로)</text>
+
+<!-- fault → mission -->
+<line x1="220" y1="168" x2="363" y2="168" stroke="#534AB7" stroke-width="1.2" marker-end="url(#a)"/>
+<text x="292" y="161" text-anchor="middle" font-size="10.5" fill="#534AB7">비상 요청</text>
+
+<!-- mission ↔ payload -->
+<line x1="537" y1="168" x2="678" y2="168" stroke="#534AB7" stroke-width="1.2" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="608" y="161" text-anchor="middle" font-size="10.5" fill="#534AB7">협조 요청</text>
+
+<!-- 워커 -->
+<rect x="50" y="430" width="800" height="62" rx="12" fill="#FAECE7" stroke="#993C1D" stroke-width="0.8"/>
+<text x="450" y="456" text-anchor="middle" font-size="13" font-weight="500" fill="#712B13">워커들 (기능 평면 · 일만 함 · 장치와 대화)</text>
+<text x="450" y="476" text-anchor="middle" font-size="10.5" fill="#993C1D">역할 주제 · 이벤트를 발행, 명령을 받아 응답. 누가 쓰는지 모름</text>
+
+<!-- mission ↔ 워커 -->
+<line x1="450" y1="208" x2="450" y2="428" stroke="#534AB7" stroke-width="1.4" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="458" y="250" font-size="10.5" fill="#3C3489">명령 · 응답</text>
+
+<!-- 워커 → status, record -->
+<line x1="335" y1="430" x2="335" y2="338" stroke="#993C1D" stroke-width="1.1" marker-end="url(#a)"/>
+<line x1="765" y1="430" x2="765" y2="338" stroke="#993C1D" stroke-width="1.1" marker-end="url(#a)"/>
+<!-- 워커 → fault, payload -->
+<polyline points="235,430 235,196 222,196" fill="none" stroke="#993C1D" stroke-width="1.1" marker-end="url(#a)"/>
+<polyline points="665,430 665,196 678,196" fill="none" stroke="#993C1D" stroke-width="1.1" marker-end="url(#a)"/>
+<text x="560" y="418" text-anchor="middle" font-size="10.5" fill="#993C1D">역할 주제 · 이벤트(구독, many)</text>
+
+<!-- payload → process-manager -->
+<polyline points="850,190 878,190 878,545" fill="none" stroke="#5F5E5A" stroke-width="1.1" marker-end="url(#a)"/>
+<text x="872" y="520" text-anchor="end" font-size="10.5" fill="#5F5E5A">모듈 켜고 끄기</text>
+
+<!-- process-manager -->
+<rect x="50" y="547" width="840" height="52" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8" stroke-dasharray="5 3"/>
+<text x="450" y="569" text-anchor="middle" font-size="13" font-weight="500" fill="#444441">process-manager (플랫폼)</text>
+<text x="450" y="587" text-anchor="middle" font-size="10.5" fill="#5F5E5A">매니저 · 워커를 모두 띄우고 감시(heartbeat) · 입력 주소(many 목록 포함) · 허용 목록</text>
+</svg>
