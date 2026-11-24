@@ -51,7 +51,7 @@ Jetson 보드에서 **워커**를 개발·실행·확인하고, 다 만든 것�
 │      ▼                         ▼                                       │
 │  Manager ── 실행·감시 ──▶ [워커] system-monitor replay 장치 워커 …      │
 │      │                       │ 영상(RTSP)                              │
-│  workspace-logger            ▼                                         │
+│  record-manager              ▼                                         │
 │  (상태·명령 기록)          MediaMTX :8554 ──▶ 브라우저 WebRTC :8889      │
 │                                    └──▶ 원격 미디어 서버(켰을 때)       │
 └───────────────────────────────────────────────────────────────────────┘
@@ -61,7 +61,7 @@ Jetson 보드에서 **워커**를 개발·실행·확인하고, 다 만든 것�
 |---|---|---|
 | Manager | 워커 실행, 종료 감시, 재실행, 상태 보관 | Python |
 | REST | HTTP API(:8080), 화면 제공, 제품 빌드. 늘 켜짐 | Python |
-| workspace-logger | 상태·지표·명령 이력 기록 | Python |
+| record-manager | 상태·지표·명령 이력 기록(매니저, Manager가 띄움) | C++ |
 | MediaMTX | 보드 안 미디어 서버. 워커 영상 수신, 브라우저 시청, 원격 중계 | (공식 배포 실행 파일) |
 | 워커 | 장치 하나 또는 처리 단계 하나를 맡는 프로세스 | Python, C++ |
 
@@ -82,7 +82,8 @@ dev-workspace/
 ├─ manager/                  process-manager(C++: 워커 실행·감시·설정·연결 선언·허용 목록)
 ├─ gateway/                  게이트웨이(C++: REST + 화면 제공 + 스트림 중계 + 신분 확인 + 제품 빌드), nginx/ 설정 틀
 ├─ rest/                     게이트웨이 수락 시험
-├─ logger/                   workspace-logger, 지난 지표 조회(workspace_history.py)
+├─ managers/                 매니저(record 등, docs/managers.md). Manager가 기본 탑재로 띄움
+├─ logger/                   지난 지표 조회 기준 코드(workspace_history.py)
 ├─ monitor/                  시스템 모니터 sysmon(기본 제공: Manager가 자동 등록)
 ├─ workers/                  워커 폴더. 각 폴더가 코드·라이브러리(lib/)·실행 준비·설치를 함께 갖는다(폴더 하나로 독립)
 │  ├─ _template/             새 워커의 틀(표준 구성, lib/libworker 등 공용 라이브러리 원본)

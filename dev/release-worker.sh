@@ -7,6 +7,7 @@
 #   dev/release-worker.sh manager    플랫폼 process-manager(C++) → manager/bin/ (같은 방식)
 #   dev/release-worker.sh gateway    플랫폼 게이트웨이(C++) → gateway/bin/
 #   dev/release-worker.sh monitor    플랫폼 시스템 모니터 sysmon(C++, 기본 탑재 워커) → monitor/bin/
+#   dev/release-worker.sh record     매니저 record-manager(C++, managers/<이름>) → managers/record/bin/
 #   git commit
 #
 # 빌드를 이 스크립트가 직접 한다: 따로 빌드하게 두면 빌드가 실패하거나 안 돌았을 때(예: jetson-build를 못 찾음)
@@ -30,8 +31,11 @@ done
 if [[ "$name" == manager || "$name" == gateway || "$name" == monitor ]]; then  # 플랫폼 블록(워커 폴더가 아님)
   W="$ROOT/$name"
   SRCDIR="$name"
+elif [[ -n "$name" && -f "$ROOT/managers/$name/CMakeLists.txt" ]]; then  # 매니저(docs/managers.md)
+  W="$ROOT/managers/$name"
+  SRCDIR="managers/$name"
 else
-  [[ -n "$name" && -d "$ROOT/workers/$name" ]] || { echo "usage: $0 <worker folder>|manager|gateway|monitor [--dirty]  (e.g. replay)" >&2; exit 1; }
+  [[ -n "$name" && -d "$ROOT/workers/$name" ]] || { echo "usage: $0 <worker folder>|manager|gateway|monitor|<managers/ folder> [--dirty]  (e.g. replay)" >&2; exit 1; }
   W="$ROOT/workers/$name"
   SRCDIR="workers/$name"
 fi

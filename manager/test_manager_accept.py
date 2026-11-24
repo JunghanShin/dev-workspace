@@ -93,7 +93,7 @@ while not state["stop"]:
         parts += ["%s=%s" % kv for kv in metrics.items()]
         send(" ".join(parts))
     time.sleep(0.2)
-log(ev="stop", pid=os.getpid())
+log(ev="stop", pid=os.getpid(), t=time.time())
 sys.exit(0)
 '''
 
@@ -103,7 +103,7 @@ STATUS_KEYS = {"id", "type", "builtin", "autostart", "preset", "temp", "libworke
                "restart_count", "crash_loop", "restart_in_s", "process", "started_at", "last_heartbeat_ms_ago",
                "progress", "config_version", "applied_version", "metrics", "resources"}
 if os.environ.get("MANAGER_BIN"):  # C++ 판만: 입력 연결 상태(design.md 6.6.7.4, Python 판은 곧 지움)
-    STATUS_KEYS = STATUS_KEYS | {"inputs"}
+    STATUS_KEYS = STATUS_KEYS | {"inputs", "kind"}
 
 SCHEMA = {"groups": [
     {"title": "모듈", "section": "mod", "fields": [
@@ -193,9 +193,9 @@ class Env:
             os.makedirs(d)
             with open(os.path.join(d, "w.py"), "w") as f:
                 f.write(W_PY)
-            self.out[part] = os.path.join(self.tmp, part + ".out")
+            self.out[part.split("/")[-1]] = out = os.path.join(self.tmp, part.replace("/", "_") + ".out")
             decl = dict(decl)
-            decl.setdefault("exec", [sys.executable, "@WORKSPACE_ROOT@/%s/w.py" % part, self.out[part]])
+            decl.setdefault("exec", [sys.executable, "@WORKSPACE_ROOT@/%s/w.py" % part, out])
             write_json(os.path.join(d, "worker-types.json"), {tname: decl})
         if legacy is not None:
             write_json(os.path.join(self.data, "config", "workers.json"), legacy)
@@ -981,6 +981,42 @@ class Accept(unittest.TestCase):
         for f in stale:
             self.assertFalse(os.path.exists(f), f)
         self.assertFalse(os.path.exists(os.path.join(e.data, "state", "workers", "brk.json")))
+
+    @unittest.skipUnless(os.environ.get("MANAGER_BIN"), "C++ process-manager only (docs/managers.md)")
+    def test_managers(self):
+        """매니저(docs/managers.md): managers/*/ 기본 탑재 찾기, kind, 운용 모드에서 정지·설정 막기, 끌 때 순서"""
+        e = self.env({"w": {"autostart": True}},
+                     builtins={"managers/mgr": ("mgr_t", {"kind": "manager",
+                                                          "builtin": {"id": "mgr", "autostart": True}}),
+                               "managers/rec": ("rec_t", {"kind": "manager", "stop_order": 2,
+                                                          "builtin": {"id": "rec", "autostart": True}})}).start()
+        e.wait_state("w", "running")
+        for m in ("mgr", "rec"):
+            s = e.wait_state(m, "running")
+            self.assertEqual((s["builtin"], s["kind"]), (True, "manager"))
+        self.assertEqual(e.status("w")["kind"], "worker")
+        # 운용 모드: 매니저 정지·설정 바꾸기는 막음(게이트웨이도), 워커는 그대로
+        for req in ({"op": "stop", "id": "mgr"}, {"op": "set_config", "id": "rec", "config": {"a": 1}},
+                    {"op": "set_autostart", "id": "mgr", "autostart": False}):
+            r = e.rest(req)
+            self.assertEqual((r["error"]["code"], r.get("need")), ("forbidden", "development"), req)
+        self.assertEqual(e.status("mgr")["actual_state"], "running")
+        e.ok({"op": "stop", "id": "w"})
+        e.wait_state("w", "stopped")
+        e.ok({"op": "start", "id": "w"})
+        e.wait_state("w", "running")
+        # 개발 모드: 됨
+        e.ok({"op": "set_access_mode", "mode": "development"})
+        e.ok({"op": "stop", "id": "mgr"})
+        e.wait_state("mgr", "stopped")
+        e.ok({"op": "start", "id": "mgr"})
+        e.wait_state("mgr", "running")
+        e.ok({"op": "set_access_mode", "mode": "operation"})
+        # 끌 때: 워커 → 매니저 → rec(stop_order 2)
+        e.stop()
+        t = {n: [x["t"] for x in e.events(n) if x["ev"] == "stop"][-1] for n in ("w", "mgr", "rec")}
+        self.assertLess(t["w"], t["mgr"])
+        self.assertLess(t["mgr"], t["rec"])
 
 
 def write_io(e, name, provides=None, uses=None):

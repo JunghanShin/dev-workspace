@@ -1,0 +1,16 @@
+{
+  "record-manager": {
+    "exec": ["@WORKSPACE_ROOT@/managers/record/bin/record-manager"],
+    "exec_candidates": [
+      "@WORKSPACE_ROOT@/managers/record/build/record-manager",
+      "@WORKSPACE_ROOT@/managers/record/build/jetson/install/bin/record-manager",
+      "@WORKSPACE_ROOT@/managers/record/bin/record-manager"
+    ],
+    "kind": "manager",
+    "stop_order": 2,
+    "start_timeout_sec": 10,
+    "watchdog_sec": 5,
+    "stop_timeout_sec": 5,
+    "builtin": {"id": "record-manager", "autostart": true, "config": {}}
+  }
+}

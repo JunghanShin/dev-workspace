@@ -3,7 +3,7 @@
 #
 #   ./workspace-stop.sh
 #
-# workspace-start.sh(감시 셸)가 REST → Manager(워커 정리) → logger 순서로 내린다.
+# workspace-start.sh(감시 셸)가 REST → Manager(워커 → 매니저 → record-manager 정리) 순서로 내린다.
 # 자동 재실행은 없다. 다시 띄우려면 ./workspace-start.sh
 # 같은 부팅에서 다시 시작하면 워커는 멈추기 직전 실행 상태로 돌아온다.
 set -uo pipefail

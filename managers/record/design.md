@@ -101,7 +101,7 @@
 ## 4. 옮기는 순서
 
 1. record-manager가 `worker`·`removed`·`command`·`system`·`logger` 종류를 지금 logger와 같은 모양으로 씀. PC에서 둘을 나란히 돌려 줄을 비교(시험) — **됨(2026-11-24)**: `test_compare.py`(시각만 빼고 글자 그대로 같음), 단위·통합 시험·TSan
-2. 시작 셸이 logger를 띄우지 않음. 게이트웨이 `/history` 시험 그대로 통과 확인
+2. 시작 셸이 logger를 띄우지 않음. 게이트웨이 `/history` 시험 그대로 통과 확인 — **됨(2026-11-24, 0.63)**: 기본 탑재(`worker-types.json`, `kind: manager`, `stop_order: 2`), process-manager 수락 시험 `test_managers`. 보드 확인 남음
 3. `topic`·`event` 종류 추가(`many` 입력 구현과 함께, process-manager 쪽)
 4. Python logger 삭제, 환경 변수 정리, 보드 확인
 

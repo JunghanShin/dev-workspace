@@ -368,6 +368,10 @@ Json Supervisor::status(const Worker& w, double now) const {
     s["id"] = w.id;
     s["type"] = w.type;
     s["builtin"] = builtin_types_.count(w.type) > 0;  // 기본 탑재(화면은 워커 목록에서 뺀다)
+    {
+        const Json k = jget(type_of(w), "kind");
+        s["kind"] = k.is_string() ? k : Json("worker");  // worker | manager(docs/managers.md)
+    }
     s["autostart"] = w.autostart;
     s["preset"] = w.preset;
     s["temp"] = w.temp;
@@ -1196,6 +1200,41 @@ void Supervisor::on_failure(Worker& w, double now) {
     w.actual = "exited";
     w.next_start_mono = now + interval;
     PM_WARN("%s failed (%s), restart #%d in %.1fs", w.id.c_str(), py_str(w.last_error).c_str(), w.restart_count, interval);
+}
+
+int Supervisor::stop_order(const Worker& w) const {
+    const Json& t = type_of(w);
+    const Json o = jget(t, "stop_order");
+    if (o.is_number_integer()) return o.get<int>();
+    return jget(t, "kind") == Json("manager") ? 1 : 0;
+}
+
+bool Supervisor::is_manager(const std::string& id) const {
+    auto it = by_id_.find(id);
+    return it != by_id_.end() && jget(type_of(*it->second), "kind") == Json("manager");
+}
+
+std::vector<int> Supervisor::stop_orders() const {
+    std::set<int> s;
+    for (const auto& w : workers_)
+        if (w->has_proc()) s.insert(stop_order(*w));
+    return {s.begin(), s.end()};
+}
+
+double Supervisor::shutdown_begin(int order) {
+    double deadline = 0;
+    for (auto& w : workers_) {
+        if (!w->has_proc() || stop_order(*w) != order) continue;
+        if (!w->stop_reason) terminate(*w, "shutdown");
+        deadline = std::max(deadline, tnum(type_of(*w), "stop_timeout_sec", 5));
+    }
+    return deadline;
+}
+
+bool Supervisor::any_running(int order) const {
+    for (const auto& w : workers_)
+        if (w->has_proc() && stop_order(*w) == order) return true;
+    return false;
 }
 
 double Supervisor::shutdown_begin() {

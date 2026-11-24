@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.62 |
+| 문서 버전 | 0.63 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -118,7 +118,7 @@
 | Manager | 1 | C++ | 워커 관리 상태 단일 소유, 실행·감시·재실행, 설정 검사·저장 | 시작 셸 |
 | REST | 1 | C++ | HTTP ↔ Manager API, 명령·스트림 중계, 화면 제공, 보드 읽기 | 시작 셸 |
 | Manager API를 쓰는 워커(외부 운용 인터페이스 등) | 0~N | C/C++ | 다른 워커 시작·정지·설정. 워커 폴더로 넣는 선택 부품(6.5) | Manager(워커로) |
-| workspace-logger | 1 | C++ | Manager 상태·지표·명령 이력을 부팅 단위 파일로 기록 | 시작 셸 |
+| record-manager(매니저) | 1 | C++ | Manager 상태·지표·명령 이력을 부팅 단위 파일로 기록(예전 workspace-logger를 대신, 0.63). `managers/record/design.md` | Manager(기본 탑재, 끌 때 마지막) |
 | 워커 | N | 성능에 따라 C/C++ 또는 Python(원칙 10) | 각자의 기능. 계약(9장)만 지킴 | Manager |
 
 분리 원칙:
@@ -942,7 +942,7 @@ workers/<이름>/
 
 ```text
 워커 heartbeat 지표(9.5) ─┐
-system-monitor(tegrastats)┼─▶ Manager 상태(metrics, resources) ─subscribe─▶ workspace-logger ─▶ <데이터>/records/
+system-monitor(tegrastats)┼─▶ Manager 상태(metrics, resources) ─subscribe─▶ record-manager ─▶ <데이터>/records/
 Manager /proc 측정 ───────┘                                    └─ REST ─▶ 화면(시스템 모니터, 그래프)
 ```
 
@@ -952,12 +952,12 @@ Manager /proc 측정 ───────┘                                   
 | 워커별 자원 | Manager가 1초마다 프로세스 그룹 CPU·메모리·프로세스·스레드 수(8.2 `resources`) |
 | 워커 내부 | REST `/workers/{id}/tasks`: 프로세스·스레드와 스레드별 CPU, 스레드 우선순위(정책·값)·CPU 고정(시스템 모니터 워커 보기를 열었을 때만 측정). 루프 시간·안전망과 (단계 도구를 쓰면) 단계·큐는 워커 `get_status`의 `runtime`(6.6.9) |
 | 시스템 모니터 | 기본 탑재 워커 `system-monitor`(`monitor/`, C++ libworker 워커 `sysmon`). root 수집기가 쓴 tegrastats 한 줄 → CPU·GPU·메모리·온도·전력·전용 HW 지표. tegrastats가 없으면(PC) 사용 안 함 |
-| `workspace-logger` | 상태·지표·명령 이력을 같은 시간축으로 부팅 단위 파일에 기록 |
+| `record-manager` | 상태·지표·명령 이력을 같은 시간축으로 부팅 단위 파일에 기록(0.63부터, 예전 Python `workspace-logger`와 같은 파일·줄. `managers/record/design.md`) |
 | 지난 지표 | `logger/workspace_history.py`가 기록을 기간·칸 평균으로 줄임(REST `/history`, 화면 그래프·CSV) |
 
-| logger 항목 | 내용 |
+| 기록 항목 | 내용 |
 |---|---|
-| 접속 | `manager-logger.sock`(쓰기 op는 `forbidden`), `subscribe` topics `workers`, `system`, `commands` |
+| 접속 | `manager-logger.sock`(클라이언트 이름은 예전 그대로 `logger`, 쓰기 op는 `forbidden`), `subscribe` topics `workers`, `system`, `commands` |
 | 파일 | `<데이터>/records/{시작시각}_{boot_id 8자}.jsonl`, 한 줄 = 기록 하나. 같은 부팅이면 이어 씀 |
 | 용량 | 파일당 `WORKSPACE_LOGGER_MAX_FILE_MB`(64), 전체 `WORKSPACE_LOGGER_MAX_TOTAL_MB`(2048) 넘으면 오래된 것부터 삭제 |
 | 주기 | 상태 값이 바뀌면 즉시, 아니면 워커마다 `WORKSPACE_LOGGER_INTERVAL_S`(1 s) |
@@ -1263,7 +1263,8 @@ REST는 `0.0.0.0` 바인딩이라 새 IP로 닿는 즉시 재개된다(진행 �
     manager/                      # process-manager(C++: core·src·test, bin/ 확정 실행 파일) + 수락 시험
     gateway/                      # 게이트웨이(C++, REST·화면 제공·스트림 중계·신분 확인) + nginx/ 설정 틀. bin/ 확정 실행 파일
     rest/                         # 게이트웨이 수락 시험(test_rest_accept.py, test_nginx_front.py)
-    logger/workspace_logger/      # workspace-logger, workspace_history.py
+    logger/                       # workspace_history.py(지난 지표 기준 코드). workspace_logger/는 옮기는 동안만(record-manager가 대신)
+    managers/<용도>/              # 매니저(docs/managers.md): record/ 등. worker-types.json(기본 탑재, kind manager), bin/ 확정 실행 파일
     monitor/                      # 시스템 모니터(기본 탑재 워커) + worker-types.json, config.json·presets/
     ui/web/                       # 화면(6.11)
     workers/
@@ -1281,7 +1282,7 @@ REST는 `0.0.0.0` 바인딩이라 새 IP로 닿는 즉시 재개된다(진행 �
     config/                       # network.conf, workspace.env, manager.json, mediamtx.yml, 프로필의 다른 파일,
                                   # profile.json(설치 기록), worker-types.json(코어), worker-types.d/(시작마다 다시), backup-<시각>/
     state/                        # Manager만: versions.json, workers/{id}.json(spawn 설정), logs/{id}.log
-    records/                      # logger만: {시작시각}_{boot_id}.jsonl
+    records/                      # record-manager만: {시작시각}_{boot_id}.jsonl
     run/                          # desired.json, temp_config.json(임시 적용), manager*.sock, notify.sock, cmd/{id}.sock, stream/{id}.sock, frames/{id}.sock,
                                   # payload.env, tegrastats.line, workspace-start.pid
     sdk/<장비>/                   # 워커 install.sh가 푼 SDK
@@ -1327,9 +1328,9 @@ REST는 `0.0.0.0` 바인딩이라 새 IP로 닿는 즉시 재개된다(진행 �
 systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계속 떠서 감시)
    1. 데이터 폴더: 없는 폴더·파일을 install/config 기본값으로, 더 이상 쓰지 않는 파일(config/mode, workers.json 옮긴 흔적) 지우기, worker-types.d/ 비우기
    2. tegrastats 수집기, network.conf 적용, 워커마다 workspace/prepare.sh(type 조각, payload.env)  ── 실패해도 경고만
-   3. Manager → REST → logger 를 소유자 계정으로
+   3. Manager → REST 를 소유자 계정으로(기록은 Manager가 띄우는 record-manager)
    4. 감시: Manager가 끝나면 전체 종료. 나머지가 끝나면 기록만
-   5. SIGTERM: REST → Manager(워커 정리) → logger → 수집기 순서로 종료
+   5. SIGTERM: REST → Manager(워커 → 매니저 → record-manager 순서로 정리) → 수집기 순서로 종료
 ```
 
 | 동작 | 방법 |
@@ -1559,6 +1560,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.60 | **시스템 모니터 C++**(`monitor/`, 설계 `monitor/design.md`): Python sysmon을 libworker 워커로(코어 `lib/sysmon/core`는 libworker 없음, tegrastats 해석은 옛 정규식 그대로·같은 입력 3008줄에서 출력 글자까지 같음). 확정 실행 파일 `monitor/bin/sysmon`(`dev/release-worker.sh monitor`), 제품 묶음은 Nuitka 대신 이 실행 파일. 지표 이름·뜻 그대로. 설정은 `{"sysmon": {"interval_ms"}}`(옛 맨 위 `interval_ms`도 읽음). logger는 record-manager 때 정리 |
 | 0.61 | **`--io`**(6.6.7.1): libworker 0.12 `worker_io()`·`--io`, 공통 정의를 `lib/libworker/io/common.json`으로 옮김(process-manager `get_io`는 워커의 libworker 사본 것을 먼저). **설정 칸 `unique`**(6.10): process-manager에 박혀 있던 칸 이름 `device_sn` 검사를 걷어내고, 스키마 칸 표시 `"unique": true`로 일반화(묶음 `section` 안도 봄. 예전 검사는 맨 위 키만 봐서 묶음 안 시리얼은 걸리지 않았음). 15장에 모듈화와 별개로 미룬 것 목록 |
 | 0.62 | **매니저 공통 설계**(`docs/managers.md`): 정한 것 ① 6개 모두 공개 저장소(시스템마다 다른 것은 규칙 데이터뿐) ② process-manager가 기본 탑재(`builtin`, `"kind": "manager"`)로 띄움 ③ 역할 명령은 게이트웨이 → mission-manager → 워커(생기기 전까지 바로) ④ 순서 record → status → mission → payload → fault → config. 함께 정함: 폴더 `managers/<용도>/`, 운용 모드에서 매니저 정지 막음, 여러 워커 입력 `uses` `many: true`, mission 다시 켜지는 중 `unavailable`, `from` + `origin`, mission은 허용 목록에 자동. 그림 `docs/managers.svg`(배치·외부 연동 워커 입구)·`docs/managers-inside.svg`(매니저 안 큐 구조) |
+| 0.63 | **record-manager 기본 탑재**(`managers/record/design.md` 4장 1~2단계): process-manager가 `managers/*/worker-types.json`도 기본 탑재로 찾고 상태에 `kind`(worker·manager), 운용 모드에서 매니저 정지·설정 바꾸기 `forbidden`(`need: development`), 끌 때 type `stop_order` 순서(워커 0 → 매니저 1 → record 2). 시작 셸은 Python logger를 띄우지 않음(PC `workspace-dev.sh`는 매니저를 저장소 안 `build/`에 빌드). 제품 묶음에 매니저 실행 파일. `dev/release-worker.sh record` |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

@@ -10,10 +10,11 @@
 #   1. 데이터 폴더(<워크스페이스>_data) 확인. 없거나 지워진 폴더·파일은 기본값으로 다시 만든다
 #   2. 보드 상태 수집(root tegrastats), 네트워크 적용(network.conf), 워커 준비(workers/*/workspace/prepare.sh, 예전 워커는 workers/*/prepare.sh).
 #      실패해도 경고만 하고 계속
-#   3. Manager → 게이트웨이(+nginx) → logger 를 워크스페이스 소유자 계정으로 실행하고 감시
-#   4. 종료 요청(SIGTERM, workspace-stop.sh) 시 게이트웨이 → Manager(워커 정리) → logger 순서로 종료
+#   3. Manager → 게이트웨이(+nginx)를 워크스페이스 소유자 계정으로 실행하고 감시. 기록은 매니저 record-manager가 함
+#      (process-manager가 기본 탑재로 띄움, managers/record)
+#   4. 종료 요청(SIGTERM, workspace-stop.sh) 시 게이트웨이 → Manager(워커 → 매니저 → record-manager 순서로 정리) 순서로 종료
 #
-# 자동 재실행은 없다. Manager가 죽으면 전체를 내리고 끝난다. 게이트웨이·logger가 죽으면 기록만 하고 계속.
+# 자동 재실행은 없다. Manager가 죽으면 전체를 내리고 끝난다. 게이트웨이가 죽으면 기록만 하고 계속.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -82,7 +83,7 @@ OWNER_GID="$(id -g "$OWNER")"
 if [[ "$OWNER_UID" -eq 0 ]]; then
   log "warning: workspace is owned by root; programs will run as root"
 fi
-# 제품 묶음은 Manager·게이트웨이·시스템 모니터가 C++ 실행 파일, logger가 컴파일된 실행 파일(app/)이라 python3가 필요 없다
+# 제품 묶음은 Manager·게이트웨이·시스템 모니터·매니저가 C++ 실행 파일이라 python3가 필요 없다(app/: 예전 컴파일 묶음)
 [[ -d "$ROOT/app" || -x "$PY" ]] || { log "python3 not found: $PY"; exit 1; }
 
 # ---- 1. 데이터 폴더 -----------------------------------------------------------------
@@ -208,12 +209,11 @@ stop_pid() {  # stop_pid <pid> <이름> <timeout s>
   wait "$pid" 2>/dev/null
 }
 
-MGR="${MGR:-}" REST="${REST:-}" LOGGER="${LOGGER:-}" NGINX="${NGINX:-}"
+MGR="${MGR:-}" REST="${REST:-}" NGINX="${NGINX:-}"
 shutdown() {
   stop_pid "$NGINX" nginx 5
   stop_pid "$REST" rest 5
-  stop_pid "$MGR" manager 20      # Manager가 워커를 정리한다(워커 stop_timeout 포함)
-  stop_pid "$LOGGER" logger 5     # Manager 종료까지 기록
+  stop_pid "$MGR" manager 30      # Manager가 워커 → 매니저 → record-manager 순서로 정리(순서마다 stop_timeout)
   stop_pid "$COLLECT" tegrastats-collector 3
 }
 
@@ -294,9 +294,6 @@ if (( use_nginx )); then
   NGINX=$!
   log "nginx started (pid $NGINX, listen ${WORKSPACE_REST_BIND:-0.0.0.0}:${WORKSPACE_REST_PORT:-8080})"
 fi
-run_as_owner "$ROOT/logger" workspace_logger
-LOGGER=$!
-log "logger started (pid $LOGGER)"
 
 code=0
 while (( ! STOPPING )); do
@@ -314,10 +311,6 @@ while (( ! STOPPING )); do
   if [[ -n "$NGINX" ]] && ! alive "$NGINX"; then
     log "nginx exited; gateway keeps running on its socket only (start again with workspace-stop.sh / workspace-start.sh)"
     NGINX=""
-  fi
-  if [[ -n "$LOGGER" ]] && ! alive "$LOGGER"; then
-    log "logger exited; manager keeps running (no records until restart)"
-    LOGGER=""
   fi
   if [[ -n "$COLLECT" ]] && ! alive "$COLLECT"; then
     log "tegrastats collector exited; sysmon falls back to its own tegrastats (no EMC/HW engine values)"

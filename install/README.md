@@ -95,7 +95,7 @@ bash ~/dev-workspace/workspace-stop.sh
 | `config/mediamtx.yml` | 로컬 미디어 서버: 수신·시청 포트, 원격 중계 주소(`runOnAvailable`, 현장 값) | `sudo systemctl restart workspace-mediamtx` |
 | `state/logs/<id>.log` | 워커 로그 | — |
 | `run/temp_config.json` | 저장하지 않고 적용한 워커 설정(이번 부팅 동안, 재부팅하면 버림) | — |
-| `records/*.jsonl` | workspace-logger 기록 | — |
+| `records/*.jsonl` | record-manager 기록 | — |
 | `sdk/<워커>/` | 워커가 쓰는 장치 SDK. 그 워커의 install.sh가 설치할 때 풂 | — |
 
 - 파일을 지우면 다음 시작 때 기본값으로 다시 만든다. 폴더 전체를 지워도 된다(워커 설정은 워커 폴더에 있어 그대로). SDK는 `sudo bash <워크스페이스>/workers/<워커>/workspace/install.sh`로 다시 푼다

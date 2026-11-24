@@ -6,7 +6,7 @@
 #   dev/build-product.sh <프로필> --check      빌드 전 점검만(깃·워커 확정본·컴파일 도구·빈 공간)
 #   dev/build-product.sh <프로필> --allow-dirty  커밋 안 한 변경이 있어도(시험용)
 #
-# Python 부분(Manager·REST·logger·시스템 모니터)은 aarch64에서 Nuitka로 컴파일한다: PC면 dev/board.env의 보드 임시 폴더,
+# Python 부분(지금은 없음, 예전 logger 등)은 aarch64에서 Nuitka로 컴파일한다: PC면 dev/board.env의 보드 임시 폴더,
 # 보드에서 실행하면 그 자리에서.
 # 장비 설치: tar xzf <묶음> && sudo bash <폴더>/install.sh --owner <계정>  (--rollback, --status, --uninstall)
 exec python3 "$(dirname "$(readlink -f "$0")")/build_product.py" "$@"

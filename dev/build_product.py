@@ -1,8 +1,8 @@
 """제품 묶음 만들기(워크스페이스 design.md 11.4). 표준 라이브러리만.
 
 워크스페이스(개발 작업대)에서 개발 부품을 걷어내고 장비에 올릴 결과물 하나를 만든다:
-  넣음: 확정 워커 실행 파일(workspace/bin, 소스와 같은지 확인), Manager·게이트웨이·시스템 모니터(C++ 확정 실행 파일),
-        logger(aarch64 네이티브로 컴파일, 소스 없음), 잠근 설정(워커마다 고른 프리셋 하나), 프로필, 시작 셸, 제품 설치 스크립트(서비스·되돌리기),
+  넣음: 확정 워커 실행 파일(workspace/bin, 소스와 같은지 확인), Manager·게이트웨이·시스템 모니터·매니저(C++ 확정 실행 파일),
+        잠근 설정(워커마다 고른 프리셋 하나), 프로필, 시작 셸, 제품 설치 스크립트(서비스·되돌리기),
         기본 화면(셸 + 시스템 모니터 + 워커 패널, product.json ui=true일 때), 전원 모드(설치가 맞춤, power_mode)
   뺌:   소스·깃·문서·배포 키·빌드 도구, 가짜 장치(*-sim, libfake_*), 다른 프리셋, 개발 빌드 후보(build/),
         진단·설정 화면(로그·명령 이력·워크스페이스)
@@ -36,11 +36,11 @@ import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 APPS = {  # app/<모듈>/<모듈>: 시작 셸이 python3 -m <모듈> 대신 쓴다(workspace-start.sh run_as_owner)
-    # Manager·게이트웨이·시스템 모니터는 C++ 확정 실행 파일(manager/bin, gateway/bin, monitor/bin)을 그대로 넣는다(PLATFORM_BINS)
-    "workspace_logger": {"src": "logger", "pkg": "workspace_logger", "entry": "from workspace_logger.__main__ import main"},
+    # Manager·게이트웨이·시스템 모니터·매니저는 C++ 확정 실행 파일을 그대로 넣는다(PLATFORM_BINS).
+    # 예전 workspace_logger는 record-manager가 대신한다(managers/record). 지금 컴파일할 Python 앱은 없다
 }
 PLATFORM_BINS = {"manager/bin": ["process-manager", "BUILD"], "gateway/bin": ["gateway", "BUILD"],
-                 "monitor/bin": ["sysmon", "BUILD"]}  # C++ 확정 실행 파일(release-worker.sh)
+                 "monitor/bin": ["sysmon", "BUILD"], "managers/record/bin": ["record-manager", "BUILD"]}  # C++ 확정 실행 파일(release-worker.sh)
 DEV_ONLY = ("-sim", "libfake_")  # 가짜 장치 부품(제품에서 뺌)
 DEPS = "$HOME/.cache/workspace-product/nuitka-deps"  # 컴파일 도구(Nuitka) 받아 두는 곳(컴파일하는 계정의 홈)
 MIN_FREE_GB = 1.5
@@ -192,7 +192,7 @@ def stage_tree(product, info, stage, version):
     for d, names in PLATFORM_BINS.items():
         for n in names:
             if not os.path.exists(os.path.join(ROOT, d, n)):
-                raise BuildError("%s/%s 없음: dev/release-worker.sh %s 로 확정하세요" % (d, n, d.split("/")[0]))
+                raise BuildError("%s/%s 없음: dev/release-worker.sh %s 로 확정하세요" % (d, n, d.split("/")[-2]))
             cp(os.path.join(d, n))
     cp("gateway/nginx")
     for f in ("workspace-network-apply", "workspace-tegrastats-collect", "workspace-power-mode"):
@@ -249,6 +249,19 @@ def stage_tree(product, info, stage, version):
         json.dump(t, open(os.path.join(mon, "worker-types.json"), "w", encoding="utf-8"), indent=2, ensure_ascii=False)
         for f in ("config.json", "presets"):
             cp(os.path.join("monitor", f))
+    # 매니저(기본 탑재, docs/managers.md): 늘 넣는다. C++ 확정 실행 파일(위 PLATFORM_BINS), 개발 빌드 후보는 뺀다
+    for m in sorted(os.listdir(os.path.join(ROOT, "managers"))):
+        src = os.path.join(ROOT, "managers", m, "worker-types.json")
+        if not os.path.isfile(src):
+            continue
+        dst = os.path.join(stage, "managers", m)
+        os.makedirs(dst, exist_ok=True)
+        t = json.load(open(src, encoding="utf-8"))
+        for v in t.values():
+            v.pop("exec_candidates", None)
+        json.dump(t, open(os.path.join(dst, "worker-types.json"), "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+        for f in ("config.json", "presets"):
+            cp(os.path.join("managers", m, f))
     if product.get("ui"):
         # 기본 화면만: 셸·공통 부품 + 워커에 딸린 패널(worker_types: 시스템 모니터). 진단(로그·명령 이력)·설정(워크스페이스)
         # 패널은 파일째 뺀다(주소로도 못 엶). 워커 패널은 위에서 워커 폴더와 함께 들어갔다. 별도 제어 UI는 REST로 만든다
@@ -273,6 +286,7 @@ def compile_apps(stage, version, runner):
     remote = "/tmp/workspace-product-%s" % version
     work = tempfile.mkdtemp(prefix="wsprod-src-")
     try:
+        os.makedirs(os.path.join(work, "src"), exist_ok=True)  # 컴파일할 앱이 없어도 묶음 모양은 같게
         for name, a in APPS.items():
             d = os.path.join(work, "src", a["src"])
             if not os.path.exists(d):
@@ -315,7 +329,7 @@ cd "$R/src"
                     shutil.copy2(os.path.join(stage, d, n), os.path.join(bins, d, n))
         script += ('cd $R && for f in $(find bins -type f) %s; do strip --strip-unneeded "$f"; done\n'
                    % " ".join("app/%s/%s" % (a, a) for a in APPS))
-        script += "cd $R && tar czf app.tgz app && tar czf bins.tgz -C bins .\n"
+        script += "cd $R && mkdir -p app && tar czf app.tgz app && tar czf bins.tgz -C bins .\n"
         tar = os.path.join(work, "src.tgz")
         with tarfile.open(tar, "w:gz") as t:
             t.add(os.path.join(work, "src"), arcname="src")

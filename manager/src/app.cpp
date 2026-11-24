@@ -555,6 +555,13 @@ std::optional<Json> App::check_write(const Json& req, const std::optional<std::s
         const Json cfg = op == "set_config" ? jget(req, "config") : jget(preset, "config");
         if (cfg.is_object() && cfg.contains("sim")) return error("bad_request", "sim (fake device) not allowed in product");
     }
+    // 매니저는 운용 모드에서 정지·설정 바꾸기를 막는다(docs/managers.md 9장 2). 다시 켜기(start)는 됨. 모든 클라이언트에
+    if (op != "start" && op != "set_connections" && jget(req, "id").is_string() && access_mode_ != "development" &&
+        sup_.is_manager(jget(req, "id").get<std::string>())) {
+        Json e = error("forbidden", "managers can be stopped or reconfigured only in development mode");
+        e["need"] = "development";
+        return e;
+    }
     // Manager API를 쓰는 워커는 자기 자신을 정지·설정하지 못한다(스스로 끊기지 않게)
     if (cfg_.api_workers.count(*client) && jget(req, "id") == Json(*client))
         return error("forbidden", "worker " + *client + " cannot control itself");
@@ -874,9 +881,12 @@ int App::run() {
     PM_INFO("shutting down");
     for (auto& [fd, n] : listeners_) ::close(fd);
     listeners_.clear();
-    // 워커 정리. desired_state는 그대로 두어 다시 시작하면 복원
-    const double deadline = now() + sup_.shutdown_begin();
-    while (sup_.any_running() && now() < deadline) step(100, false);
+    // 워커 정리. desired_state는 그대로 두어 다시 시작하면 복원.
+    // 순서대로 끈다: 워커 → 매니저 → record-manager(stop_order, 마지막까지 기록). 순서마다 그 stop_timeout까지 기다림
+    for (int order : sup_.stop_orders()) {
+        const double deadline = now() + sup_.shutdown_begin(order);
+        while (sup_.any_running(order) && now() < deadline) step(100, false);
+    }
     sup_.shutdown_kill();
     const double end = now() + 2.0;
     while (sup_.any_running() && now() < end) step(100, false);

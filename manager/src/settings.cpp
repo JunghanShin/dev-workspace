@@ -203,12 +203,15 @@ Json load_types(const std::string& path, const std::string& dir, const Json& wor
 }
 
 void add_builtin_types(Json& types, const Json& worker_defaults, const std::string& root) {
-    // <root>/*/worker-types.json. exec 안의 @WORKSPACE_ROOT@는 워크스페이스 경로로 바꾼다
+    // <root>/*/worker-types.json(플랫폼 부품)과 <root>/managers/*/worker-types.json(매니저, docs/managers.md).
+    // exec 안의 @WORKSPACE_ROOT@는 워크스페이스 경로로 바꾼다
     std::vector<std::string> paths;
-    for (const auto& n : g_fs.list(root)) {
-        if (n.empty() || n[0] == '.') continue;  // glob "*"은 숨은 폴더를 빼고
-        const std::string p = join_path(join_path(root, n), "worker-types.json");
-        if (g_fs.is_file(p)) paths.push_back(p);
+    for (const std::string& base : {root, join_path(root, "managers")}) {
+        for (const auto& n : g_fs.list(base)) {
+            if (n.empty() || n[0] == '.') continue;  // glob "*"은 숨은 폴더를 빼고
+            const std::string p = join_path(join_path(base, n), "worker-types.json");
+            if (g_fs.is_file(p)) paths.push_back(p);
+        }
     }
     std::sort(paths.begin(), paths.end());
     for (const auto& path : paths) {

@@ -1,5 +1,6 @@
 #!/bin/bash
-# PC 개발용 워크스페이스 실행. Jetson 없이 PC(WSL·Linux)에서 process-manager + 게이트웨이 + logger와 워커를 띄운다.
+# PC 개발용 워크스페이스 실행. Jetson 없이 PC(WSL·Linux)에서 process-manager + 게이트웨이와 매니저·워커를 띄운다.
+# 매니저(managers/*)는 저장소 안 managers/<이름>/build에 PC용으로 빌드한다(type exec_candidates의 첫째, git 무시)
 # process-manager·게이트웨이(C++)는 PC용으로 ~/.cache/workspace-dev/<저장소 폴더>/에 빌드해 쓴다(바뀐 것만 다시 빌드, cmake 필요).
 # 다른 빌드를 쓰려면 WORKSPACE_MANAGER_BIN, WORKSPACE_GATEWAY_BIN. nginx 앞단은 쓰지 않는다(게이트웨이가 포트를 직접 받음)
 # 보드용 workspace-start.sh와 같은 데이터 폴더 구조를 쓰지만, 다음은 하지 않는다:
@@ -114,6 +115,12 @@ GW_BIN="${WORKSPACE_GATEWAY_BIN:-}"
 command -v cmake >/dev/null || [[ -n "$MGR_BIN" && -n "$GW_BIN" ]] || { log "cmake not found (needed to build process-manager/gateway for this PC)"; exit 1; }
 [[ -n "$MGR_BIN" ]] || { log "building process-manager (PC)"; MGR_BIN="$(build_native manager process-manager)" || exit 1; }
 [[ -n "$GW_BIN" ]] || { log "building gateway (PC)"; GW_BIN="$(build_native gateway gateway)" || exit 1; }
+for m in "$ROOT"/managers/*/; do  # 매니저: process-manager가 managers/<이름>/build/<이름>-manager를 먼저 찾는다
+  [[ -f "$m/CMakeLists.txt" ]] || continue
+  log "building $(basename "$m")-manager (PC)"
+  { [[ -f "$m/build/CMakeCache.txt" ]] || cmake -S "$m" -B "$m/build" -DCMAKE_BUILD_TYPE=Release >/dev/null; } \
+    && cmake --build "$m/build" -j"$(nproc)" >/dev/null || { log "build failed: $m"; exit 1; }
+done
 
 rm -f "$DATA/run/manager.sock"
 WORKSPACE_ROOT="$ROOT" "$MGR_BIN" --data "$DATA" &
@@ -122,7 +129,6 @@ for (( i = 0; i < 100; i++ )); do [[ -S "$DATA/run/manager.sock" ]] && break; sl
 [[ -S "$DATA/run/manager.sock" ]] || { log "manager did not start"; stop_all; exit 1; }
 WORKSPACE_ROOT="$ROOT" "$GW_BIN" &
 PIDS+=("$!")
-start "$ROOT/logger" workspace_logger
 log "workspace=$ROOT data=$DATA UI/REST=http://localhost:${WORKSPACE_REST_PORT:-8080}  (Ctrl+C to stop)"
 wait -n
 log "a component exited; stopping all"

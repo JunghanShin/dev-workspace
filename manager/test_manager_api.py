@@ -162,6 +162,8 @@ class ManagerApiWorker(unittest.TestCase):
             return None
 
     def call(self, path, req):
+        # 클라이언트 소켓(manager-rest.sock 등)은 manager.sock보다 조금 늦게 생길 수 있다: 3 s까지 기다린다
+        wait_for(lambda: os.path.exists(path), 3)
         with socket.socket(socket.AF_UNIX) as s:
             s.settimeout(2)
             s.connect(path)

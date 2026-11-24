@@ -151,9 +151,16 @@ public:
     Json config_of(const std::string& id) const;    // 지금 설정(없으면 빈 객체)
 
     // ---- 끝내기(desired_state는 그대로 두어 다시 시작하면 복원) ----
+    // 끌 때 순서(docs/managers.md, managers/record/design.md 5장): type "stop_order"가 작은 것부터.
+    // 기본 워커 0, 매니저("kind": "manager") 1. record-manager는 2(마지막까지 기록)
+    std::vector<int> stop_orders() const;  // 떠 있는 것들의 순서 값(작은 것부터)
+    double shutdown_begin(int order);      // 그 순서의 것들에 SIGTERM, 기다릴 최대 시간(초)
     double shutdown_begin();  // 모두 SIGTERM, 기다릴 최대 시간(초)
     void shutdown_kill();
     bool any_running() const;
+    bool any_running(int order) const;
+    // 매니저인가(type "kind": "manager"). 운용 모드에서 정지·설정 바꾸기를 막는 데 씀(docs/managers.md 9장)
+    bool is_manager(const std::string& id) const;
 
     // ---- 시험용 ----
     Worker* worker(const std::string& id);
@@ -166,6 +173,7 @@ private:
     Worker& lookup(const Json& id);
     Worker& valid(const Json& id);
     const Json& type_of(const Worker& w) const;
+    int stop_order(const Worker& w) const;
     double tnum(const Json& t, const char* key, double dflt) const;
     double rnum(const char* key) const;
     Json config_errors(const std::string& type, const Json& config) const;
