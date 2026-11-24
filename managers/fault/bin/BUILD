@@ -1,6 +1,6 @@
 # fault 워커 실행 파일(Jetson aarch64). dev/release-worker.sh가 만든다. 손으로 고치지 않는다
-source_commit: daf6e8c
+source_commit: 2c8cc64
 build_env: jetson-dev 2.1
-built: 2026-11-24 15:00
+built: 2026-11-24 15:29
 sha256:
-  badbf95b108eddc318f64f28dc552137b63aa9b6ea38ff5d57c3c8a2e9adb183  fault-manager
+  3c8927dee4f17c1d619e4f6c04c65b28a4f4e6d8074846bbc507ebca8695f2ed  fault-manager
