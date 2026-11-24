@@ -245,7 +245,20 @@ void App::write_peers(bool force) {
     std::vector<PeerProcess> procs;
     if (gateway_pid_ > 0) procs.push_back({"gateway", gateway_pid_, 0, true});
     for (const auto& [id, pid] : sup_.pids_by_id()) procs.push_back({id, 0, pid, cfg_.command_entries.count(id) > 0});
-    Json doc = build_peers(connections_.value("commanders", Json()), cmds_, procs, access_mode_, cfg_.command_guard,
+    // 매니저가 역할 mission을 쓰면(io.json uses) 명령 입구 매니저에 명령할 수 있게 자동으로(요청 방향 fault → mission 등은
+    // 플랫폼 규칙이라 사람이 commanders에 적지 않아도 되게, managers/fault/design.md 5장)
+    Json commanders = connections_.value("commanders", Json());
+    if (!commanders.is_object()) commanders = Json::object();
+    for (const auto& [id, c] : cmds_) {
+        if (!c.uses.count("mission") || !sup_.is_manager(id)) continue;
+        for (const auto& [target, tc] : cmds_) {
+            if (target == id || !tc.roles.count("mission")) continue;
+            Json& list = commanders[target + ".mission"];
+            if (!list.is_array()) list = Json::array();
+            if (std::find(list.begin(), list.end(), Json(id)) == list.end()) list.push_back(id);
+        }
+    }
+    Json doc = build_peers(commanders, cmds_, procs, access_mode_, cfg_.command_guard,
                            cfg_.boot_id);
     const std::string text = dump_file(doc);
     if (!force && text == peers_text_) return;

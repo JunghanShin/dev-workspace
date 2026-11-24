@@ -1,0 +1,28 @@
+{
+  "name": "fault",
+  "version": "1.0",
+  "description": "이상 목록(managers/fault/design.md 3·4장). fault-manager가 낸다",
+  "topics": {
+    "fault": {
+      "description": "올라간 이상. 바뀌면 바로, 그대로면 1 s",
+      "type": "object",
+      "required": ["t_mono_ns", "active", "counts", "worst"],
+      "properties": {
+        "t_mono_ns": {"type": "integer", "unit": "ns"},
+        "active": {"type": "object", "additionalProperties": {"type": "object", "required": ["rule", "severity", "text", "since_ns", "acked", "actions"],
+          "properties": {"rule": {"type": "string"}, "worker": {"type": ["string", "null"]}, "severity": {"type": "string", "enum": ["warning", "error", "critical"]},
+                         "text": {"type": "string"}, "since_ns": {"type": "integer", "unit": "ns"}, "age_ms": {"type": "integer", "unit": "ms"},
+                         "acked": {"type": "boolean"}, "actions": {"type": "array"}}}},
+        "counts": {"type": "object"},
+        "worst": {"type": "string", "enum": ["none", "warning", "error", "critical"]}
+      }
+    }
+  },
+  "commands": {
+    "fault.list": {"description": "올라간 이상", "read": true, "args": {"type": "object"},
+                   "reply": {"type": "object", "additionalProperties": true}, "errors": []},
+    "fault.ack": {"description": "사람이 봤다는 표시(조건이 남아 있으면 이상은 그대로)", "operate": true,
+                  "args": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
+                  "reply": {"type": "object", "additionalProperties": true}, "errors": ["not_found"]}
+  }
+}

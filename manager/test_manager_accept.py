@@ -1047,7 +1047,11 @@ class Accept(unittest.TestCase):
         # 여러 워커 입력(docs/managers.md 5장): rec의 io.json uses many → 입력 파일 "many"(자기 말고 모두), 상태 inputs
         self.assertEqual(read_json(os.path.join(e.data, "run", "inputs", "rec.json")).get("many"), None)  # io.json 전
         write_json(os.path.join(e.root, "managers", "rec", "io.json"),
-                   {"provides": [], "uses": {"streams": {"from": "*", "many": True}}})
+                   {"provides": [], "uses": {"streams": {"from": "*", "many": True}, "m": {"from": "mission", "version": "1.0"}}})
+        # mgr가 역할 mission을 내보냄 → mission을 쓰는 매니저(rec)는 mgr 허용 목록에 자동으로(managers/fault/design.md 5장)
+        write_json(os.path.join(e.root, "managers", "mgr", "io.json"), {"provides": ["mission"], "uses": {}})
+        write_json(os.path.join(e.root, "managers", "mgr", "io", "mission.json"),
+                   {"name": "mission", "version": "1.0", "commands": {"mission.send": {"operate": True}, "mission.get_queues": {"read": True}}})
         e.ok({"op": "set_access_mode", "mode": "development"})
         e.ok({"op": "stop", "id": "rec"})
         e.wait_state("rec", "stopped")
@@ -1057,6 +1061,17 @@ class Accept(unittest.TestCase):
             d = read_json(os.path.join(e.data, "run", "inputs", "rec.json"))
             return d.get("many") if d and e.status("rec")["actual_state"] == "running" else None
         self.assertEqual(wait_for(many, 20), {"streams": [{"worker": "mgr"}, {"worker": "pl"}, {"worker": "w"}]})
+        def auto_allow():
+            try:
+                d = read_json(os.path.join(e.run_dir, "peers.json"))
+            except (OSError, ValueError):
+                return None
+            a = d.get("workers", {}).get("mgr", {}).get("allow", {})
+            return a if "rec" in a else None
+        allow = wait_for(auto_allow, 20)
+        self.assertTrue(allow)
+        self.assertEqual(allow["rec"], ["mission.get_queues", "mission.send"])
+        self.assertNotIn("w", allow)  # 워커는 자동으로 안 됨(매니저만)
         st = e.status("rec")["inputs"]["streams"]
         self.assertEqual((st["how"], st["from"], st["ok"]), ("many", ["mgr", "pl", "w"], True))
         # 끌 때: 워커 → 매니저 → rec(stop_order 2)

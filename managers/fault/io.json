@@ -1,0 +1,8 @@
+{
+  "provides": ["fault"],
+  "uses": {
+    "system": {"from": "system", "version": "1.0", "topics": ["system"], "description": "건강: status-manager 주제 system"},
+    "mission": {"from": "mission", "version": "1.0", "commands": ["mission.send"], "description": "비상 대응을 보낼 곳(요청 방향 fault → mission)"},
+    "streams": {"from": "*", "many": true, "description": "이벤트를 볼 곳: 자기 말고 모든 워커·매니저"}
+  }
+}

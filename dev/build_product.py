@@ -42,7 +42,7 @@ APPS = {  # app/<모듈>/<모듈>: 시작 셸이 python3 -m <모듈> 대신 쓴�
 PLATFORM_BINS = {"manager/bin": ["process-manager", "BUILD"], "gateway/bin": ["gateway", "BUILD"],
                  "monitor/bin": ["sysmon", "BUILD"], "managers/record/bin": ["record-manager", "BUILD"],
                  "managers/status/bin": ["status-manager", "BUILD"], "managers/mission/bin": ["mission-manager", "BUILD"],
-                 "managers/payload/bin": ["payload-manager", "BUILD"]}  # C++ 확정 실행 파일(release-worker.sh)
+                 "managers/payload/bin": ["payload-manager", "BUILD"], "managers/fault/bin": ["fault-manager", "BUILD"]}  # C++ 확정 실행 파일(release-worker.sh)
 DEV_ONLY = ("-sim", "libfake_")  # 가짜 장치 부품(제품에서 뺌)
 DEPS = "$HOME/.cache/workspace-product/nuitka-deps"  # 컴파일 도구(Nuitka) 받아 두는 곳(컴파일하는 계정의 홈)
 MIN_FREE_GB = 1.5
