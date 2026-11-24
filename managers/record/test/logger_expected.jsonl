@@ -1,0 +1,7 @@
+{"type":"worker","changed":true,"id":"cam1","desired_state":"running","actual_state":"running","pid":101,"restart_count":0,"last_error":null,"config_version":3,"applied_version":3,"metrics":{"fps":29.97,"small":1e-05,"big":1e+20,"whole":3.0,"n":123456789012,"ok":true},"resources":{"cpu":0.1,"rss_kb":2048},"note":"한글 \"따옴표\" \\ 탭\t끝","worker_type":"cam"}
+{"type":"command","t_ms":5,"client":"rest","op":"start","id":"cam1","ok":true,"from":"screen"}
+{"type":"system","clients":{"rest":true,"logger":true},"access_mode":"operation"}
+{"type":"worker","changed":true,"id":"cam1","desired_state":"running","actual_state":"stopping","pid":101,"restart_count":0,"last_error":null,"config_version":3,"applied_version":3,"metrics":{"fps":29.97,"small":1e-05,"big":1e+20,"whole":3.0,"n":123456789012,"ok":true},"resources":{"cpu":0.1,"rss_kb":2048},"note":"한글 \"따옴표\" \\ 탭\t끝","worker_type":"cam"}
+{"type":"worker","changed":false,"id":"cam1","desired_state":"running","actual_state":"stopping","pid":101,"restart_count":0,"last_error":null,"config_version":3,"applied_version":3,"metrics":{"fps":29.97,"small":1e-05,"big":1e+20,"whole":3.0,"n":123456789012,"ok":true},"resources":{"cpu":0.1,"rss_kb":2048},"note":"한글 \"따옴표\" \\ 탭\t끝","worker_type":"cam"}
+{"type":"removed","id":"cam1"}
+{"type":"command","op":"set","args":[1,2.5,null,{"k":[]}],"ok":false,"error":{"code":"bad_request","message":"x"}}

@@ -63,7 +63,7 @@
 | `max_file_mb`, `max_total_mb` | 파일 하나·전체 상한, 넘으면 새 파일·오래된 것부터 지움 | 64, 2048(지금과 같음) |
 | `fsync_s` | 디스크에 확실히 쓰는 간격 | 5 |
 
-- 지금 환경 변수(`WORKSPACE_LOGGER_*`)는 옮기는 동안 기본값으로 읽고, 다 옮기면 지운다
+- 예전 환경 변수(`WORKSPACE_LOGGER_*`)는 4단계에서 지움(0.65). 값은 이 설정 칸으로만 받는다(프로필 `managers/record` 프리셋)
 - 규칙은 설정 스키마로 검사(design.md 6.10). 프로젝트는 프로필로 덮어쓴다
 
 ### 2.3 기록 줄
@@ -103,7 +103,7 @@
 1. record-manager가 `worker`·`removed`·`command`·`system`·`logger` 종류를 지금 logger와 같은 모양으로 씀. PC에서 둘을 나란히 돌려 줄을 비교(시험) — **됨(2026-11-24)**: `test_compare.py`(시각만 빼고 글자 그대로 같음), 단위·통합 시험·TSan
 2. 시작 셸이 logger를 띄우지 않음. 게이트웨이 `/history` 시험 그대로 통과 확인 — **됨(2026-11-24, 0.63)**: 기본 탑재(`worker-types.json`, `kind: manager`, `stop_order: 2`), process-manager 수락 시험 `test_managers`. 보드 확인(2026-11-24): 떠 있음(RSS 3.6 MB, 스레드 4), 같은 파일에 이어 씀, `/history` 그대로. 끌 때 순서는 다음 재시작 때
 3. `topic`·`event` 종류 추가(`many` 입력 구현과 함께, process-manager 쪽) — **됨(2026-11-24, 0.64)**: `io.json` `uses.streams`(`from: "*"`, `many`), 구독 스레드 `rs.<id>`, 규칙 `topics`·`exclude`. 단위·통합 시험(가짜 워커 스트림, 목록에서 빠지면 구독 끊음) 보드 확인(2026-11-24): 끌 때 순서(워커 → record, `stop` 맨 끝), 구독 5(스트림 내는 2 연결), 주제 1 s 솎기, 이벤트 중복 없음
-4. Python logger 삭제, 환경 변수 정리, 보드 확인
+4. Python logger 삭제, 환경 변수 정리, 보드 확인 — **됨(2026-11-24, 0.65)**: `logger/workspace_logger/` 삭제, 비교 시험은 지우기 전에 저장한 정답 줄(`test/logger_expected.jsonl`)과 맞댐
 
 ## 5. 끝날 때
 

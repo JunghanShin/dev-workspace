@@ -55,10 +55,7 @@ DNS=                              # 비우면 설정 안 함
 | `WORKSPACE_REST_COMMAND_TIMEOUT` | `3` | 워커 명령 응답을 기다리는 초. 장치 응답을 기다리는 명령보다 길게 |
 | `WORKSPACE_UI_MEDIA_URL` | `http://{host}:8889/{path}` | 화면의 영상 주소 틀. `{host}` = 브라우저가 접속한 보드 주소, `{path}` = 송출 경로. 원격 미디어 서버를 보려면 그 주소로 |
 | `WORKSPACE_UI_TITLE` | `Workspace` | 화면 왼쪽 위·브라우저 탭 제목 |
-| `WORKSPACE_LOG_LEVEL` | `INFO` | Manager·REST·logger 로그 수준(`DEBUG`, `INFO`, `WARNING`) |
-| `WORKSPACE_LOGGER_INTERVAL_S` | `1` | 기록 간격(초) |
-| `WORKSPACE_LOGGER_MAX_FILE_MB` | `64` | 기록 파일 하나의 크기 |
-| `WORKSPACE_LOGGER_MAX_TOTAL_MB` | `2048` | 기록 전체 상한. 넘으면 오래된 파일부터 지움 |
+| `WORKSPACE_LOG_LEVEL` | `INFO` | Manager·REST 로그 수준(`DEBUG`, `INFO`, `WARNING`) |
 | `WORKSPACE_REST_TOKEN` | 없음 | REST 접근 토큰. 있으면 `/health`·화면 파일 말고 모두 토큰 필요(`Authorization: Bearer`, 쿠키 `workspace_token`, `?token=`). 제품 설치가 장비별로 만든다 |
 | `WORKSPACE_UI` | `1` | `0`이면 보드가 화면을 내주지 않음(별도 제어 UI가 REST만 씀) |
 

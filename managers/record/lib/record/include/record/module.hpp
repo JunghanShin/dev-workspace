@@ -1,14 +1,13 @@
 // 모듈 record: 기록 매니저(managers/record/design.md). 코어(PlatformRecorder, RecordFile, find)를 스레드·큐로 감싼다.
 //
 // 설정 config["record"]:
-//   dir             기록 폴더(기본 $WORKSPACE_LOGGER_DIR 또는 $WORKSPACE_DATA/records)
+//   dir             기록 폴더(기본 $WORKSPACE_DATA/records)
 //   manager_socket  process-manager 읽기 소켓(기본 $WORKSPACE_MANAGER_SOCKET 또는 $WORKSPACE_DATA/run/manager-logger.sock)
-//   interval_s      워커 상태를 바뀌지 않아도 남기는 간격(기본 $WORKSPACE_LOGGER_INTERVAL_S 또는 1)
-//   max_file_mb, max_total_mb  파일 하나·전체 상한(기본 $WORKSPACE_LOGGER_MAX_*_MB 또는 64, 2048)
+//   interval_s      워커 상태를 바뀌지 않아도 남기는 간격(기본 1)
+//   max_file_mb, max_total_mb  파일 하나·전체 상한(기본 64, 2048)
 //   fsync_s         fsync 간격(기본 5)
 //   topics          주제 규칙 [{"match": "<보낸 곳>.<주제> 글롭", "interval_ms": n}](기본 [{"match": "*", "interval_ms": 1000}])
 //   exclude         남기지 않을 "<보낸 곳>.<주제>" 글롭 목록
-//   환경 변수는 예전 workspace-logger에서 옮기는 동안만 읽는다(design.md 2.2)
 //
 // 스레드(design.md 1장): record.pm(process-manager 구독) → 큐 → 코어(호스트 루프) → 쓰기 큐 → record.write(파일)
 //                        명령 find → 찾기 큐 → record.find → 결과 큐 → 코어가 답함

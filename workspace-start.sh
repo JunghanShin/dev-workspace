@@ -137,8 +137,7 @@ read_kv() {
 
 # 실행 설정. 경로 관련 키는 받지 않는다(이 스크립트가 데이터 폴더 기준으로 정한다)
 read_kv "$DATA/config/workspace.env" WORKSPACE_REST_BIND WORKSPACE_REST_PORT WORKSPACE_REST_COMMAND_TIMEOUT WORKSPACE_UI_MEDIA_URL WORKSPACE_UI_TITLE WORKSPACE_LOG_LEVEL \
-  WORKSPACE_REST_TOKEN WORKSPACE_UI WORKSPACE_AUTH WORKSPACE_GATEWAY_CACHE \
-  WORKSPACE_LOGGER_INTERVAL_S WORKSPACE_LOGGER_MAX_FILE_MB WORKSPACE_LOGGER_MAX_TOTAL_MB
+  WORKSPACE_REST_TOKEN WORKSPACE_UI WORKSPACE_AUTH WORKSPACE_GATEWAY_CACHE
 
 # ---- 2. 보드 상태 수집, 네트워크, 워커 준비 (root) -----------------------------------
 # tegrastats는 root로 돌려야 EMC·NVENC·VIC·DLA 항목이 나온다. 최신 한 줄을 sysmon이 읽는다.
@@ -181,7 +180,7 @@ done < "$DATA/run/payload.env"
 
 # ---- 3. 실행·감시 ---------------------------------------------------------------------
 export WORKSPACE_DATA="$DATA" WORKSPACE_ROOT="$ROOT" PYTHONDONTWRITEBYTECODE=1
-unset WORKSPACE_MANAGER_SETTINGS WORKSPACE_MANAGER_SOCKET WORKSPACE_LOGGER_DIR
+unset WORKSPACE_MANAGER_SETTINGS WORKSPACE_MANAGER_SOCKET
 
 OWNER_HOME="$(getent passwd "$OWNER" | cut -d: -f6)"
 run_as_owner() {  # run_as_owner <PYTHONPATH> <모듈> [환경 KEY=VALUE...]

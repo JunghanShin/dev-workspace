@@ -29,14 +29,6 @@ std::string env_or(const char* name, const std::string& def) {
     return v && *v ? std::string(v) : def;
 }
 
-double env_num(const char* name, double def) {
-    const char* v = std::getenv(name);
-    if (!v || !*v) return def;
-    char* end = nullptr;
-    const double d = std::strtod(v, &end);
-    return end && *end == '\0' ? d : def;
-}
-
 double mono_s() { return mono_ns() / 1e9; }
 
 int connect_unix(const std::string& path, std::string* why) {
@@ -74,11 +66,8 @@ void nap(worker::WorkerThread& t, double seconds) {
 Settings read_settings(const worker::Json& config) {
     Settings s;
     const std::string data = env_or("WORKSPACE_DATA", "");
-    s.dir = env_or("WORKSPACE_LOGGER_DIR", data.empty() ? "records" : data + "/records");
+    s.dir = data.empty() ? "records" : data + "/records";
     s.manager_socket = env_or("WORKSPACE_MANAGER_SOCKET", data.empty() ? "manager-logger.sock" : data + "/run/manager-logger.sock");
-    s.interval_s = env_num("WORKSPACE_LOGGER_INTERVAL_S", s.interval_s);
-    s.max_file_mb = env_num("WORKSPACE_LOGGER_MAX_FILE_MB", s.max_file_mb);
-    s.max_total_mb = env_num("WORKSPACE_LOGGER_MAX_TOTAL_MB", s.max_total_mb);
     worker::check_keys(config, {"dir", "manager_socket", "interval_s", "max_file_mb", "max_total_mb", "fsync_s", "topics", "exclude"});
     worker::read(config, "dir", s.dir);
     worker::read(config, "manager_socket", s.manager_socket);

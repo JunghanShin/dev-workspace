@@ -81,7 +81,7 @@ done
 
 # ---- 3. 실행 ------------------------------------------------------------------------------
 export WORKSPACE_DATA="$DATA" PYTHONDONTWRITEBYTECODE=1
-unset WORKSPACE_MANAGER_SETTINGS WORKSPACE_MANAGER_SOCKET WORKSPACE_LOGGER_DIR
+unset WORKSPACE_MANAGER_SETTINGS WORKSPACE_MANAGER_SOCKET
 set -a; [[ -f "$DATA/config/workspace.env" ]] && . "$DATA/config/workspace.env"; set +a
 
 PIDS=()

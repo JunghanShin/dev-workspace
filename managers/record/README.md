@@ -2,13 +2,13 @@
 
 기록 매니저(기본 탑재). 설계는 `design.md`, 매니저 공통 틀은 `../../docs/managers.md`.
 
-process-manager 상태(워커·시스템·명령)를 같은 시간축으로 `<데이터>/records/*.jsonl`에 남긴다. 예전 Python `workspace-logger`와 같은 파일·같은 줄 모양이라 게이트웨이 `/history`가 그대로 읽는다. 역할 주제·이벤트 기록은 다음 단계(design.md 4장).
+process-manager 상태(워커·시스템·명령)와 워커·매니저의 주제·이벤트를 같은 시간축으로 `<데이터>/records/*.jsonl`에 남긴다. 예전 Python `workspace-logger`(지움)와 같은 파일·같은 줄 모양이라 게이트웨이 `/history`가 그대로 읽는다.
 
 ## 빌드·시험
 
 ```sh
 cmake -S managers/record -B ~/rec-build && cmake --build ~/rec-build -j && ctest --test-dir ~/rec-build --output-on-failure
-RECORD_BIN=~/rec-build/record-manager python3 -m unittest managers/record/test_compare.py   # 예전 logger와 줄 비교
+RECORD_BIN=~/rec-build/record-manager python3 -m unittest managers/record/test_compare.py   # 예전 logger 정답 줄과 비교
 ```
 
 `dev/check.sh`가 위 둘과 TSan을 함께 돌린다.
@@ -22,7 +22,7 @@ JSON
 ~/rec-build/record-manager --config /tmp/rec.json
 ```
 
-설정 키는 `design.md` 2.2(`dir`, `manager_socket`, `interval_s`, `max_file_mb`, `max_total_mb`, `fsync_s`). 비우면 예전 logger 환경 변수(`WORKSPACE_LOGGER_*`, `WORKSPACE_DATA`)로 정한다.
+설정 키는 `design.md` 2.2(`dir`, `manager_socket`, `interval_s`, `max_file_mb`, `max_total_mb`, `fsync_s`, `topics`, `exclude`). `dir`·`manager_socket`를 비우면 `WORKSPACE_DATA` 기준 기본 경로.
 
 ## 명령
 
