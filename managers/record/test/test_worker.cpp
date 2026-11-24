@@ -123,13 +123,13 @@ static std::vector<Json> records(const std::string& dir) {
 static int count(const std::vector<Json>& rs, const std::string& type, const std::string& event = "") {
     int n = 0;
     for (const auto& r : rs)
-        if (r.value("type", "") == type && (event.empty() || r.value("event", "") == event)) ++n;
+        if (r.is_object() && r.value("type", "") == type && (event.empty() || r.value("event", "") == event)) ++n;
     return n;
 }
 
 static std::string config(const std::string& rec_dir, const std::string& sock, const std::string& extra = "") {
     return R"({"id":"record-manager","config_version":1,"config":{"record":{"dir":")" + rec_dir + R"(","manager_socket":")" +
-           sock + R"(","interval_s":0.3)" + extra + "}}}";
+           sock + R"(","interval_s":1.0)" + extra + "}}}";
 }
 
 static void test_basic() {
@@ -137,10 +137,11 @@ static void test_basic() {
     const int lfd = listen_unix(sock);
     CHECK(lfd >= 0);
     const pid_t pid = spawn(config(rec, sock));
-    const int c = accept_for(lfd, 5000);
+    const int c = accept_for(lfd, 15000);  // 에뮬레이터(QEMU)에서는 뜨는 데 몇 초
     CHECK(c >= 0);
-    const Json sub = Json::parse(read_line(c, 2000), nullptr, false);
-    CHECK(sub.value("op", "") == "subscribe" && sub["topics"].size() == 3 && sub.value("period_ms", 0) == 300);
+    const Json sub = Json::parse(read_line(c, 10000), nullptr, false);
+    CHECK(sub.is_object() && sub.value("op", "") == "subscribe" && sub["topics"].size() == 3 &&
+          sub.value("period_ms", 0) == 1000);
     send_line(c, R"({"ok":true})");
     const std::string w = R"({"event":"worker_status","data":{"id":"cam1","type":"cam","actual_state":"running","metrics":{"n":1}}})";
     send_line(c, w);
@@ -148,11 +149,11 @@ static void test_basic() {
     send_line(c, R"({"event":"command","data":{"op":"start","id":"cam1","ok":true}})");
     send_line(c, R"({"event":"system","data":{"clients":{"rest":true}}})");
     send_line(c, "broken line");
-    std::this_thread::sleep_for(500ms);
-    send_line(c, w);  // 간격 지남: 남김
-    std::this_thread::sleep_for(300ms);
+    std::this_thread::sleep_for(1500ms);
+    send_line(c, w);  // 간격(1 s) 지남: 남김
+    std::this_thread::sleep_for(1000ms);
     kill(pid, SIGTERM);
-    CHECK(wait_exit(pid, 5000) == 0);
+    CHECK(wait_exit(pid, 15000) == 0);
     close(c);
     close(lfd);
 
@@ -166,7 +167,7 @@ static void test_basic() {
     CHECK(!rs.empty() && rs.back().value("event", "") == "stop");
     for (const auto& r : rs) {
         CHECK(r.is_object() && r.contains("t") && r.contains("t_mono_ns"));
-        if (r.value("type", "") == "worker") CHECK(r.value("worker_type", "") == "cam" && r["metrics"]["n"] == 1);
+        if (r.is_object() && r.value("type", "") == "worker") CHECK(r.value("worker_type", "") == "cam" && r["metrics"]["n"] == 1);
     }
 }
 
@@ -174,18 +175,18 @@ static void test_reconnect() {
     const std::string sock = g_dir + "/pm2.sock", rec = g_dir + "/rec2";
     int lfd = listen_unix(sock);
     const pid_t pid = spawn(config(rec, sock));
-    int c = accept_for(lfd, 5000);
-    read_line(c, 2000);
+    int c = accept_for(lfd, 15000);
+    read_line(c, 10000);
     send_line(c, R"({"ok":true})");
     std::this_thread::sleep_for(200ms);
     close(c);  // process-manager가 끊김
-    c = accept_for(lfd, 5000);  // 2 s 뒤 다시 붙음
+    c = accept_for(lfd, 15000);  // 2 s 뒤 다시 붙음
     CHECK(c >= 0);
-    read_line(c, 2000);
+    read_line(c, 10000);
     send_line(c, R"({"ok":true})");
-    std::this_thread::sleep_for(200ms);
+    std::this_thread::sleep_for(1000ms);
     kill(pid, SIGTERM);
-    CHECK(wait_exit(pid, 5000) == 0);
+    CHECK(wait_exit(pid, 15000) == 0);
     close(c);
     close(lfd);
     const auto rs = records(rec);
@@ -195,8 +196,8 @@ static void test_reconnect() {
 
 static void test_bad_config() {
     const std::string rec = g_dir + "/rec3";
-    CHECK(wait_exit(spawn(config(rec, "/nonexistent.sock", R"(,"nope":1)")), 5000) == 1);
-    CHECK(wait_exit(spawn(config(rec, "/nonexistent.sock", R"(,"max_total_mb":1,"max_file_mb":5)")), 5000) == 1);
+    CHECK(wait_exit(spawn(config(rec, "/nonexistent.sock", R"(,"nope":1)")), 15000) == 1);
+    CHECK(wait_exit(spawn(config(rec, "/nonexistent.sock", R"(,"max_total_mb":1,"max_file_mb":5)")), 15000) == 1);
 }
 
 int main(int argc, char** argv) {
