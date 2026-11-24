@@ -92,7 +92,7 @@
 
 | 무엇 | 내용 |
 |---|---|
-| 입력 | process-manager Manager API 구독(읽기 소켓, 지금 `manager-logger.sock`). `io.json` `uses`: 모든 스트림(`many: true`, 정의는 가리지 않음: 내용은 해석하지 않고 그대로 기록) |
+| 입력 | process-manager Manager API 구독(매니저 읽기 소켓 `manager-record-manager.sock`, 0.66. 설정·환경 변수가 없을 때만 예전 `manager-logger.sock`, libworker `ManagerSubscription`). `io.json` `uses`: 모든 스트림(`many: true`, 정의는 가리지 않음: 내용은 해석하지 않고 그대로 기록) |
 | 명령 | `record.find`(읽기), `get_status` |
 | 주제 | `record`: `{"file": "<지금 파일>", "lines": n, "bytes": n, "drops": n, "disk_free_mb": n}` 1 s |
 | 이벤트 | `disk_low`(warning, 남은 공간 < 5%), `write_failed`(error), `pm_lost`(warning, process-manager 구독이 끊김) |

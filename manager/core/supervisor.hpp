@@ -58,6 +58,7 @@ struct SupervisorConfig {
     std::string workspace_root;            // get_io의 공통 정의 위치
     std::string boot_id;                   // 비어 있으면 null
     std::set<std::string> manager_api_workers;
+    std::set<std::string> manager_clients;  // 매니저 읽기 전용 소켓도 WORKSPACE_MANAGER_SOCKET으로 알려 줌
     std::string peers_file;                // 허용 목록(docs/command-path.md 4.2). 워커에 WORKSPACE_PEERS_FILE로
     std::string inputs_dir;                // 입력 주소 파일 폴더(design.md 6.6.7.4). 워커에 WORKSPACE_INPUTS_FILE로
 };

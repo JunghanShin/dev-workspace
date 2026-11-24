@@ -1,0 +1,6 @@
+{
+  "provides": ["system"],
+  "uses": {
+    "streams": {"from": "*", "many": true, "description": "스트림 연결 여부를 볼 곳: 자기 말고 모든 워커·매니저(docs/managers.md 5장)"}
+  }
+}

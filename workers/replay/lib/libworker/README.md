@@ -64,6 +64,23 @@ cmd_->start();
 
 상대가 없거나 다시 시작해도 살아서 다시 붙는다(`connected()`, `reachable()` → 지표 `<모듈>_link`). 본보기: 틀의 `lib/peer`.
 
+## 매니저 도구 (`worker/manager_link.hpp`, 0.13, 워크스페이스 docs/managers.md)
+
+```cpp
+// 여러 워커 입력(io.json uses "many": true): 입력 파일의 "many" 칸. 1 s쯤마다 refresh()
+worker::ManyInputs many("", host.id());          // 경로를 비우면 WORKSPACE_INPUTS_FILE
+if (many.refresh()) for (const auto& id : many.workers("streams")) { /* 구독 더하고 빼기 */ }
+// process-manager 구독(Manager API subscribe). 끊기면 다시 붙음. 받은 줄은 키 순서를 지킨 JSON
+worker::ManagerSubscription::Options o;          // socket을 비우면 WORKSPACE_MANAGER_SOCKET
+o.topics = {"workers", "system"};
+pm_ = std::make_unique<worker::ManagerSubscription>(host.watch(), o);
+pm_->start();
+// add_pollfds: fds.push_back({pm_->wake_fd(), POLLIN, 0});
+// on_poll:     while (auto e = pm_->next()) { /* e->kind: Connected | Line(e->msg) | Down(e->reason) */ }
+```
+
+본보기: `managers/record`, `managers/status`.
+
 시험: 이 폴더에서 `jetson-build --test`(또는 `--native --test`).
 
 명령 소켓 기본 경로(설정 `command_socket`이 없을 때): `$WORKSPACE_DATA/run/cmd/<id>.sock` → `$XDG_RUNTIME_DIR/<id>.sock` → `/tmp/<id>.sock`.

@@ -90,6 +90,7 @@ App::App(AppConfig cfg, Supervisor& sup, StoreThread& store, Publisher& pub, Res
     loop_slot_ = watch_.add("pm.loop");
     client_names_ = {"rest", "logger"};
     for (const auto& w : cfg_.api_workers) client_names_.push_back(w);  // std::set이라 이름순
+    for (const auto& w : cfg_.manager_clients) client_names_.push_back(w);
     sup_.listener = [this](const std::string& e, const std::string& k, const Json& d) { on_event(e, k, d); };
     sup_.inputs_for = [this](const std::string& id) {
         return inputs_res_.inject.contains(id) ? inputs_res_.inject[id] : Json::object();
@@ -551,7 +552,8 @@ Json App::dispatch_read(const Json& req) {
 
 std::optional<Json> App::check_write(const Json& req, const std::optional<std::string>& client) {
     const std::string op = req["op"].get<std::string>();
-    if (!client || *client == "logger") return error("forbidden", (client ? *client : "manager.sock") + " is read-only");
+    if (!client || *client == "logger" || cfg_.manager_clients.count(*client))
+        return error("forbidden", (client ? *client : "manager.sock") + " is read-only");
     // 제품 모드: 설정 잠금(시작·정지는 됨), 가짜 장치 설정 금지(design.md 11.4)
     if (kConfigOps.count(op) && !cfg_.config_write) return error("forbidden", "settings are locked (product)");
     if (cfg_.product && (op == "set_config" || op == "save_preset")) {

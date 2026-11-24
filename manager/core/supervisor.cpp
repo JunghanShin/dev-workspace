@@ -1111,7 +1111,7 @@ void Supervisor::do_spawn(Worker& w, const Json& t) {
     if (!cfg_.peers_file.empty()) spec.env.push_back("WORKSPACE_PEERS_FILE=" + cfg_.peers_file);
     if (!cfg_.inputs_dir.empty()) spec.env.push_back("WORKSPACE_INPUTS_FILE=" + cfg_.inputs_dir + "/" + w.id + ".json");
     // Manager API를 쓰는 워커에게만 전용 Manager 소켓을 알려 준다(design.md 6.5)
-    if (cfg_.manager_api_workers.count(w.id))
+    if (cfg_.manager_api_workers.count(w.id) || cfg_.manager_clients.count(w.id))
         spec.env.push_back(mgr_sock + cfg_.paths.run_dir + "/manager-" + w.id + ".sock");
     spec.log_path = cfg_.paths.log_path(w.id);  // 파이프를 쓰지 않는다: 파이프가 차면 워커가 막힌다(9.4)
     process_options(t, spec.nice, spec.cpus);

@@ -16,13 +16,13 @@
 #include <thread>
 
 #include "worker/config.hpp"
+#include "worker/manager_link.hpp"
 
 namespace record {
 
 namespace {
 
 constexpr int kWaitMs = 100;      // 스레드 대기 상한(이보다 오래 막히지 않고 beat)
-constexpr double kRetryS = 2.0;   // process-manager에 다시 붙는 간격(예전 logger와 같음)
 
 std::string env_or(const char* name, const std::string& def) {
     const char* v = std::getenv(name);
@@ -30,36 +30,6 @@ std::string env_or(const char* name, const std::string& def) {
 }
 
 double mono_s() { return mono_ns() / 1e9; }
-
-int connect_unix(const std::string& path, std::string* why) {
-    sockaddr_un addr{};
-    if (path.size() >= sizeof(addr.sun_path)) {
-        *why = "socket path too long";
-        return -1;
-    }
-    const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (fd < 0) {
-        *why = std::strerror(errno);
-        return -1;
-    }
-    addr.sun_family = AF_UNIX;
-    std::memcpy(addr.sun_path, path.c_str(), path.size() + 1);
-    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        *why = std::string("connect: ") + std::strerror(errno);
-        ::close(fd);
-        return -1;
-    }
-    return fd;
-}
-
-// 정지 요청을 보며 seconds 동안 쉰다(beat 계속)
-void nap(worker::WorkerThread& t, double seconds) {
-    const double until = mono_s() + seconds;
-    while (!t.stopping() && mono_s() < until) {
-        t.beat();
-        std::this_thread::sleep_for(std::chrono::milliseconds(kWaitMs));
-    }
-}
 
 }  // namespace
 
@@ -101,7 +71,7 @@ void Module::configure(const worker::Json& config) {
 void Module::start(worker::Host& host) {
     host_ = &host;
     boot_ = boot_id();
-    if (const char* f = std::getenv("WORKSPACE_INPUTS_FILE"); f && *f) inputs_file_ = f;
+    many_ = std::make_unique<worker::ManyInputs>("", host.id());
     platform_ = std::make_unique<PlatformRecorder>(s_.interval_s);
     file_ = std::make_unique<RecordFile>(s_.dir, static_cast<uint64_t>(s_.max_file_mb * 1048576),
                                          static_cast<uint64_t>(s_.max_total_mb * 1048576), s_.fsync_s, boot_);
@@ -118,10 +88,16 @@ void Module::start(worker::Host& host) {
     auto& watch = host.watch();
     write_thread_ = std::make_unique<worker::WorkerThread>("record.write", watch, [this](worker::WorkerThread& t) { run_write(t); });
     find_thread_ = std::make_unique<worker::WorkerThread>("record.find", watch, [this](worker::WorkerThread& t) { run_find(t); });
-    pm_thread_ = std::make_unique<worker::WorkerThread>("record.pm", watch, [this](worker::WorkerThread& t) { run_pm(t); });
+    worker::ManagerSubscription::Options po;
+    po.socket = s_.manager_socket;
+    po.topics = {"workers", "system", "commands"};
+    po.period_ms = static_cast<int>(s_.interval_s * 1000);
+    po.retry_sec = 2.0;  // 예전 logger와 같음
+    po.thread_name = "record.pm";
+    pm_ = std::make_unique<worker::ManagerSubscription>(watch, po);
     write_thread_->start();
     find_thread_->start();
-    pm_thread_->start();
+    pm_->start();
     sync_subs();
 }
 
@@ -133,21 +109,9 @@ void Module::put(const Json& rec, int64_t t_mono_ns) {
 }
 
 void Module::sync_subs() {
-    if (inputs_file_.empty() || !host_) return;
-    struct stat st {};
-    const long long mt = ::stat(inputs_file_.c_str(), &st) == 0 ? static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL + st.st_mtim.tv_nsec : -2;
-    if (mt == inputs_mtime_ns_) return;
-    inputs_mtime_ns_ = mt;
+    if (!many_ || !host_ || !many_->refresh()) return;
     std::set<std::string> want;
-    if (mt >= 0) {
-        std::ifstream in(inputs_file_);
-        const Json doc = Json::parse(in, nullptr, false);
-        const Json list = doc.is_object() && doc.contains("many") && doc["many"].is_object() && doc["many"].contains("streams")
-                              ? doc["many"]["streams"] : Json::array();
-        for (const auto& x : list.is_array() ? list : Json::array())
-            if (x.is_object() && x.contains("worker") && x["worker"].is_string() && x["worker"] != host_->id())
-                want.insert(x["worker"].get<std::string>());
-    }
+    for (const auto& id : many_->workers("streams")) want.insert(id);
     for (auto it = subs_.begin(); it != subs_.end();) {
         if (want.count(it->first)) {
             ++it;
@@ -174,7 +138,7 @@ void Module::on_timer(worker::TimePoint now) {
 }
 
 void Module::add_pollfds(std::vector<pollfd>& fds) {
-    fds.push_back({pm_q_.wake_fd(), POLLIN, 0});
+    if (pm_) fds.push_back({pm_->wake_fd(), POLLIN, 0});
     fds.push_back({found_q_.wake_fd(), POLLIN, 0});
     for (const auto& [id, sub] : subs_) fds.push_back({sub->wake_fd(), POLLIN, 0});
 }
@@ -186,17 +150,17 @@ void Module::on_poll(const std::vector<pollfd>& fds, worker::TimePoint now) {
 }
 
 void Module::drain() {
-    while (auto ev = pm_q_.try_pop()) {
+    while (auto ev = pm_ ? pm_->next() : std::nullopt) {
         switch (ev->kind) {
-        case PmEvent::Connected:
+        case worker::ManagerSubscription::Event::Connected:
             pm_link_ = true;
             put(platform_->connected());
             break;
-        case PmEvent::Down:
+        case worker::ManagerSubscription::Event::Down:
             pm_link_ = false;
             for (const auto& r : platform_->disconnected(ev->reason)) put(r);
             break;
-        case PmEvent::Line:
+        case worker::ManagerSubscription::Event::Line:
             for (const auto& r : platform_->handle(ev->msg, mono_s())) put(r);
             break;
         }
@@ -232,74 +196,6 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
     }
     pending_[id] = std::move(reply);
     return true;
-}
-
-void Module::run_pm(worker::WorkerThread& t) {
-    const double read_timeout = std::max(5.0, s_.interval_s * 5);
-    while (!t.stopping()) {
-        std::string why;
-        const int fd = connect_unix(s_.manager_socket, &why);
-        if (fd < 0) {
-            pm_q_.push(PmEvent{PmEvent::Down, Json(), why});
-            nap(t, kRetryS);
-            continue;
-        }
-        Json sub = Json::object();
-        sub["op"] = "subscribe";
-        sub["topics"] = Json::array({"workers", "system", "commands"});
-        sub["period_ms"] = static_cast<long long>(s_.interval_s * 1000);
-        const std::string req = sub.dump() + "\n";
-        (void)!::send(fd, req.data(), req.size(), MSG_NOSIGNAL);
-
-        std::string buf, reason = "manager closed the subscription";
-        bool first = true;
-        double last_rx = mono_s();
-        char chunk[65536];
-        while (!t.stopping()) {
-            t.beat();
-            pollfd p{fd, POLLIN, 0};
-            const int n = ::poll(&p, 1, kWaitMs);
-            if (n < 0 && errno != EINTR) {
-                reason = std::strerror(errno);
-                break;
-            }
-            if (n <= 0) {
-                if (mono_s() - last_rx > read_timeout) {
-                    reason = "timed out";
-                    break;
-                }
-                continue;
-            }
-            const ssize_t r = ::recv(fd, chunk, sizeof chunk, 0);
-            if (r <= 0) break;
-            last_rx = mono_s();
-            buf.append(chunk, static_cast<size_t>(r));
-            size_t pos;
-            bool stop_session = false;
-            while ((pos = buf.find('\n')) != std::string::npos) {
-                const std::string line = buf.substr(0, pos);
-                buf.erase(0, pos + 1);
-                Json msg = Json::parse(line, nullptr, false);
-                if (first) {
-                    first = false;
-                    if (!msg.is_object() || !msg.value("ok", false)) {
-                        reason = "subscribe refused: " + (msg.is_object() && msg.contains("error") ? msg["error"].dump() : line);
-                        stop_session = true;
-                        break;
-                    }
-                    pm_q_.push(PmEvent{PmEvent::Connected, Json(), ""});
-                    continue;
-                }
-                if (msg.is_discarded()) continue;  // 깨진 줄은 건너뜀(예전 logger와 같음)
-                pm_q_.push(PmEvent{PmEvent::Line, std::move(msg), ""});
-            }
-            if (stop_session) break;
-        }
-        ::close(fd);
-        if (t.stopping()) break;
-        pm_q_.push(PmEvent{PmEvent::Down, Json(), reason});
-        nap(t, kRetryS);
-    }
 }
 
 void Module::run_write(worker::WorkerThread& t) {
@@ -369,7 +265,11 @@ void Module::metrics(worker::Metrics& m) const {
 }
 
 bool Module::failed(std::string* why) const {
-    for (const auto* th : {pm_thread_.get(), write_thread_.get(), find_thread_.get()}) {
+    if (pm_ && pm_->thread().failed()) {
+        if (why) *why = pm_->thread().name() + ": " + pm_->thread().error();
+        return true;
+    }
+    for (const auto* th : {write_thread_.get(), find_thread_.get()}) {
         if (th && th->failed()) {
             if (why) *why = th->name() + ": " + th->error();
             return true;
@@ -382,10 +282,8 @@ void Module::stop() {
     for (auto& [id, sub] : subs_) sub->stop();
     if (platform_) drain();  // 구독에서 이미 받은 것도 남긴다
     subs_.clear();
-    if (pm_thread_) {
-        pm_thread_->request_stop();
-        pm_thread_->join();
-        pm_thread_.reset();
+    if (pm_) {
+        pm_->stop();
     }
     if (find_thread_) {
         find_thread_->request_stop();

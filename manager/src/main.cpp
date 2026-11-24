@@ -121,6 +121,7 @@ int main(int argc, char** argv) {
     pm::add_builtin_types(types, wd, root);
     pm::mark_requirements(types);
     const std::set<std::string> api_workers = pm::manager_api_workers(types);
+    const std::set<std::string> mgr_clients = pm::manager_clients(types, api_workers);
 
     const bool product = env_or("WORKSPACE_PRODUCT", "0") == "1";
     const bool config_write = env_or("WORKSPACE_CONFIG_WRITE", product ? "0" : "1") == "1";
@@ -151,6 +152,7 @@ int main(int argc, char** argv) {
     sc.workspace_root = root;
     sc.boot_id = read_boot_id();
     sc.manager_api_workers = api_workers;
+    sc.manager_clients = mgr_clients;
     sc.peers_file = paths.run_dir + "/peers.json";
     sc.inputs_dir = paths.run_dir + "/inputs";
     pm::mkdir_p(sc.inputs_dir);
@@ -181,6 +183,7 @@ int main(int argc, char** argv) {
     ac.logs_dir = paths.logs_dir();
     ac.notify_path = notify_path;
     ac.api_workers = api_workers;
+    ac.manager_clients = mgr_clients;
     ac.product = product;
     ac.config_write = config_write;
     // 명령 길(docs/command-path.md): 연결 선언(설정 폴더의 connections.json) → run/peers.json

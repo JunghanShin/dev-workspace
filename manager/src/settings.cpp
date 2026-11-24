@@ -273,4 +273,17 @@ std::set<std::string> manager_api_workers(const Json& types) {
     return out;
 }
 
+std::set<std::string> manager_clients(const Json& types, const std::set<std::string>& api_workers) {
+    // 매니저(type "kind": "manager")는 읽기 전용 클라이언트 소켓 manager-<id>.sock을 받는다(managers/status/design.md 4장).
+    // 쓰기가 필요한 매니저는 manager_api로 선언(그쪽이 이김)
+    std::set<std::string> out;
+    for (auto it = types.begin(); it != types.end(); ++it) {
+        if (it->value("kind", Json()) != Json("manager")) continue;
+        const Json wid = it->value("_worker_id", Json());
+        if (!wid.is_string() || wid.get<std::string>().empty() || wid == Json("rest") || wid == Json("logger")) continue;
+        if (!api_workers.count(wid.get<std::string>())) out.insert(wid.get<std::string>());
+    }
+    return out;
+}
+
 }  // namespace pm

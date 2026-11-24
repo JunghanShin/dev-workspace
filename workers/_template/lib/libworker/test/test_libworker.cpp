@@ -20,6 +20,7 @@
 #include "worker/command_server.hpp"
 #include "worker/guard.hpp"
 #include "worker/inputs.hpp"
+#include "worker/manager_link.hpp"
 #include "worker/workspace.hpp"
 #include "worker/host.hpp"
 #include "worker/mutex.hpp"
@@ -910,7 +911,70 @@ static void inputs_resolve_and_host() {
     rmdir(dir);
 }
 
+// 매니저 도구(0.13): 여러 워커 입력 목록 읽기, process-manager 구독(가짜 소켓)
+static void manager_link_tools() {
+    char tmpl[] = "/tmp/lw-many-XXXXXX";
+    const std::string dir = mkdtemp(tmpl);
+    const std::string file = dir + "/in.json";
+    auto write = [&](const std::string& text) {
+        const std::string tmp = file + ".tmp";
+        FILE* f = std::fopen(tmp.c_str(), "w");
+        std::fputs(text.c_str(), f);
+        std::fclose(f);
+        std::rename(tmp.c_str(), file.c_str());
+    };
+    worker::ManyInputs many(file, "me");
+    CHECK(!many.refresh() && many.workers("streams").empty());  // 파일 없음
+    write(R"({"inputs": {}, "many": {"streams": [{"worker": "b"}, {"worker": "me"}, {"worker": "a"}]}})");
+    CHECK(many.refresh());
+    CHECK((many.workers("streams") == std::vector<std::string>{"a", "b"}));
+    CHECK(!many.refresh());  // 그대로
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    write(R"({"many": {"streams": [{"worker": "a"}]}})");
+    CHECK(many.refresh() && many.workers("streams").size() == 1);
+
+    // 구독: 가짜 process-manager(첫 줄 ok, 그다음 줄들). 끊기면 Down
+    const std::string sock = dir + "/pm.sock";
+    const int lfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    sockaddr_un a{};
+    a.sun_family = AF_UNIX;
+    std::strncpy(a.sun_path, sock.c_str(), sizeof(a.sun_path) - 1);
+    CHECK(bind(lfd, reinterpret_cast<sockaddr*>(&a), sizeof a) == 0 && listen(lfd, 2) == 0);
+    worker::ThreadWatch watch(std::chrono::milliseconds(3000));
+    worker::ManagerSubscription::Options o;
+    o.socket = sock;
+    o.retry_sec = 0.2;
+    worker::ManagerSubscription sub(watch, o);
+    sub.start();
+    const int c = accept(lfd, nullptr, nullptr);
+    char buf[512] = {0};
+    CHECK(read(c, buf, sizeof buf - 1) > 0 && std::string(buf).find(R"("subscribe")") != std::string::npos);
+    const std::string lines = R"({"ok":true})" "\n" R"({"event":"system","data":{"z":1,"a":2}})" "\n" "broken\n";
+    CHECK(::write(c, lines.data(), lines.size()) == static_cast<ssize_t>(lines.size()));
+    std::vector<worker::ManagerSubscription::Event> got;
+    for (int i = 0; i < 50 && got.size() < 2; ++i) {
+        while (auto e = sub.next()) got.push_back(*e);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    CHECK(got.size() == 2 && got[0].kind == worker::ManagerSubscription::Event::Connected);
+    CHECK(got.size() == 2 && got[1].msg.dump() == R"({"event":"system","data":{"z":1,"a":2}})");  // 키 순서 그대로
+    CHECK(sub.connected());
+    close(c);
+    bool down = false;
+    for (int i = 0; i < 50 && !down; ++i) {
+        while (auto e = sub.next()) down |= e->kind == worker::ManagerSubscription::Event::Down;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    CHECK(down);
+    sub.stop();
+    close(lfd);
+    std::remove(file.c_str());
+    std::remove(sock.c_str());
+    rmdir(dir.c_str());
+}
+
 int main() {
+    manager_link_tools();
     inputs_resolve_and_host();
     guard_table();
     host_guard_and_last_command();

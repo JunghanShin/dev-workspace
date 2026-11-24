@@ -20,6 +20,8 @@ void add_builtin_types(Json& types, const Json& worker_defaults, const std::stri
 void mark_requirements(Json& types);
 // "manager_api": true인 워커 id
 std::set<std::string> manager_api_workers(const Json& types);
+// 매니저 읽기 전용 클라이언트(kind manager, manager_api가 아닌 것)
+std::set<std::string> manager_clients(const Json& types, const std::set<std::string>& api_workers);
 // 절대 경로로, 정리해서(os.path.abspath)
 std::string abspath(const std::string& p);
 

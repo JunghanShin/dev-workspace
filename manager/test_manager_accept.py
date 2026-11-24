@@ -995,6 +995,13 @@ class Accept(unittest.TestCase):
             s = e.wait_state(m, "running")
             self.assertEqual((s["builtin"], s["kind"]), (True, "manager"))
         self.assertEqual(e.status("w")["kind"], "worker")
+        # 매니저 읽기 전용 소켓 manager-<id>.sock(managers/status/design.md 4장): 환경 변수로 알려 줌, 읽기 되고 쓰기 forbidden
+        msock = os.path.join(e.run_dir, "manager-mgr.sock")
+        self.assertEqual(e.starts("mgr")[-1]["env"]["WORKSPACE_MANAGER_SOCKET"], msock)
+        self.assertIsNone(e.starts("w")[-1]["env"]["WORKSPACE_MANAGER_SOCKET"])
+        self.assertTrue(e.call("manager-mgr.sock", {"op": "list"})["ok"])
+        r = e.call("manager-mgr.sock", {"op": "stop", "id": "w"})
+        self.assertEqual((r["error"]["code"], r["error"]["message"]), ("forbidden", "mgr is read-only"))
         # 운용 모드: 매니저 정지·설정 바꾸기는 막음(게이트웨이도), 워커는 그대로
         for req in ({"op": "stop", "id": "mgr"}, {"op": "set_config", "id": "rec", "config": {"a": 1}},
                     {"op": "set_autostart", "id": "mgr", "autostart": False}):

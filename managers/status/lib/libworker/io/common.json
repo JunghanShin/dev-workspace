@@ -1,0 +1,82 @@
+{
+  "name": "common",
+  "version": "1.2",
+  "description": "공통 정의: 모든 워커가 같은 것(워크스페이스 design.md 6.6.7.1). get_status 겉모양, 공통 명령, 오류 code, heartbeat 지표(호스트·단계), 스트림 겉모양, 이벤트, 시각. 워커가 고치지 않는다(플랫폼 버전)",
+  "errors": ["bad_request", "unavailable", "timeout", "busy", "forbidden", "internal"],
+  "status": {
+    "id": {"type": "string", "description": "워커 id"},
+    "config_version": {"type": "integer", "description": "적용된 설정 버전"},
+    "sim": {"optional": true, "description": "가짜 장치(설정 sim이 있을 때만)",
+            "type": "object", "required": ["cmd", "running", "restarts"],
+            "properties": {"cmd": {"type": "array", "items": {"type": "string"}},
+                           "running": {"type": "boolean"}, "restarts": {"type": "integer"}}},
+    "threads": {"optional": true, "description": "스레드 이름 → 마지막 beat 뒤(ms)",
+                "type": "object", "additionalProperties": {"type": "number", "unit": "ms"}},
+    "last_command": {"optional": true, "description": "마지막으로 받은 읽기가 아닌 명령(워크스페이스 docs/command-path.md 5장, libworker 0.10). 없으면 null",
+                     "type": ["object", "null"], "required": ["cmd", "from", "t_mono_ns", "ok"],
+                     "properties": {"cmd": {"type": "string", "description": "명령 이름"},
+                                    "from": {"type": ["string", "null"], "description": "보낸 곳: screen, remote:<토큰 이름>, 워커·매니저 id, unknown:<pid>. 단독 실행이면 명령의 from(없으면 null)"},
+                                    "t_mono_ns": {"type": "integer", "unit": "ns", "description": "받은 시각(보드 CLOCK_MONOTONIC)"},
+                                    "ok": {"type": ["boolean", "null"], "description": "응답 결과(응답 전이면 null)"}}},
+    "inputs": {"optional": true, "description": "입력 주소와 연결 상태(design.md 6.6.7.5, libworker 0.11). 입력이 있을 때만",
+               "type": "object", "additionalProperties": {"type": "object", "required": ["worker", "from", "link"],
+                 "properties": {"worker": {"type": ["string", "null"], "description": "상대 워커 id(주소를 직접 받았으면 null)"},
+                                "from": {"type": "string", "enum": ["workspace", "config"], "description": "워크스페이스 연결 또는 설정 inputs"},
+                                "link": {"type": "boolean", "description": "상대에 붙었나"}}}},
+    "runtime": {"description": "워커 속사정(루프·단계·큐). 형식 보장 없음",
+                "type": "object", "additionalProperties": true}
+  },
+  "metrics": {
+    "host_loop_ms": {"type": "number", "unit": "ms", "description": "최근 1초 루프 한 바퀴 최대"},
+    "host_errors": {"type": "integer", "description": "호스트가 잡은 예외 수"},
+    "host_budget_overruns": {"type": "integer", "description": "처리 예산을 넘긴 바퀴 수"},
+    "inputs_<입력>_link": {"type": "integer", "description": "입력이 상대에 붙었나(0/1, 모듈이 host.input_link로 알림, libworker 0.11)"},
+    "<단계>_q": {"type": "integer", "description": "단계 큐에 쌓인 수"},
+    "<단계>_q_max": {"type": "integer", "description": "큐 최대"},
+    "<단계>_lag_ms": {"type": "number", "unit": "ms", "description": "넣고 꺼내기까지 최대"},
+    "<단계>_drops": {"type": "integer", "description": "넘쳐서 버린 수"},
+    "<단계>_errors": {"type": "integer", "description": "단계 처리 예외 수"}
+  },
+  "commands": {
+    "get_status": {
+      "description": "상태 전체. 응답 data = 이 정의의 status + 워커 정의의 status(모듈 칸)",
+      "args": {"type": "object"},
+      "reply": {"type": "object", "additionalProperties": true},
+      "errors": []
+    },
+    "__fault": {
+      "description": "장애 주입(시험, 설정 fault_injection이 켜졌을 때만)",
+      "args": {"type": "object", "additionalProperties": true},
+      "reply": {"type": "object", "additionalProperties": true},
+      "errors": ["bad_request", "forbidden"]
+    }
+  },
+  "definitions": {
+    "event": {
+      "description": "이벤트 하나(모든 워커·매니저 공통 형식)",
+      "type": "object", "required": ["t_mono_ns", "source", "severity", "code", "text"],
+      "properties": {
+        "seq": {"type": "integer", "description": "낸 쪽 안의 순서 번호(있으면)"},
+        "t_mono_ns": {"type": "integer", "unit": "ns", "description": "일어난 시각, 보드 CLOCK_MONOTONIC"},
+        "t_unix": {"type": "number", "unit": "s"},
+        "source": {"type": "string", "description": "<워커 id>.<모듈>"},
+        "severity": {"type": "string", "enum": ["info", "notice", "warning", "error", "critical"]},
+        "code": {"type": "string", "description": "기계가 읽는 이름(예: link_down)"},
+        "text": {"type": "string", "description": "사람이 읽는 문장"},
+        "detail": {"type": "object", "additionalProperties": true, "description": "낸 쪽이 덧붙이는 칸(뜻은 낸 쪽 설계서)"}
+      }
+    }
+  },
+  "stream": {
+    "description": "스트림 한 줄(9.7). topics의 각 값에는 t_mono_ns(그 값을 재거나 만든 시각)를 넣는다",
+    "type": "object", "required": ["seq", "kf", "t", "topics"],
+    "properties": {
+      "seq": {"type": "integer"},
+      "kf": {"type": "boolean", "description": "기준 상태(통째로 바꿈)"},
+      "t": {"type": "number", "unit": "s", "description": "보낸 시각(unix)"},
+      "topics": {"type": "object", "additionalProperties": {"type": ["object", "null"], "additionalProperties": true}, "description": "주제 이름 → 값(값은 그 주제의 정의로 검사)"},
+      "events": {"type": "array", "items": {"$ref": "#/definitions/event"}},
+      "events_next": {"type": "integer"}
+    }
+  }
+}

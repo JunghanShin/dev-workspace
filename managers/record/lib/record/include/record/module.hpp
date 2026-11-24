@@ -9,7 +9,7 @@
 //   topics          주제 규칙 [{"match": "<보낸 곳>.<주제> 글롭", "interval_ms": n}](기본 [{"match": "*", "interval_ms": 1000}])
 //   exclude         남기지 않을 "<보낸 곳>.<주제>" 글롭 목록
 //
-// 스레드(design.md 1장): record.pm(process-manager 구독) → 큐 → 코어(호스트 루프) → 쓰기 큐 → record.write(파일)
+// 스레드(design.md 1장): record.pm(process-manager 구독, libworker ManagerSubscription) → 큐 → 코어(호스트 루프) → 쓰기 큐 → record.write(파일)
 //                        명령 find → 찾기 큐 → record.find → 결과 큐 → 코어가 답함
 //                        워커·매니저마다 rs.<id>(스트림 구독, libworker Subscriber) → 큐 → 코어(주제·이벤트, 3단계)
 // 구독할 곳: 입력 파일(WORKSPACE_INPUTS_FILE)의 "many".streams(process-manager가 씀, docs/managers.md 5장).
@@ -28,6 +28,7 @@
 #include "record/topics.hpp"
 #include "worker/peer.hpp"
 #include "worker/host.hpp"
+#include "worker/manager_link.hpp"
 #include "worker/queue.hpp"
 #include "worker/thread.hpp"
 
@@ -65,11 +66,6 @@ public:
     const Settings& settings() const { return s_; }
 
 private:
-    struct PmEvent {
-        enum Kind { Connected, Line, Down } kind = Line;
-        Json msg;
-        std::string reason;
-    };
     struct FindReq {
         uint64_t id;
         Json args;
@@ -83,7 +79,6 @@ private:
     void put(const Json& rec, int64_t t_mono_ns);
     void sync_subs();           // 입력 파일의 many.streams와 구독을 맞춤
     void drain();
-    void run_pm(worker::WorkerThread& t);
     void run_write(worker::WorkerThread& t);
     void run_find(worker::WorkerThread& t);
 
@@ -92,18 +87,17 @@ private:
     std::unique_ptr<RecordFile> file_;  // start에서 열고 그 뒤로는 쓰기 스레드만 씀
     std::string boot_;
 
-    worker::BoundedQueue<PmEvent> pm_q_{256, worker::Overflow::DropOldest};
     worker::BoundedQueue<std::string> write_q_{4096, worker::Overflow::Reject};
     worker::BoundedQueue<FindReq> find_q_{4, worker::Overflow::Reject};
     worker::BoundedQueue<FindResult> found_q_{8, worker::Overflow::DropOldest};
-    std::unique_ptr<worker::WorkerThread> pm_thread_, write_thread_, find_thread_;
+    std::unique_ptr<worker::ManagerSubscription> pm_;  // process-manager 구독(libworker, 스레드 record.pm)
+    std::unique_ptr<worker::ManyInputs> many_;          // 여러 워커 입력 목록(libworker)
+    std::unique_ptr<worker::WorkerThread> write_thread_, find_thread_;
 
     std::map<uint64_t, worker::Reply> pending_;  // 코어만
     worker::Host* host_ = nullptr;
     TopicRules rules_;
     std::map<std::string, std::unique_ptr<worker::Subscriber>> subs_;  // 보낸 곳 id → 구독(코어만)
-    std::string inputs_file_;
-    long long inputs_mtime_ns_ = -1;
     uint64_t topics_ = 0, events_ = 0;
     uint64_t next_find_ = 1;
 
