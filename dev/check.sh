@@ -82,6 +82,28 @@ if (( ! QUICK )); then
     grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null
     fail+=("monitor build")
   fi
+  # 매니저(managers/*, docs/managers.md): 빌드 → 코어 유닛 + 통합 시험. record는 예전 workspace-logger와 줄 비교도
+  for m in "$ROOT"/managers/*/; do
+    m="${m%/}"
+    name="$(basename "$m")"
+    [[ -f "$m/CMakeLists.txt" ]] || continue
+    step "$name-manager (C++)"
+    b="$OUT/manager-$name"
+    if cmake -S "$m" -B "$b" -DCMAKE_BUILD_TYPE=Release >"$b.cfg.log" 2>&1        && cmake --build "$b" -j"$(nproc)" >"$b.build.log" 2>&1; then
+      if out="$(cd "$b" && ctest --output-on-failure 2>&1)"; then rc=0; else rc=$?; fi
+      echo "$out" | grep -E "tests passed|tests failed|FAIL" | head -5
+      (( rc == 0 )) || fail+=("$name-manager test")
+      if [[ -f "$m/test_compare.py" ]]; then
+        out="$(cd "$ROOT" && RECORD_BIN="$b/$name-manager" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest "managers/$name/test_compare.py" 2>&1)"; rc=$?
+        echo "test_compare: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)"
+        ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:|Error" | head -10; fail+=("$name-manager compare"); }
+      fi
+    else
+      echo "build failed: $b.build.log"
+      grep -m5 -E "error" "$b.build.log" "$b.cfg.log" 2>/dev/null
+      fail+=("$name-manager build")
+    fi
+  done
   for w in "$ROOT"/workers/*/; do  # _template 포함
     w="${w%/}"
     name="$(basename "$w")"
@@ -112,7 +134,7 @@ if (( ! QUICK )); then
   # 최신 커널의 넓은 주소 무작위화와 TSan이 맞지 않아 setarch -R(그 실행만 무작위화 끔)로 돌린다
   tsan="-fsanitize=thread -g -O1"
   # libworker 단위 시험(스레드·큐·단계·잠금)과 템플릿·모든 워커의 시험(연동 ON). 경고가 하나라도 있으면 실패
-  for target in "$ROOT/workers/_template/lib/libworker" "$ROOT/manager" "$ROOT/gateway" "$ROOT/monitor" "$ROOT"/workers/*/; do
+  for target in "$ROOT/workers/_template/lib/libworker" "$ROOT/manager" "$ROOT/gateway" "$ROOT/monitor" "$ROOT"/managers/*/ "$ROOT"/workers/*/; do
     target="${target%/}"
     [[ -f "$target/CMakeLists.txt" ]] || continue
     name="$(basename "$target")"

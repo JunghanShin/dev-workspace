@@ -28,8 +28,10 @@ TEMPLATE = os.path.join(ROOT, "workers", "_template")
 # 공용 라이브러리 = 틀에 있는 lib/lib*(원본). 워커는 쓰는 것만 사본으로 둔다. 틀의 예제 모듈(source 등)은 출발점이라 비교하지 않는다
 COPIED_LIBS = tuple(sorted(os.path.basename(d) for d in glob.glob(os.path.join(TEMPLATE, "lib", "lib*")) if os.path.isdir(d)))
 SKIP_DIRS = {"build", ".git", "__pycache__"}
-# 워커 틀로 만든 플랫폼 블록(워커 폴더가 아님): 시스템 모니터 sysmon(C++). 사본 라이브러리·코어 층 규칙만 같이 본다
-PLATFORM_WORKERS = (os.path.join(ROOT, "monitor"),)
+# 워커 틀로 만든 플랫폼 블록(워커 폴더가 아님): 시스템 모니터 sysmon(C++), 매니저(managers/*, docs/managers.md).
+# 사본 라이브러리·코어 층 규칙만 같이 본다
+PLATFORM_WORKERS = (os.path.join(ROOT, "monitor"),) + tuple(
+    sorted(d for d in glob.glob(os.path.join(ROOT, "managers", "*")) if os.path.isfile(os.path.join(d, "CMakeLists.txt"))))
 
 
 def workers(with_template=False):

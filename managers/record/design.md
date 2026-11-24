@@ -30,7 +30,7 @@
 
 ### 2.1 무엇을 기록하나
 
-| 종류(`kind`) | 출처 | 언제 | 지금 logger |
+| 종류(`type`) | 출처 | 언제 | 지금 logger |
 |---|---|---|---|
 | `worker` | process-manager `workers` | 상태가 바뀌면 바로, 아니면 워커마다 1 s | 같음 |
 | `removed` | process-manager | 워커가 빠질 때 | 같음 |
@@ -69,8 +69,8 @@
 ### 2.3 기록 줄
 
 ```json
-{"t": "2026-11-24T10:00:00.123+09:00", "t_mono_ns": 123456789000, "kind": "topic", "src": "cam1", "topic": "camera", "v": {}}
-{"t": "...", "t_mono_ns": 123456790000, "kind": "event", "src": "cam1", "v": {"severity": "warning", "code": "link_down"}}
+{"t": "2026-11-24T10:00:00.123+09:00", "t_mono_ns": 123456789000, "type": "topic", "src": "cam1", "topic": "camera", "v": {}}
+{"t": "...", "t_mono_ns": 123456790000, "type": "event", "src": "cam1", "v": {"severity": "warning", "code": "link_down"}}
 ```
 
 - `t`: 사람이 읽는 시각(지금 logger와 같음). `t_mono_ns`: 같은 시간축(보드 CLOCK_MONOTONIC, 공통 정의). 주제 값에 `t_mono_ns`가 있으면 그것(잰 시각), 없으면 받은 시각
@@ -100,7 +100,7 @@
 
 ## 4. 옮기는 순서
 
-1. record-manager가 `worker`·`removed`·`command`·`system`·`logger` 종류를 지금 logger와 같은 모양으로 씀. PC에서 둘을 나란히 돌려 줄을 비교(시험)
+1. record-manager가 `worker`·`removed`·`command`·`system`·`logger` 종류를 지금 logger와 같은 모양으로 씀. PC에서 둘을 나란히 돌려 줄을 비교(시험) — **됨(2026-11-24)**: `test_compare.py`(시각만 빼고 글자 그대로 같음), 단위·통합 시험·TSan
 2. 시작 셸이 logger를 띄우지 않음. 게이트웨이 `/history` 시험 그대로 통과 확인
 3. `topic`·`event` 종류 추가(`many` 입력 구현과 함께, process-manager 쪽)
 4. Python logger 삭제, 환경 변수 정리, 보드 확인

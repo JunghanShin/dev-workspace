@@ -63,7 +63,7 @@
 <text x="515" y="198">정한 간격으로 하나</text>
 <text x="515" y="220">이벤트 · 명령은 모두</text>
 <text x="515" y="242">줄 만들기(t, t_mono_ns,</text>
-<text x="515" y="258">kind, src)</text>
+<text x="515" y="258">type, src)</text>
 <text x="515" y="292">지표: 줄 · 버림 · 바이트</text>
 </g>
 
