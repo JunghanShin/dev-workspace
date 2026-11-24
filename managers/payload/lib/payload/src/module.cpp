@@ -237,6 +237,8 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
 
 void Module::on_timer(worker::TimePoint now) {
     drain();
+    // 입력 연결 알리기(지표 inputs_system_link, get_status inputs). 알리지 않으면 status가 링크 끊김으로 봄
+    if (host_ && host_->uses("system")) host_->input_link("system", sys_ && sys_->connected());
     if (mods_ && (ids_changed_ || now >= next_io_)) {
         io_want_.push(mods_->ids());
         ids_changed_ = false;

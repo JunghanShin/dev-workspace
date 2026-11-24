@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | 확정·구현(2026-11-24, 0.67). 단위·통합·게이트웨이·process-manager 수락 시험. 보드 확인(2026-11-24): 떠 있음(RSS 3.9 MB), peers.json에 `"*"`·`trusted_from`, 화면 명령(siyi `camera.zoom_abs`)이 mission을 거쳐 성공(`from: mission-manager`). 남은 확인: 장치 워커를 libworker 0.14로 다시 빌드함(DURU `3dfb1bb`), 보드를 다시 시작한 뒤 `origin: screen` 기록 |
+| 상태 | 확정·구현(2026-11-24, 0.67). 단위·통합·게이트웨이·process-manager 수락 시험. 보드 확인(2026-11-24): 떠 있음(RSS 3.9 MB), peers.json에 `"*"`·`trusted_from`, 화면 명령(siyi `camera.zoom_abs`)이 mission을 거쳐 성공(`from: mission-manager`). 다시 확인(장치 워커 libworker 0.14): siyi `last_command`에 `from: mission-manager`, `origin: screen` |
 | 대상 | **명령 송수신**: 화면·외부에서 온 워커 명령을 받아 맡은 워커로 보내고 결과를 돌려준다. 같은 역할에 동시에 온 명령을 정리한다 |
 | 실행 파일 | `bin/mission-manager`(C++, libworker 호스트 + 모듈 `mission`). 소스 `src/`, `lib/mission/` |
 | 바탕 | `docs/managers.md`(공통 틀, 4장 명령 길), `docs/command-path.md`(허용 목록·모드·`from`), `docs/gateway.md`(지금 명령 전달) |

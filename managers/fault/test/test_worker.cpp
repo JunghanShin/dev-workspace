@@ -183,6 +183,8 @@ static void test_fault() {
     }
     list = cmd(sock, {{"cmd", "fault.list"}, {"args", Json::object()}});
     CHECK(list.value("ok", false) && list["data"]["active"]["cam_lost:cam1"]["actions"][0]["ok"] == true);
+    const Json stj = cmd(sock, {{"cmd", "get_status"}, {"args", Json::object()}});
+    CHECK(stj.value("ok", false) && stj["data"]["inputs"]["system"]["link"] == true && stj["data"]["inputs"]["mission"]["link"] == true);
     Json r = cmd(sock, {{"cmd", "fault.ack"}, {"args", {{"id", "cam_lost:cam1"}}}});
     CHECK(r.value("ok", false));
     r = cmd(sock, {{"cmd", "fault.ack"}, {"args", {{"id", "nope"}}}});

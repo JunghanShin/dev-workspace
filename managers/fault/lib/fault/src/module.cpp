@@ -1,6 +1,7 @@
 #include "fault/module.hpp"
 
 #include <poll.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <ctime>
@@ -178,6 +179,12 @@ void Module::evaluate() {
 }
 
 void Module::on_timer(worker::TimePoint now) {
+    // 입력 연결 알리기(지표 inputs_<입력>_link). mission은 명령 소켓이 있으면 붙은 것으로(명령은 요청마다 연결)
+    if (host_) {
+        if (host_->uses("system")) host_->input_link("system", sys_ && sys_->connected());
+        if (const worker::InputAddress* in = host_->uses("mission"))
+            host_->input_link("mission", mission_ && (mission_->reachable() || ::access(in->command.c_str(), F_OK) == 0));
+    }
     if (now >= next_sync_) {
         sync_subs();
         next_sync_ = now + std::chrono::seconds(1);

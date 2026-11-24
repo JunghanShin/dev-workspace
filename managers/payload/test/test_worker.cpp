@@ -212,6 +212,14 @@ static void test_payload() {
     const Json mods = list.value("data", Json::object()).value("modules", Json::object());
     CHECK(mods.contains("cam1") && mods.contains("sensor") && !mods.contains("mission-manager"));
     CHECK(mods.contains("cam1") && mods["cam1"]["health"] == "degraded" && mods["cam1"]["groups"] == Json::parse(R"(["cams"])"));
+    // 입력 연결을 알림(get_status inputs.system.link)
+    Json stj;
+    for (int i = 0; i < 30; ++i) {
+        stj = cmd(sock, {{"cmd", "get_status"}, {"args", Json::object()}});
+        if (stj.value("ok", false) && stj["data"]["inputs"]["system"]["link"] == true) break;
+        std::this_thread::sleep_for(100ms);
+    }
+    CHECK(stj.value("ok", false) && stj["data"]["inputs"]["system"]["link"] == true);
     // 켜고 끄기
     Json r = cmd(sock, {{"cmd", "payload.power"}, {"args", {{"module", "sensor"}, {"on", false}}}, {"from", "screen"}});
     CHECK(r.value("ok", false) && r["data"]["desired_state"] == "stopped");
