@@ -85,7 +85,7 @@ static pid_t spawn(const std::string& config) {
         argv.push_back(nullptr);
         unsetenv("WORKSPACE_DATA");
         unsetenv("NOTIFY_SOCKET");
-        execv(argv[0], argv.data());
+        execvp(argv[0], argv.data());  // 에뮬레이터는 이름만 올 수 있다(PATH에서 찾음)
         _exit(127);
     }
     return pid;
