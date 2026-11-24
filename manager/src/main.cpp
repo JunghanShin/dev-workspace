@@ -120,7 +120,9 @@ int main(int argc, char** argv) {
     pm::Json types = pm::load_types(settings["types_file"].get<std::string>(), settings["types_dir"].get<std::string>(), wd, root);
     pm::add_builtin_types(types, wd, root);
     pm::mark_requirements(types);
-    const std::set<std::string> api_workers = pm::manager_api_workers(types);
+    const std::set<std::string> module_ctl = pm::module_controls(types);
+    std::set<std::string> api_workers = pm::manager_api_workers(types);
+    api_workers.insert(module_ctl.begin(), module_ctl.end());  // 모듈 운용 매니저도 쓰기 소켓
     const std::set<std::string> mgr_clients = pm::manager_clients(types, api_workers);
 
     const bool product = env_or("WORKSPACE_PRODUCT", "0") == "1";
@@ -185,6 +187,7 @@ int main(int argc, char** argv) {
     ac.api_workers = api_workers;
     ac.manager_clients = mgr_clients;
     ac.command_entries = pm::command_entries(types);
+    ac.module_controls = module_ctl;
     ac.product = product;
     ac.config_write = config_write;
     // 명령 길(docs/command-path.md): 연결 선언(설정 폴더의 connections.json) → run/peers.json

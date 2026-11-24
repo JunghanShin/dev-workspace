@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.67 |
+| 문서 버전 | 0.68 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -118,6 +118,7 @@
 | Manager | 1 | C++ | 워커 관리 상태 단일 소유, 실행·감시·재실행, 설정 검사·저장 | 시작 셸 |
 | REST | 1 | C++ | HTTP ↔ Manager API, 명령·스트림 중계, 화면 제공, 보드 읽기 | 시작 셸 |
 | Manager API를 쓰는 워커(외부 운용 인터페이스 등) | 0~N | C/C++ | 다른 워커 시작·정지·설정. 워커 폴더로 넣는 선택 부품(6.5) | Manager(워커로) |
+| payload-manager(매니저) | 1 | C++ | 들어간 모듈(매니저가 아닌 워커) 목록·건강, 켜고 끄기(운용 모드에서도 start·stop). `managers/payload/design.md` | Manager(기본 탑재) |
 | mission-manager(매니저) | 1 | C++ | 명령 입구: 게이트웨이가 넘긴 워커 명령을 (대상, 역할)마다 한 번에 하나씩 워커로. `managers/mission/design.md` | Manager(기본 탑재) |
 | status-manager(매니저) | 1 | C++ | 워커 상태·heartbeat·링크 지표로 건강을 정해 시스템 상태 하나(주제 `system`)로 냄. 보기만. `managers/status/design.md` | Manager(기본 탑재) |
 | record-manager(매니저) | 1 | C++ | Manager 상태·지표·명령 이력을 부팅 단위 파일로 기록(예전 workspace-logger를 대신, 0.63). `managers/record/design.md` | Manager(기본 탑재, 끌 때 마지막) |
@@ -1567,6 +1568,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.65 | **Python workspace-logger 삭제**(`managers/record/design.md` 4장 4단계): `logger/workspace_logger/` 지움, 환경 변수 `WORKSPACE_LOGGER_*` 없앰(값은 record-manager 설정 칸으로만). 비교 시험은 지우기 전에 저장한 정답 줄과 맞댐. record-manager는 kf에 다시 실려 오는 지난 이벤트를 뺌 |
 | 0.66 | **status-manager**(`managers/status/design.md`): 워커마다 건강(`off`·`fault`·`starting`·`degraded`·`ok`, 상태·heartbeat·`*_link` 지표·규칙 지표 조건) → 시스템 건강 하나(필수 워커, 비면 autostart), 주제 `system`(`io/system.json`, 시각 기준 `clock` 포함)·이벤트·`status.get_system`. 매니저마다 읽기 전용 소켓 `manager-<id>.sock`(process-manager, `WORKSPACE_MANAGER_SOCKET`). libworker 0.13 `worker/manager_link.hpp`: `ManyInputs`·`ManagerSubscription`(record-manager도 이것을 씀) |
 | 0.67 | **mission-manager**(`managers/mission/design.md`): 게이트웨이는 읽기가 아닌 워커 명령을 역할 `mission`을 내보내는 매니저로 `mission.send`(설치됐는데 꺼져 있으면 503, 없으면 지금처럼 바로), mission은 (대상, 역할)마다 한 번에 하나·대기 4·넘치면 `busy`·기다림 2.8 s 넘으면 `timeout`, 주제 `mission`. process-manager는 `"command_entry": true` 매니저를 허용 목록에서 게이트웨이처럼(`"*"`, `trusted_from`). libworker 0.14: 믿는 곳의 봉투 `origin` → `last_command.origin`(common 1.3), `CommandClient::send(cmd, args, envelope)`, `Host::current_from()` |
+| 0.68 | **payload-manager**(`managers/payload/design.md`): 모듈 = 매니저가 아닌 워커(역할은 계약, 건강은 status 주제 `system`), `payload.power`·`power_group`(규칙 `groups`)으로 process-manager에 start·stop 요청, 주제 `payload`. process-manager는 `"module_control": true` 매니저에게 쓰기 소켓을 주고 운용 모드에서도 매니저가 아닌 워커의 `start`·`stop`만 허용(매니저 대상은 늘 `forbidden`) |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

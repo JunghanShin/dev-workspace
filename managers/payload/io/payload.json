@@ -1,0 +1,32 @@
+{
+  "name": "payload",
+  "version": "1.0",
+  "description": "들어간 모듈의 운용(managers/payload/design.md 2·3·4장). payload-manager가 낸다",
+  "topics": {
+    "payload": {
+      "description": "모듈 목록(매니저가 아닌 워커)과 묶음. 바뀌면 바로, 그대로면 1 s",
+      "type": "object",
+      "required": ["t_mono_ns", "modules", "groups"],
+      "properties": {
+        "t_mono_ns": {"type": "integer", "unit": "ns"},
+        "modules": {"type": "object", "additionalProperties": {"type": "object", "required": ["roles", "state", "desired", "autostart", "health", "groups"],
+          "properties": {"roles": {"type": "array", "items": {"type": "string"}}, "state": {"type": "string"}, "desired": {"type": "string"},
+                         "autostart": {"type": "boolean"}, "health": {"type": ["string", "null"]}, "why": {"type": ["string", "null"]},
+                         "groups": {"type": "array", "items": {"type": "string"}}}}},
+        "groups": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}}
+      }
+    }
+  },
+  "commands": {
+    "payload.list": {"description": "모듈 목록", "read": true, "args": {"type": "object"},
+                     "reply": {"type": "object", "additionalProperties": true}, "errors": []},
+    "payload.power": {"description": "모듈 켜고 끄기(process-manager start·stop 요청). 답은 요청이 받아들여졌는지(desired_state)",
+                      "operate": true,
+                      "args": {"type": "object", "required": ["module", "on"], "properties": {"module": {"type": "string"}, "on": {"type": "boolean"}}},
+                      "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request", "not_found", "forbidden", "busy"]},
+    "payload.power_group": {"description": "묶음의 모듈마다 켜고 끄기. 답은 모듈별 결과",
+                            "operate": true,
+                            "args": {"type": "object", "required": ["group", "on"], "properties": {"group": {"type": "string"}, "on": {"type": "boolean"}}},
+                            "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request", "not_found"]}
+  }
+}

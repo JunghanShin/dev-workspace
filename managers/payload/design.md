@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | 확정(2026-11-24). 8장은 함께 정한 것 |
+| 상태 | 확정·구현(2026-11-24, 0.68). 단위·통합·process-manager 수락 시험. 보드 확인 남음 |
 | 대상 | **시스템에 들어간 모듈의 운용**: 무엇이 있고 어떤 상태인지, 켜고 끄기, 묶어 쓰기 |
 | 실행 파일 | `bin/payload-manager`(C++, libworker 호스트 + 모듈 `payload`). 소스 `src/`, `lib/payload/` |
 | 바탕 | `docs/managers.md`(공통 틀, 1장: payload = 들어간 모듈), `docs/command-path.md` 3장·8장(운용 조작, "모듈 전원 = 워커 시작/정지"), `managers/status`(건강) |

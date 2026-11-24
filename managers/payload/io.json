@@ -1,0 +1,6 @@
+{
+  "provides": ["payload"],
+  "uses": {
+    "system": {"from": "system", "version": "1.0", "topics": ["system"], "description": "모듈 건강: status-manager 주제 system"}
+  }
+}

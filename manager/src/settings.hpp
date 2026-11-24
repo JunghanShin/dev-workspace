@@ -20,6 +20,8 @@ void add_builtin_types(Json& types, const Json& worker_defaults, const std::stri
 void mark_requirements(Json& types);
 // "manager_api": true인 워커 id
 std::set<std::string> manager_api_workers(const Json& types);
+// 모듈 운용 매니저(kind manager + module_control true): 쓰기 소켓, 운용 모드에서도 워커 start·stop
+std::set<std::string> module_controls(const Json& types);
 // 명령 입구 매니저(kind manager + command_entry true): 허용 목록에서 게이트웨이처럼
 std::set<std::string> command_entries(const Json& types);
 // 매니저 읽기 전용 클라이언트(kind manager, manager_api가 아닌 것)

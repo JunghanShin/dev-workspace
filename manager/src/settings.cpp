@@ -273,6 +273,19 @@ std::set<std::string> manager_api_workers(const Json& types) {
     return out;
 }
 
+std::set<std::string> module_controls(const Json& types) {
+    // 모듈 운용 매니저(kind manager + module_control true, managers/payload/design.md 3장): 쓰기 소켓을 받고,
+    // 운용 모드에서도 매니저가 아닌 워커의 start·stop만 된다
+    std::set<std::string> out;
+    for (auto it = types.begin(); it != types.end(); ++it) {
+        if (it->value("kind", Json()) != Json("manager") || it->value("module_control", Json()) != Json(true)) continue;
+        const Json wid = it->value("_worker_id", Json());
+        if (wid.is_string() && !wid.get<std::string>().empty() && wid != Json("rest") && wid != Json("logger"))
+            out.insert(wid.get<std::string>());
+    }
+    return out;
+}
+
 std::set<std::string> command_entries(const Json& types) {
     // 명령 입구 매니저(type "kind": "manager" + "command_entry": true, managers/mission/design.md 5장):
     // 허용 목록에서 게이트웨이처럼 모든 워커에 "*", 봉투의 from·origin을 믿음

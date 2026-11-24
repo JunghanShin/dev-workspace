@@ -571,6 +571,13 @@ std::optional<Json> App::check_write(const Json& req, const std::optional<std::s
     // Manager API를 쓰는 워커는 자기 자신을 정지·설정하지 못한다(스스로 끊기지 않게)
     if (cfg_.api_workers.count(*client) && jget(req, "id") == Json(*client))
         return error("forbidden", "worker " + *client + " cannot control itself");
+    // 모듈 운용 매니저(managers/payload/design.md 3장): 매니저는 못 건드리고, 워커 start·stop은 운용 모드에서도 된다
+    if (cfg_.module_controls.count(*client)) {
+        const Json id = jget(req, "id");
+        if (id.is_string() && sup_.is_manager(id.get<std::string>()))
+            return error("forbidden", *client + " cannot start or stop managers");
+        if (op == "start" || op == "stop") return std::nullopt;
+    }
     // 운용 모드에서는 관리 조작(시작·정지·설정·연결 선언)을 개발 모드에서만(docs/command-path.md 3·5장 ③).
     // 화면의 같은 요청은 게이트웨이가 먼저 막는다. 게이트웨이(rest)는 사용자 역할과 함께 직접 판단하므로 여기서 보지 않음
     if (cfg_.api_workers.count(*client) && access_mode_ != "development") {

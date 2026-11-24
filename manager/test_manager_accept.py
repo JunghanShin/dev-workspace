@@ -989,7 +989,9 @@ class Accept(unittest.TestCase):
                      builtins={"managers/mgr": ("mgr_t", {"kind": "manager", "command_entry": True,
                                                           "builtin": {"id": "mgr", "autostart": True}}),
                                "managers/rec": ("rec_t", {"kind": "manager", "stop_order": 2,
-                                                          "builtin": {"id": "rec", "autostart": True}})}).start()
+                                                          "builtin": {"id": "rec", "autostart": True}}),
+                               "managers/pl": ("pl_t", {"kind": "manager", "module_control": True,
+                                                        "builtin": {"id": "pl", "autostart": True}})}).start()
         e.wait_state("w", "running")
         for m in ("mgr", "rec"):
             s = e.wait_state(m, "running")
@@ -1014,6 +1016,17 @@ class Accept(unittest.TestCase):
         self.assertTrue(pj["peers"]["mgr"].get("trusted_from"))
         self.assertEqual(pj["workers"]["w"]["allow"].get("mgr"), "*")
         self.assertNotIn("trusted_from", pj["peers"].get("rec", {}))
+        # 모듈 운용 매니저(module_control, managers/payload/design.md 3장): 쓰기 소켓, 운용 모드에서도 워커 start·stop만, 매니저는 못 건드림
+        e.wait_state("pl", "running")
+        self.assertEqual(e.starts("pl")[-1]["env"]["WORKSPACE_MANAGER_SOCKET"], os.path.join(e.run_dir, "manager-pl.sock"))
+        self.assertTrue(e.call("manager-pl.sock", {"op": "stop", "id": "w"})["ok"])
+        e.wait_state("w", "stopped")
+        self.assertTrue(e.call("manager-pl.sock", {"op": "start", "id": "w"})["ok"])
+        e.wait_state("w", "running")
+        r = e.call("manager-pl.sock", {"op": "set_autostart", "id": "w", "autostart": False})
+        self.assertEqual((r["error"]["code"], r.get("need")), ("forbidden", "development"))
+        r = e.call("manager-pl.sock", {"op": "start", "id": "rec"})
+        self.assertEqual((r["error"]["code"], r["error"]["message"]), ("forbidden", "pl cannot start or stop managers"))
         # 운용 모드: 매니저 정지·설정 바꾸기는 막음(게이트웨이도), 워커는 그대로
         for req in ({"op": "stop", "id": "mgr"}, {"op": "set_config", "id": "rec", "config": {"a": 1}},
                     {"op": "set_autostart", "id": "mgr", "autostart": False}):
@@ -1043,9 +1056,9 @@ class Accept(unittest.TestCase):
         def many():
             d = read_json(os.path.join(e.data, "run", "inputs", "rec.json"))
             return d.get("many") if d and e.status("rec")["actual_state"] == "running" else None
-        self.assertEqual(wait_for(many, 20), {"streams": [{"worker": "mgr"}, {"worker": "w"}]})
+        self.assertEqual(wait_for(many, 20), {"streams": [{"worker": "mgr"}, {"worker": "pl"}, {"worker": "w"}]})
         st = e.status("rec")["inputs"]["streams"]
-        self.assertEqual((st["how"], st["from"], st["ok"]), ("many", ["mgr", "w"], True))
+        self.assertEqual((st["how"], st["from"], st["ok"]), ("many", ["mgr", "pl", "w"], True))
         # 끌 때: 워커 → 매니저 → rec(stop_order 2)
         e.stop()
         t = {n: [x["t"] for x in e.events(n) if x["ev"] == "stop"][-1] for n in ("w", "mgr", "rec")}

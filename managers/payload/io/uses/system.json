@@ -1,0 +1,31 @@
+{
+  "name": "system",
+  "version": "1.0",
+  "description": "시스템 상태 하나(managers/status/design.md 3장). status-manager가 낸다. 다른 매니저·게이트웨이·record-manager가 구독",
+  "topics": {
+    "system": {
+      "description": "건강·워커별 건강·시각 기준. 건강이 바뀌면 바로, 그대로면 publish_ms(1 s)마다",
+      "type": "object",
+      "required": ["t_mono_ns", "health", "reasons", "workers", "counts", "pm_link", "clock"],
+      "properties": {
+        "t_mono_ns": {"type": "integer", "unit": "ns"},
+        "health": {"type": "string", "enum": ["ok", "degraded", "fault"]},
+        "reasons": {"type": "array", "items": {"type": "string"}},
+        "workers": {"type": "object", "additionalProperties": {"type": "object", "required": ["health", "state", "kind", "required", "links"],
+          "properties": {"health": {"type": "string", "enum": ["ok", "degraded", "fault", "starting", "off"]},
+                         "state": {"type": "string"}, "kind": {"type": "string"}, "required": {"type": "boolean"},
+                         "links": {"type": "object"}, "why": {"type": ["string", "null"]},
+                         "heartbeat_age_ms": {"type": ["number", "null"]}, "stream": {"type": ["boolean", "null"]}}}},
+        "counts": {"type": "object"},
+        "pm_link": {"type": "boolean"},
+        "clock": {"type": "object", "required": ["t_mono_ns", "t_unix", "boot_id"],
+                  "properties": {"t_mono_ns": {"type": "integer", "unit": "ns"}, "t_unix": {"type": "number", "unit": "s"},
+                                 "boot_id": {"type": "string"}}}
+      }
+    }
+  },
+  "commands": {
+    "status.get_system": {"description": "주제 system의 지금 값", "read": true, "args": {"type": "object"},
+                          "reply": {"type": "object", "additionalProperties": true}, "errors": []}
+  }
+}
