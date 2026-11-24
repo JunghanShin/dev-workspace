@@ -146,6 +146,16 @@ int main(int argc, char** argv) {
     CHECK(cmd("a", "source.set_rate", {{"hz", 0}})["error"]["code"] == "bad_request");
     CHECK(cmd("a", "nope.x")["ok"] == false);
     CHECK(mod("a", "peer").value("peer", std::string("x")).empty());  // peer 비움 = 꺼짐
+    // 명령 임대(docs/command-lease.md): boost는 임대 300 ms. 갱신하면 이어지고, 멈추면 호스트가 source.normal을 넣는다
+    CHECK(cmd("a", "source.boost", {{"hz", 200}})["ok"] == true);
+    CHECK(status("a")["leases"].contains("example"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    CHECK(cmd("a", "lease.renew", {{"role", "example"}})["ok"] == true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    CHECK(status("a")["leases"].contains("example"));  // 갱신해서 아직 있음
+    CHECK(wait_until([] { return status("a")["leases"].empty(); }, 2000));  // 갱신이 끊기면 끝
+    CHECK(status("a")["last_command"].value("cmd", std::string()) == "source.normal");
+    CHECK(status("a")["last_command"].value("from", std::string()) == "lease");
 
     // 2) 워커 둘: b가 a의 데이터·상태를 받고, a에 명령한다
     pid_t b = start("b", {{"source", {{"rate_hz", 5}}}, {"peer", {{"peer", "a"}}}});

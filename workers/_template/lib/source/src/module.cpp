@@ -158,7 +158,7 @@ void Module::publish_stream(worker::TimePoint now) {
     const double t = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
     pub_->publish(Json{{"seq", ++stream_seq_}, {"kf", kf}, {"t", t},
                        {"topics", {{"source", {{"t_mono_ns", last_ts_ns_}, {"seq", seq_}, {"mean", last_mean_}, {"rate_hz", rate}}}}},
-                       {"events", Json::array()}, {"events_next", 0}}.dump());
+                       {"events", host() ? Json(host()->take_events()) : Json::array()}, {"events_next", 0}}.dump());
 }
 
 // 자식 프로세스 감시: 죽으면 2초 뒤 다시 띄운다(워커는 계속)
@@ -195,6 +195,24 @@ bool Module::handle(const std::string& cmd, const Json& args, worker::Reply repl
         }
         cfg_.gen = g;
         reply(worker::ok_reply({{"rate_hz", g.rate_hz}}));  // 바로 적용, 설정 파일은 그대로
+        return true;
+    }
+    // 명령 임대 예(docs/command-lease.md): boost는 잠깐 주기를 올리고, 갱신이 끊기면 호스트가 normal을 넣는다
+    if (cmd == "boost" || cmd == "normal") {
+        if (cmd == "boost" && (!args.contains("hz") || !args["hz"].is_number())) {
+            reply(worker::error_reply("bad_request", "args.hz must be a number"));
+            return true;
+        }
+        std::lock_guard<worker::Mutex> lock(gen_mu_);
+        GeneratorConfig g = gen_.config();
+        g.rate_hz = cmd == "boost" ? args["hz"].get<double>() : cfg_.gen.rate_hz;
+        try {
+            gen_.set_config(g);
+        } catch (const ConfigError& e) {
+            reply(worker::error_reply("bad_request", e.what()));
+            return true;
+        }
+        reply(worker::ok_reply({{"rate_hz", g.rate_hz}}));
         return true;
     }
     if (cmd == "reset") {

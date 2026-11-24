@@ -1,6 +1,6 @@
 {
   "name": "common",
-  "version": "1.3",
+  "version": "1.4",
   "description": "공통 정의: 모든 워커가 같은 것(워크스페이스 design.md 6.6.7.1). get_status 겉모양, 공통 명령, 오류 code, heartbeat 지표(호스트·단계), 스트림 겉모양, 이벤트, 시각. 워커가 고치지 않는다(플랫폼 버전)",
   "errors": ["bad_request", "unavailable", "timeout", "busy", "forbidden", "internal"],
   "status": {
@@ -24,6 +24,10 @@
                  "properties": {"worker": {"type": ["string", "null"], "description": "상대 워커 id(주소를 직접 받았으면 null)"},
                                 "from": {"type": "string", "enum": ["workspace", "config"], "description": "워크스페이스 연결 또는 설정 inputs"},
                                 "link": {"type": "boolean", "description": "상대에 붙었나"}}}},
+    "leases": {"optional": true, "description": "명령 임대(워크스페이스 docs/command-lease.md, libworker 0.15). 계약에 lease_ms 명령이 있을 때만. 역할 → 지금 임대",
+               "type": "object", "additionalProperties": {"type": "object", "required": ["cmd", "from", "origin", "left_ms"],
+                 "properties": {"cmd": {"type": "string"}, "from": {"type": ["string", "null"]}, "origin": {"type": ["string", "null"]},
+                                "left_ms": {"type": "integer", "unit": "ms", "description": "기한까지 남은 시간"}}}},
     "runtime": {"description": "워커 속사정(루프·단계·큐). 형식 보장 없음",
                 "type": "object", "additionalProperties": true}
   },
@@ -31,6 +35,8 @@
     "host_loop_ms": {"type": "number", "unit": "ms", "description": "최근 1초 루프 한 바퀴 최대"},
     "host_errors": {"type": "integer", "description": "호스트가 잡은 예외 수"},
     "host_budget_overruns": {"type": "integer", "description": "처리 예산을 넘긴 바퀴 수"},
+    "host_lease_active": {"optional": true, "type": "integer", "description": "지금 걸린 명령 임대 수(계약에 임대 명령이 있을 때만, libworker 0.15)"},
+    "host_lease_expired": {"optional": true, "type": "integer", "description": "기한이 지나 안전 상태로 간 수(누적)"},
     "inputs_<입력>_link": {"type": "integer", "description": "입력이 상대에 붙었나(0/1, 모듈이 host.input_link로 알림, libworker 0.11)"},
     "<단계>_q": {"type": "integer", "description": "단계 큐에 쌓인 수"},
     "<단계>_q_max": {"type": "integer", "description": "큐 최대"},
@@ -44,6 +50,13 @@
       "args": {"type": "object"},
       "reply": {"type": "object", "additionalProperties": true},
       "errors": []
+    },
+    "lease.renew": {
+      "description": "명령 임대의 기한만 늘림(명령을 다시 보내지 않고). 임대가 없으면 bad_request(docs/command-lease.md)",
+      "operate": true,
+      "args": {"type": "object", "required": ["role"], "properties": {"role": {"type": "string"}}},
+      "reply": {"type": "object", "required": ["role", "left_ms"], "properties": {"role": {"type": "string"}, "left_ms": {"type": "integer", "unit": "ms"}}},
+      "errors": ["bad_request"]
     },
     "__fault": {
       "description": "장애 주입(시험, 설정 fault_injection이 켜졌을 때만)",

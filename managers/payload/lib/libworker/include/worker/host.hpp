@@ -205,6 +205,17 @@ public:
     // 지금 처리 중인 명령을 보낸 곳(검사를 거친 from: screen, remote:<이름>, 워커 id). 모듈 handle() 안에서만, 밖에서는 빈 글
     // (libworker 0.14, 명령 입구 매니저가 넘길 때 origin으로 씀)
     const std::string& current_from() const { return current_from_; }
+
+    // ---- 명령 임대(워크스페이스 docs/command-lease.md, libworker 0.15) ----
+    // 계약(provides 역할 정의)의 명령 "lease_ms"·역할 "safe_state"로 임대 표를 만든다. run이 시작할 때 내장 io로 부른다.
+    // 시험에서는 provides 객체({"<역할>": 정의})를 직접 넘겨도 된다
+    void load_leases(const Json& provides);
+    // 기한이 지난 임대: 그 역할의 safe_state 명령을 모듈에 넣고 이벤트를 쌓는다(run 루프가 부름, 시험에서도)
+    void lease_tick(TimePoint now);
+    // 다음 임대 기한(없으면 TimePoint::max())
+    TimePoint next_lease_deadline() const;
+    // 호스트가 낸 이벤트(공통 이벤트 형식, 예: lease_expired)를 꺼낸다. 스트림을 내는 모듈이 자기 이벤트에 붙여 발행
+    std::vector<Json> take_events();
     void input_link(const std::string& name, bool up);
     const std::map<std::string, InputAddress>& inputs() const { return inputs_; }
     Json status() const;
@@ -212,6 +223,22 @@ public:
 
 private:
     std::string current_from_;  // current_from()
+    struct LeaseDef {
+        std::string role;
+        int ms = 0;
+    };
+    struct Lease {
+        std::string cmd, from, origin;
+        TimePoint deadline{};
+    };
+    void route(const std::string& cmd, const Json& args, Reply reply);
+    void push_event(const std::string& severity, const std::string& code, const std::string& text, const Json& detail);
+    std::map<std::string, LeaseDef> lease_cmds_;  // 명령 → (역할, lease_ms)
+    std::map<std::string, Json> safe_states_;     // 역할 → {"cmd", "args"}
+    std::map<std::string, Lease> leases_;         // 역할 → 지금 임대
+    uint64_t lease_expired_ = 0;
+    std::vector<Json> host_events_;
+    uint64_t host_event_seq_ = 0;
     Json read_config(const std::string& path, std::string* id, long* version);
     Json host_keys(const Json& cfg) const;
     StageOptions stage_options(const std::string& name, StageOptions defaults) const;

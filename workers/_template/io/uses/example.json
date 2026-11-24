@@ -1,40 +1,182 @@
 {
   "name": "example",
-  "version": "1.1",
+  "version": "1.2",
   "description": "워커 템플릿 예제: 값 배열 생성(source), 이동 평균(processor), 다른 예제 워커 받기(peer). 칸은 JSON Schema, 단위는 unit(워크스페이스 design.md 6.6.7.1)",
+  "safe_state": {
+    "cmd": "source.normal",
+    "args": {}
+  },
   "commands": {
     "source.set_rate": {
       "description": "값 생성 주기를 바꾼다(바로 적용, 설정 파일은 그대로)",
-      "args": {"type": "object", "required": ["hz"],
-               "properties": {"hz": {"type": "number", "minimum": 0.1, "maximum": 1000, "unit": "Hz"}}},
-      "reply": {"type": "object", "required": ["rate_hz"],
-                "properties": {"rate_hz": {"type": "number", "unit": "Hz"}}},
-      "errors": ["bad_request"]
+      "args": {
+        "type": "object",
+        "required": [
+          "hz"
+        ],
+        "properties": {
+          "hz": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 1000,
+            "unit": "Hz"
+          }
+        }
+      },
+      "reply": {
+        "type": "object",
+        "required": [
+          "rate_hz"
+        ],
+        "properties": {
+          "rate_hz": {
+            "type": "number",
+            "unit": "Hz"
+          }
+        }
+      },
+      "errors": [
+        "bad_request"
+      ]
     },
     "source.reset": {
       "description": "생성 번호를 0으로",
-      "args": {"type": "object"},
-      "reply": {"type": "object", "required": ["seq"], "properties": {"seq": {"type": "integer"}}},
+      "args": {
+        "type": "object"
+      },
+      "reply": {
+        "type": "object",
+        "required": [
+          "seq"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer"
+          }
+        }
+      },
       "errors": []
     },
     "processor.reset": {
       "description": "이동 평균 창을 비운다",
-      "args": {"type": "object"},
-      "reply": {"type": "object", "required": ["count"], "properties": {"count": {"type": "integer"}}},
+      "args": {
+        "type": "object"
+      },
+      "reply": {
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
       "errors": []
     },
     "peer.set_rate": {
       "description": "상대 예제 워커의 source.set_rate로 넘긴다(응답은 상대 것)",
-      "args": {"type": "object", "required": ["hz"],
-               "properties": {"hz": {"type": "number", "minimum": 0.1, "maximum": 1000, "unit": "Hz"}}},
-      "reply": {"type": "object", "required": ["rate_hz"],
-                "properties": {"rate_hz": {"type": "number", "unit": "Hz"}}},
-      "errors": ["bad_request", "unavailable", "timeout"]
+      "args": {
+        "type": "object",
+        "required": [
+          "hz"
+        ],
+        "properties": {
+          "hz": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 1000,
+            "unit": "Hz"
+          }
+        }
+      },
+      "reply": {
+        "type": "object",
+        "required": [
+          "rate_hz"
+        ],
+        "properties": {
+          "rate_hz": {
+            "type": "number",
+            "unit": "Hz"
+          }
+        }
+      },
+      "errors": [
+        "bad_request",
+        "unavailable",
+        "timeout"
+      ]
     },
     "peer.reset": {
       "description": "받은 수·빠진 수를 0으로",
-      "args": {"type": "object"},
-      "reply": {"type": "object", "required": ["received"], "properties": {"received": {"type": "integer"}}},
+      "args": {
+        "type": "object"
+      },
+      "reply": {
+        "type": "object",
+        "required": [
+          "received"
+        ],
+        "properties": {
+          "received": {
+            "type": "integer"
+          }
+        }
+      },
+      "errors": []
+    },
+    "source.boost": {
+      "description": "누르는 동안만 주기를 올린다(명령 임대 예, docs/command-lease.md). 갱신이 끊기면 source.normal로 돌아감",
+      "lease_ms": 300,
+      "args": {
+        "type": "object",
+        "required": [
+          "hz"
+        ],
+        "properties": {
+          "hz": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 1000,
+            "unit": "Hz"
+          }
+        }
+      },
+      "reply": {
+        "type": "object",
+        "required": [
+          "rate_hz"
+        ],
+        "properties": {
+          "rate_hz": {
+            "type": "number",
+            "unit": "Hz"
+          }
+        }
+      },
+      "errors": [
+        "bad_request"
+      ]
+    },
+    "source.normal": {
+      "description": "boost를 끝내고 설정 주기로(임대의 안전 상태)",
+      "args": {
+        "type": "object"
+      },
+      "reply": {
+        "type": "object",
+        "required": [
+          "rate_hz"
+        ],
+        "properties": {
+          "rate_hz": {
+            "type": "number",
+            "unit": "Hz"
+          }
+        }
+      },
       "errors": []
     }
   },
@@ -42,12 +184,35 @@
     "source": {
       "description": "생성 상태. 바뀌었을 때만(값을 만들 때마다), 기준 상태는 새 구독자와 5초마다",
       "every_ms": 200,
-      "schema": {"type": "object", "required": ["t_mono_ns", "seq", "mean", "rate_hz"],
-                 "properties": {
-                   "t_mono_ns": {"type": "integer", "unit": "ns", "description": "값 배열을 만든 시각(1.1)"},
-                   "seq": {"type": "integer", "description": "생성 번호"},
-                   "mean": {"type": "number", "description": "마지막 값 배열의 평균"},
-                   "rate_hz": {"type": "number", "unit": "Hz", "description": "생성 주기"}}}
+      "schema": {
+        "type": "object",
+        "required": [
+          "t_mono_ns",
+          "seq",
+          "mean",
+          "rate_hz"
+        ],
+        "properties": {
+          "t_mono_ns": {
+            "type": "integer",
+            "unit": "ns",
+            "description": "값 배열을 만든 시각(1.1)"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "생성 번호"
+          },
+          "mean": {
+            "type": "number",
+            "description": "마지막 값 배열의 평균"
+          },
+          "rate_hz": {
+            "type": "number",
+            "unit": "Hz",
+            "description": "생성 주기"
+          }
+        }
+      }
     }
   },
   "data": {

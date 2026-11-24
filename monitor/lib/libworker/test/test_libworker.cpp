@@ -987,7 +987,83 @@ static void manager_link_tools() {
     rmdir(dir.c_str());
 }
 
+
+// 명령 임대(0.15, docs/command-lease.md): ok인 임대 명령만 기한, 갱신(같은 명령·lease.renew), 기한 지남 → safe_state가 모듈로·이벤트,
+// safe_state가 오면 끝, 실패한 명령은 임대 없음, 표시 없는 명령은 그대로
+namespace {
+struct Mount : worker::Module {
+    std::vector<std::string> got;
+    std::string name() const override { return "mount"; }
+    bool handle(const std::string& cmd, const worker::Json& args, worker::Reply reply) override {
+        got.push_back(cmd);
+        if (cmd == "rate" && args.value("fail", false)) {
+            reply(worker::error_reply("unavailable", "device busy"));
+            return true;
+        }
+        if (cmd == "rate" || cmd == "stop" || cmd == "angle") {
+            reply(worker::ok_reply());
+            return true;
+        }
+        return false;
+    }
+};
+}  // namespace
+
+static void command_lease() {
+    char dir[] = "/tmp/lw-lease-XXXXXX";
+    CHECK(mkdtemp(dir) != nullptr);
+    const std::string cfg = std::string(dir) + "/w.json";
+    write_text(cfg, R"({"id": "w1", "config_version": 1, "config": {}})");
+    worker::Host host("test");
+    auto& m = host.add<Mount>();
+    std::string err;
+    CHECK(host.configure_file(cfg, &err));
+    host.load_leases(worker::Json::parse(R"({"mount": {"name": "mount", "safe_state": {"cmd": "mount.stop", "args": {}},
+        "commands": {"mount.rate": {"lease_ms": 200}, "mount.angle": {}, "mount.stop": {}}}})"));
+    worker::Json r;
+    auto call = [&](const std::string& line) { host.dispatch(line, [&r](const worker::Json& j) { r = j; }); return r; };
+    using Clock = std::chrono::steady_clock;
+    CHECK(host.next_lease_deadline() == worker::TimePoint::max());
+    call(R"({"cmd": "mount.angle"})");  // 표시 없음: 임대 없음
+    CHECK(host.status()["leases"].empty());
+    call(R"({"cmd": "mount.rate", "args": {"fail": true}})");  // 실패: 임대 없음
+    CHECK(host.status()["leases"].empty());
+    CHECK(call(R"({"cmd": "mount.rate", "origin": "screen"})")["ok"] == true);
+    auto st = host.status();
+    CHECK(st["leases"].contains("mount") && st["leases"]["mount"]["cmd"] == "mount.rate" && st["leases"]["mount"]["origin"] == "screen");
+    const auto d1 = host.next_lease_deadline();
+    CHECK(d1 != worker::TimePoint::max());
+    // 기한 안: 아무것도 안 함
+    host.lease_tick(Clock::now());
+    CHECK(m.got.back() == "rate");
+    // 갱신(lease.renew): 기한이 늘어남
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK(call(R"({"cmd": "lease.renew", "args": {"role": "mount"}})")["ok"] == true);
+    CHECK(host.next_lease_deadline() > d1);
+    CHECK(call(R"({"cmd": "lease.renew", "args": {"role": "nope"}})")["error"]["code"] == "bad_request");
+    // 기한 지남 → safe_state가 모듈로, 이벤트, 임대 끝, last_command from lease
+    host.lease_tick(Clock::now() + std::chrono::milliseconds(300));
+    CHECK(m.got.back() == "stop");
+    CHECK(host.status()["leases"].empty());
+    CHECK(host.status()["last_command"]["from"] == "lease" && host.status()["last_command"]["ok"] == true);
+    auto ev = host.take_events();
+    CHECK(ev.size() == 1 && ev[0]["code"] == "lease_expired" && ev[0]["detail"]["role"] == "mount" && ev[0]["detail"]["origin"] == "screen");
+    CHECK(ev.size() == 1 && ev[0]["source"] == "w1.host" && ev[0]["severity"] == "warning");
+    CHECK(host.take_events().empty());
+    // safe_state 명령이 오면(사람이 멈춤) 임대 끝, 그 뒤 기한이 지나도 다시 멈추지 않음
+    call(R"({"cmd": "mount.rate"})");
+    CHECK(!host.status()["leases"].empty());
+    call(R"({"cmd": "mount.stop"})");
+    CHECK(host.status()["leases"].empty());
+    const size_t n = m.got.size();
+    host.lease_tick(Clock::now() + std::chrono::seconds(1));
+    CHECK(m.got.size() == n && host.take_events().empty());
+    std::remove(cfg.c_str());
+    rmdir(dir);
+}
+
 int main() {
+    command_lease();
     manager_link_tools();
     inputs_resolve_and_host();
     guard_table();

@@ -305,6 +305,25 @@ void Host::dispatch(const std::string& line, Reply reply, int peer_pid) {
             inner(resp);
         };
     }
+    // 명령 임대(docs/command-lease.md): lease.renew는 호스트가, 임대 명령은 ok일 때 기한을 잡고, safe_state 명령은 임대를 끝냄
+    if (cmd == "lease.renew") {
+        const std::string role = args.value("role", "");
+        auto it = leases_.find(role);
+        if (it == leases_.end()) return reply(error_reply("bad_request", "no lease on role " + role));
+        const auto def = lease_cmds_.find(it->second.cmd);
+        const int ms = def != lease_cmds_.end() ? def->second.ms : 0;
+        it->second.deadline = Clock::now() + std::chrono::milliseconds(ms);
+        return reply(ok_reply({{"role", role}, {"left_ms", ms}}));
+    }
+    for (auto it = safe_states_.begin(); it != safe_states_.end(); ++it)
+        if (it->second.value("cmd", "") == cmd) leases_.erase(it->first);
+    if (const auto ld = lease_cmds_.find(cmd); ld != lease_cmds_.end()) {
+        reply = [this, cmd, def = ld->second, from = g.from, origin, inner = std::move(reply)](const Json& resp) {
+            if (resp.is_object() && resp.value("ok", false))
+                leases_[def.role] = {cmd, from, origin, Clock::now() + std::chrono::milliseconds(def.ms)};
+            inner(resp);
+        };
+    }
     if (cmd == "get_status") return reply(ok_reply(status()));
     if (cmd == "__fault") {
         if (!fault_enabled_) return reply(error_reply("bad_request", "unknown command: __fault"));
@@ -312,7 +331,13 @@ void Host::dispatch(const std::string& line, Reply reply, int peer_pid) {
         if (!fault(args, &err)) return reply(error_reply("bad_request", err));
         return reply(ok_reply({{"injected", args}}));
     }
-    // "<모듈>.<명령>". 모듈이 하나뿐이면 앞부분 없이 써도 된다
+    current_from_ = g.from;  // handle 안에서만 뜻이 있음(명령 입구 매니저가 넘길 때 origin으로)
+    route(cmd, args, std::move(reply));
+    current_from_.clear();
+}
+
+// "<모듈>.<명령>"을 그 모듈의 handle로. 모듈이 하나뿐이면 앞부분 없이 써도 된다
+void Host::route(const std::string& cmd, const Json& args, Reply reply) {
     std::string mod, sub = cmd;
     if (const auto dot = cmd.find('.'); dot != std::string::npos) {
         mod = cmd.substr(0, dot);
@@ -322,11 +347,6 @@ void Host::dispatch(const std::string& line, Reply reply, int peer_pid) {
     }
     for (const auto& m : modules_) {
         if (m->name() != mod) continue;
-        current_from_ = g.from;  // handle 안에서만 뜻이 있음(명령 입구 매니저가 넘길 때 origin으로)
-        struct Clear {
-            std::string& s;
-            ~Clear() { s.clear(); }
-        } clear{current_from_};
         try {
             if (m->handle(sub, args, reply)) return;
         } catch (const Fatal& e) {
@@ -373,6 +393,15 @@ Json Host::status() const {
     }
     if (watch_) out["threads"] = watch_->ages_ms(Clock::now());
     out["last_command"] = last_command_.is_object() ? last_command_ : Json(nullptr);
+    if (!lease_cmds_.empty()) {  // 명령 임대(common 1.4)
+        Json ls = Json::object();
+        const auto now = Clock::now();
+        for (const auto& [role, l] : leases_)
+            ls[role] = {{"cmd", l.cmd}, {"from", l.from.empty() ? Json(nullptr) : Json(l.from)},
+                        {"origin", l.origin.empty() ? Json(nullptr) : Json(l.origin)},
+                        {"left_ms", std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(l.deadline - now).count())}};
+        out["leases"] = ls;
+    }
     if (!inputs_.empty()) {  // 입력 주소와 연결 상태(design.md 6.6.7.5)
         Json ins = Json::object();
         for (const auto& [n, in] : inputs_) {
@@ -495,6 +524,8 @@ std::string Host::host_metrics() {
                   static_cast<unsigned long long>(budget_overruns_));
     loop_max_us_ = 0;
     std::string out = buf;
+    if (!lease_cmds_.empty())
+        out += " host_lease_active=" + std::to_string(leases_.size()) + " host_lease_expired=" + std::to_string(lease_expired_);
     for (const auto& s : stages_)
         if (s) out += " " + s->metrics();
     for (const auto& [n, in] : inputs_) {  // 입력마다 연결(0/1)
@@ -606,6 +637,12 @@ int Host::run(int argc, char** argv) {
             std::fprintf(stderr, "%s: warning: config.stages.%s: no such stage\n", program_.c_str(), name.c_str());
     }
 
+    // 명령 임대 표(내장 계약의 provides). 계약이 없으면 비어 있음(아무것도 안 함)
+    {
+        std::string ioerr;
+        const auto bundle = io_bundle(&ioerr);
+        if (bundle.is_object() && bundle.contains("provides")) load_leases(Json::parse(bundle["provides"].dump()));
+    }
     // 명령하는 곳 허용 목록(process-manager가 띄울 때 WORKSPACE_PEERS_FILE). 없으면 단독 실행: 보지 않음
     if (const char* pf = std::getenv("WORKSPACE_PEERS_FILE"); pf && *pf) set_peers_file(pf);
     CommandServer server([&](int conn, const std::string& line) {
@@ -673,6 +710,7 @@ int Host::run(int argc, char** argv) {
         for (size_t i = 0; i < modules_.size(); ++i)
             guard(i, "next_wakeup", false, [&] { wake = std::min(wake, modules_[i]->next_wakeup(now)); });
         if (inputs_pending) wake = now;  // 예산을 넘겨 남은 입력이 있으면 바로 다음 차례
+        wake = std::min(wake, next_lease_deadline());
         const int timeout_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(wake - now).count());
         fds.clear();
         server.add_pollfds(fds);
@@ -702,6 +740,7 @@ int Host::run(int argc, char** argv) {
         server.on_timer(t);
         sim_tick(t);
         for (size_t i = 0; i < modules_.size(); ++i) guard(i, "on_timer", true, [&] { modules_[i]->on_timer(t); });
+        lease_tick(t);
         if (t >= next_report) {
             next_report = t + kReportPeriod;
             if (watch_->all_alive(t)) {
@@ -748,6 +787,83 @@ Json call_module(Module& m, const std::string& cmd, const Json& args) {
     auto out = std::make_shared<Json>();  // 늦게 오는 응답이 사라진 지역 변수에 쓰지 않게
     if (!m.handle(cmd, args, [out](const Json& r) { *out = r; })) return error_reply("bad_request", "unknown command");
     return *out;
+}
+
+// ---- 명령 임대(docs/command-lease.md) -------------------------------------------------------
+
+void Host::load_leases(const Json& provides) {
+    lease_cmds_.clear();
+    safe_states_.clear();
+    if (!provides.is_object()) return;
+    for (auto it = provides.begin(); it != provides.end(); ++it) {
+        const Json& def = *it;
+        if (!def.is_object()) continue;
+        bool any = false;
+        if (def.contains("commands") && def["commands"].is_object())
+            for (auto c = def["commands"].begin(); c != def["commands"].end(); ++c)
+                if (c->is_object() && c->contains("lease_ms") && (*c)["lease_ms"].is_number_integer()) {
+                    lease_cmds_[c.key()] = {it.key(), (*c)["lease_ms"].get<int>()};
+                    any = true;
+                }
+        if (def.contains("safe_state") && def["safe_state"].is_object()) safe_states_[it.key()] = def["safe_state"];
+        if (any && !safe_states_.count(it.key()))
+            std::fprintf(stderr, "%s: warning: role %s has lease commands but no safe_state (lease expiry does nothing)\n",
+                         program_.c_str(), it.key().c_str());
+    }
+}
+
+TimePoint Host::next_lease_deadline() const {
+    TimePoint t = TimePoint::max();
+    for (const auto& [role, l] : leases_) t = std::min(t, l.deadline);
+    return t;
+}
+
+void Host::push_event(const std::string& severity, const std::string& code, const std::string& text, const Json& detail) {
+    const auto mono = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
+    const double unix_s = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+    host_events_.push_back({{"seq", ++host_event_seq_}, {"t_mono_ns", mono}, {"t_unix", unix_s}, {"source", id_ + ".host"},
+                            {"severity", severity}, {"code", code}, {"text", text}, {"detail", detail}});
+    if (host_events_.size() > 64) host_events_.erase(host_events_.begin());
+}
+
+std::vector<Json> Host::take_events() {
+    std::vector<Json> out;
+    out.swap(host_events_);
+    return out;
+}
+
+void Host::lease_tick(TimePoint now) {
+    std::vector<std::pair<std::string, Lease>> expired;
+    for (auto it = leases_.begin(); it != leases_.end();) {
+        if (now >= it->second.deadline) {
+            expired.push_back(*it);
+            it = leases_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (const auto& [role, l] : expired) {
+        ++lease_expired_;
+        const int64_t late = std::chrono::duration_cast<std::chrono::milliseconds>(now - l.deadline).count();
+        auto ss = safe_states_.find(role);
+        const std::string scmd = ss != safe_states_.end() ? ss->second.value("cmd", "") : "";
+        std::fprintf(stderr, "%s: lease expired on %s (%s from %s), safe state: %s\n", program_.c_str(), role.c_str(), l.cmd.c_str(),
+                     (l.origin.empty() ? l.from : l.origin).c_str(), scmd.empty() ? "(none)" : scmd.c_str());
+        push_event("warning", "lease_expired", role + ": lease expired (" + l.cmd + "), " + (scmd.empty() ? "no safe state" : scmd),
+                   {{"role", role}, {"cmd", l.cmd}, {"from", l.from}, {"origin", l.origin}, {"late_ms", late},
+                    {"safe_state", scmd.empty() ? Json(nullptr) : Json(scmd)}});
+        if (scmd.empty()) continue;
+        const Json sargs = ss->second.contains("args") && ss->second["args"].is_object() ? ss->second["args"] : Json::object();
+        const auto t = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
+        last_command_ = {{"cmd", scmd}, {"from", "lease"}, {"t_mono_ns", t}, {"ok", nullptr}};
+        current_from_ = "lease";
+        route(scmd, sargs, [this, scmd, t](const Json& resp) {
+            const bool ok = resp.is_object() && resp.value("ok", false);
+            if (last_command_.is_object() && last_command_.value("t_mono_ns", int64_t(0)) == t) last_command_["ok"] = ok;
+            if (!ok) std::fprintf(stderr, "%s: safe state %s failed: %s\n", program_.c_str(), scmd.c_str(), resp.dump().c_str());
+        });
+        current_from_.clear();
+    }
 }
 
 }  // namespace worker

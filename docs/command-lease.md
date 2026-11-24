@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | 확정(2026-11-24). 7장은 함께 정한 것 |
+| 상태 | 확정·구현(2026-11-24, 0.72, libworker 0.15). 단위·계약·틀 통합 시험. 이벤트 `lease_expired`는 호스트 이벤트 큐(`Host::take_events`)에 쌓이고, 스트림을 내는 모듈이 자기 이벤트에 붙여 발행(틀 source 모듈이 본보기). 오류 code는 9.6 목록이라 임대 없음은 `bad_request` |
 | 대상 | 이어지는 명령(속도, 추종, 반복)은 명령한 쪽이 살아 있는 동안만 유지되고, 끊기면 워커가 스스로 안전 상태로 간다 |
 | 바탕 | design.md 원칙 14(명령 임대)·15(장치 자체 안전장치가 마지막), `docs/command-path.md`(명령 길·허용 목록), 계약(design.md 6.6.7.1), 남은 일 목록 `docs/managers-next.md` 1번 |
 
@@ -49,7 +49,7 @@
 | 시작 | 내장 계약(`worker_io`로 실행 파일에 넣은 io 정의)에서 임대 표를 만든다: 명령 → `lease_ms`, 역할 → `safe_state` |
 | 임대 명령이 ok로 끝남 | 그 역할의 임대 = `{기한: 지금 + lease_ms, cmd, from, origin}`. 실패한 명령은 임대를 잡지 않음(움직이지 않았으니) |
 | 같은 역할의 임대 명령이 또 옴 | 기한을 다시 `지금 + lease_ms`로(갱신) |
-| `lease.renew {"role"}` | 명령을 다시 보내지 않고 기한만 늘림(공통 명령, 운용 조작). 임대가 없으면 `not_found` |
+| `lease.renew {"role"}` | 명령을 다시 보내지 않고 기한만 늘림(공통 명령, 운용 조작). 임대가 없으면 `bad_request` |
 | `safe_state` 명령이 옴(사람이 멈춤을 누름) | 임대 끝 |
 | 타이머(50 ms마다) | 기한이 지났으면 그 역할의 `safe_state` 명령을 모듈에 스스로 넣고(`from: lease`), 이벤트 `lease_expired`(warning, 역할·명령·origin·늦은 ms), 임대 끝 |
 | 상태 | `get_status` 공통 칸 `leases: {"<역할>": {"cmd", "from", "origin", "left_ms"}}`, 지표 `host_lease_active`, `host_lease_expired` |

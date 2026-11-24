@@ -82,6 +82,10 @@ pm_->start();
 
 본보기: `managers/record`, `managers/status`.
 
+## 명령 임대 (0.15, 워크스페이스 docs/command-lease.md)
+
+역할 정의에 표시만 하면 호스트가 한다(모듈은 모름): 명령 `"lease_ms": 300`, 역할 `"safe_state": {"cmd": "<역할>.stop", "args": {}}`. 임대 명령이 ok로 끝나면 기한, 같은 명령·`lease.renew {"role"}`로 갱신, 기한이 지나면 호스트가 `safe_state` 명령을 모듈에 넣고 이벤트 `lease_expired`. 스트림을 내는 모듈은 `host()->take_events()`를 자기 `events`에 붙여 발행한다. 본보기: 틀 `io/example.json`의 `source.boost`·`source.normal`.
+
 시험: 이 폴더에서 `jetson-build --test`(또는 `--native --test`).
 
 명령 소켓 기본 경로(설정 `command_socket`이 없을 때): `$WORKSPACE_DATA/run/cmd/<id>.sock` → `$XDG_RUNTIME_DIR/<id>.sock` → `/tmp/<id>.sock`.

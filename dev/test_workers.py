@@ -150,7 +150,7 @@ class Compliance(unittest.TestCase):
 IO_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 IO_VERSION = re.compile(r"^(\d+)\.(\d+)$")
 # 명령 정의의 칸(design.md 6.6.7.1, docs/command-path.md 3장)
-CMD_KEYS = {"description", "args", "reply", "errors", "read", "operate"}
+CMD_KEYS = {"description", "args", "reply", "errors", "read", "operate", "lease_ms"}
 IO_ERRORS = {"bad_request", "unavailable", "timeout", "busy", "forbidden", "internal"}  # 9.6
 SCHEMA_TYPES = {"object", "array", "string", "number", "integer", "boolean", "null"}
 
@@ -206,7 +206,8 @@ class IoDefinitions(unittest.TestCase):
         d = load_json(path)
         stem = os.path.splitext(os.path.basename(path))[0]
         rel = os.path.relpath(path, ROOT)
-        self.assertEqual(sorted(set(d) - {"name", "version", "description", "commands", "topics", "data", "definitions"}), [], rel + ": 모르는 항목")
+        self.assertEqual(sorted(set(d) - {"name", "version", "description", "commands", "topics", "data", "definitions", "safe_state"}), [],
+                         rel + ": 모르는 항목")
         defs = d.get("definitions", {})
         self.assertIsInstance(defs, dict, rel + ": definitions는 객체")
         for k, sub in defs.items():
@@ -221,6 +222,20 @@ class IoDefinitions(unittest.TestCase):
             self.check_schema(c.get("args"), where + ".args", defs)
             self.check_schema(c.get("reply"), where + ".reply", defs)
             self.assertEqual(sorted(set(c.get("errors", [])) - IO_ERRORS), [], where + ".errors는 9.6 code만")
+        # 명령 임대(docs/command-lease.md): lease_ms는 100 이상 정수, 있으면 safe_state가 있어야 하고 그 명령은 같은 정의의 임대 없는 명령
+        leased = [n for n, c in d.get("commands", {}).items() if "lease_ms" in c]
+        for n in leased:
+            v = d["commands"][n]["lease_ms"]
+            self.assertTrue(isinstance(v, int) and not isinstance(v, bool) and v >= 100, "%s: commands.%s.lease_ms는 100 이상 정수" % (rel, n))
+            self.assertFalse(d["commands"][n].get("read"), "%s: commands.%s: 읽기 명령에는 임대를 붙이지 않음" % (rel, n))
+        if leased or "safe_state" in d:
+            ss = d.get("safe_state")
+            self.assertIsInstance(ss, dict, rel + ": lease_ms가 있으면 safe_state {\"cmd\", \"args\"?}가 있어야 함")
+            self.assertEqual(sorted(set(ss) - {"cmd", "args"}), [], rel + ": safe_state: 모르는 항목")
+            self.assertIn(ss.get("cmd"), d.get("commands", {}), rel + ": safe_state.cmd는 이 정의의 명령")
+            self.assertNotIn("lease_ms", d["commands"][ss["cmd"]], rel + ": safe_state 명령에는 임대를 붙이지 않음")
+            if "args" in ss:
+                self.assertIsInstance(ss["args"], dict, rel + ": safe_state.args는 객체")
         for name, t in d.get("topics", {}).items():
             where = "%s: topics.%s" % (rel, name)
             self.assertEqual(sorted(set(t) - {"description", "every_ms", "schema"}), [], where + ": 모르는 항목")
