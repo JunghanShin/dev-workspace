@@ -12,6 +12,7 @@
 #include "board_parse.hpp"
 #include "crypto.hpp"
 #include "history.hpp"
+#include "media_auth.hpp"
 #include "pipeline.hpp"
 #include "profile_rules.hpp"
 #include "routes.hpp"
@@ -93,6 +94,9 @@ void test_routes() {
     CHECK(route("GET", "/workers//", false).kind == RouteKind::None);
     CHECK(route("GET", "/workers/w1/stream", false).kind == RouteKind::Stream);
     CHECK(route("PUT", "/workers/w1/stream", false).kind == RouteKind::MethodNotAllowed);
+    CHECK(route("GET", "/streams", false).kind == RouteKind::Streams);
+    CHECK(route("GET", "/streams/", false).kind == RouteKind::Streams);
+    CHECK(route("POST", "/streams", false).kind == RouteKind::MethodNotAllowed);
     CHECK(route("POST", "/workers/w1/command/", false).kind == RouteKind::Command);
     CHECK(route("GET", "/health///", false).kind == RouteKind::Health);
     CHECK(route("GET", "/workspace/settings/", false).kind == RouteKind::Settings);
@@ -160,6 +164,36 @@ void test_ui_rules() {
     CHECK_EQ(lines[0], std::string("1 a_b 1.2 0.0 9"));
     lines = remote_lines("power_modes", Json::parse(R"({"modes":{"10":"B","2":"A"}})"));
     CHECK_EQ(lines[0], std::string("< POWER_MODEL ID=2 NAME=A >"));
+}
+
+void test_stream_mux() {
+    std::vector<StreamWant> w;
+    std::string err;
+    CHECK(parse_stream_ids("a:2,b,c.d-1:100", 10, w, err));
+    CHECK_EQ(w.size(), 3u);
+    CHECK(w[0].id == "a" && w[0].hz == 2);
+    CHECK(w[1].id == "b" && w[1].hz == 10);
+    CHECK(w[2].id == "c.d-1" && w[2].hz == 50);  // 0.2~50
+    CHECK(parse_stream_ids("a:0", 10, w, err) && w[0].hz == 0.2);
+    for (const char* bad : {"", "a,", ",a", "a,,b", "-a", "a b", "a:x", "a:", "a:nan", "a,a:2", "a/b", "a\n"})
+        CHECK(!parse_stream_ids(bad, 10, w, err));
+    std::string many;
+    for (size_t i = 0; i < kMaxStreamIds; ++i) many += (i ? ",w" : "w") + std::to_string(i);
+    CHECK(parse_stream_ids(many, 10, w, err) && w.size() == kMaxStreamIds);
+    CHECK(!parse_stream_ids(many + ",extra", 10, w, err));
+    CHECK(err.find("too many") != std::string::npos);
+
+    bool down = false;
+    CHECK_EQ(mux_line("a", Json::parse(R"({"seq":1,"kf":true,"topics":{"x":1},"stream":"up"})"), down),
+             std::string(R"({"seq":1,"kf":true,"topics":{"x":1},"stream":"up","worker":"a"})"));
+    CHECK(!down);
+    CHECK_EQ(mux_line("a", Json::parse(R"({"seq":2,"kf":false,"topics":{},"stream":"down"})"), down),
+             std::string(R"({"worker":"a","down":true})"));
+    CHECK(down);
+    CHECK_EQ(mux_line("a", Json::parse(R"({"seq":3,"kf":true,"topics":{},"stream":"down"})"), down), std::string());
+    CHECK_EQ(mux_line("a", Json::parse(R"({"seq":4,"kf":true,"topics":{"y":2},"stream":"up"})"), down),
+             std::string(R"({"seq":4,"kf":true,"topics":{"y":2},"stream":"up","worker":"a"})"));
+    CHECK(!down);
 }
 
 void test_stream_state() {
@@ -483,6 +517,8 @@ void test_roles() {
         {"GET", "/api/board/workers/w1", Need::Read},
         {"GET", "/system", Need::Read},
         {"GET", "/workers/w1/stream", Need::Read},
+        {"GET", "/streams", Need::Read},
+        {"GET", "/api/board/streams", Need::Read},
         {"GET", "/workers/w1/io", Need::Read},
         {"GET", "/logs/workers/w1", Need::Read},
         {"GET", "/api/remote/commands", Need::Read},
@@ -706,6 +742,84 @@ void test_settings() {
     CHECK(!act.count("B"));
 }
 
+// 워커 명령·Manager 오류 code → HTTP(design.md 6.4·9.6), 영상 로그인 판정(docs/media-auth.md)
+void test_media_auth() {
+    CHECK_EQ(worker_error_status(Json("bad_request")), 400);
+    CHECK_EQ(worker_error_status(Json("forbidden")), 403);
+    CHECK_EQ(worker_error_status(Json("busy")), 409);
+    CHECK_EQ(worker_error_status(Json("unavailable")), 503);
+    CHECK_EQ(worker_error_status(Json("timeout")), 504);
+    CHECK_EQ(worker_error_status(Json("internal")), 500);
+    CHECK_EQ(worker_error_status(Json("other")), 500);
+    CHECK_EQ(worker_error_status(Json(nullptr)), 500);
+    CHECK_EQ(manager_error_status(Json("not_found")), 404);
+    CHECK_EQ(manager_error_status(Json("conflict")), 409);
+    CHECK_EQ(manager_error_status(Json("busy")), 500);
+
+    CHECK(is_loopback("127.0.0.1") && is_loopback("127.1.2.3") && is_loopback("::1") && is_loopback("::ffff:127.0.0.1"));
+    CHECK(!is_loopback("10.0.0.1") && !is_loopback("127.0.0.1.evil") && !is_loopback("") && !is_loopback("1127.0.0.1"));
+
+    MediaRequest m;
+    CHECK(!parse_media_request(Json::array(), m));
+    CHECK(parse_media_request(Json::parse(R"({"user":"a","password":"p","token":"t","ip":"10.0.0.5","action":"read",
+        "path":"siyi","protocol":"rtsp","id":null,"query":"x=1","extra":1})"), m));
+    CHECK_EQ(m.user + "|" + m.password + "|" + m.token + "|" + m.ip + "|" + m.action + "|" + m.path + "|" + m.protocol,
+             std::string("a|p|t|10.0.0.5|read|siyi|rtsp"));
+    CHECK(parse_media_request(Json::parse(R"({"user":1})"), m) && m.user.empty());
+
+    auto v = [](const char* ip, const char* action, bool on, Role who) {
+        MediaRequest r;
+        r.ip = ip;
+        r.action = action;
+        return media_status(media_verdict(r, on, who));
+    };
+    // 보드 안: 늘 허락(송출·nginx 넘김·중계), 로그인 켬이어도
+    CHECK_EQ(v("127.0.0.1", "publish", true, Role::None), 200);
+    CHECK_EQ(v("::1", "read", true, Role::None), 200);
+    // 로그인 꺼짐: 바깥도 모두(예전과 같음)
+    CHECK_EQ(v("10.0.0.5", "publish", false, Role::None), 200);
+    CHECK_EQ(v("10.0.0.5", "read", false, Role::None), 200);
+    // 켬: 바깥 보기는 자격 필요(401: 자격을 보내라), viewer 이상 허락, publish는 늘 거절
+    CHECK_EQ(v("10.0.0.5", "read", true, Role::None), 401);
+    CHECK_EQ(v("10.0.0.5", "playback", true, Role::Viewer), 200);
+    CHECK_EQ(v("10.0.0.5", "read", true, Role::Maintainer), 200);
+    CHECK_EQ(v("10.0.0.5", "publish", true, Role::Maintainer), 403);
+    CHECK_EQ(v("10.0.0.5", "weird", true, Role::Maintainer), 403);
+    // MediaMTX 관리 동작은 보드 안에서만(켬·꺼짐 모두)
+    CHECK_EQ(v("10.0.0.5", "api", false, Role::None), 403);
+    CHECK_EQ(v("127.0.0.1", "metrics", true, Role::None), 200);
+    MediaRequest r;
+    r.ip = "10.0.0.5";
+    r.action = "read";
+    CHECK(media_needs_identity(r, true) && !media_needs_identity(r, false));
+    r.action = "publish";
+    CHECK(!media_needs_identity(r, true));
+    r.action = "read";
+    r.ip = "127.0.0.1";
+    CHECK(!media_needs_identity(r, true));
+
+    // 토큰: token 칸, 아니면 password 칸(이름은 아무거나)
+    UsersDb db;
+    User u;
+    u.name = "v1";
+    u.role = Role::Viewer;
+    u.tokens.push_back({"cam", sha256_hex("tok-123")});
+    db.users.push_back(u);
+    MediaRequest t;
+    t.token = "tok-123";
+    std::string tn;
+    CHECK(media_token_user(db, t, &tn) && tn == "cam");
+    t.token = "";
+    t.user = "anything";
+    t.password = "tok-123";
+    CHECK(media_token_user(db, t) && media_token_user(db, t)->name == "v1");
+    t.password = "nope";
+    CHECK(!media_token_user(db, t));
+    t.token = "bad";
+    t.password = "tok-123";
+    CHECK(media_token_user(db, t));  // 틀린 token 칸이어도 password 칸이 맞으면
+}
+
 }  // namespace
 
 int main() {
@@ -713,6 +827,7 @@ int main() {
     test_routes();
     test_ui_rules();
     test_stream_state();
+    test_stream_mux();
     test_history();
     test_profile_rules();
     test_board_parse();
@@ -725,6 +840,7 @@ int main() {
     test_limiter();
     test_record_line();
     test_settings();
+    test_media_auth();
     std::cout << (g_fail ? "FAILED " : "OK ") << g_checks - g_fail << "/" << g_checks << " checks\n";
     return g_fail ? 1 : 0;
 }

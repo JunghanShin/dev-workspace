@@ -44,11 +44,12 @@
 |---|---|---|
 | 화면 | 화면 제목(`WORKSPACE_UI_TITLE`), 영상 주소 틀(`WORKSPACE_UI_MEDIA_URL`) | 바로 |
 | 명령 | 명령 응답 대기(`WORKSPACE_REST_COMMAND_TIMEOUT`, 초) | 바로 |
-| 기록·로그 | 로그 수준(`WORKSPACE_LOG_LEVEL`), 기록 간격·파일 크기·전체 크기(`WORKSPACE_LOGGER_*`) | 다시 시작 |
-| 보안 | HTTPS 켬·포트·인증서·평문 넘김(`WORKSPACE_HTTPS*`, `WORKSPACE_HTTP_REDIRECT`), 로그인(`WORKSPACE_AUTH`) | 다시 시작 |
+| 로그 | 로그 수준(`WORKSPACE_LOG_LEVEL`): 게이트웨이·process-manager | 바로(0.86) |
+| 보안 | HTTPS 켬·포트·인증서·평문 넘김(`WORKSPACE_HTTPS*`, `WORKSPACE_HTTP_REDIRECT`): nginx 설정 다시 만들기·다시 읽기 | 바로(0.86, nginx 뒤일 때) |
+| 보안 | 로그인(`WORKSPACE_AUTH`): 게이트웨이 신분 확인 바꿔 끼우기 + nginx `/media/` 막기 | 바로(0.86) |
 
-- 폼은 워커 설정 창과 같은 부품(`kit.js` 스키마 폼, design.md 6.10)으로 그린다. 칸 정의는 **`install/config/workspace-settings.json`**(키·묶음·이름·형식·범위·적용 `live`|`restart`·설명). 지금 `workspace.env` 주석에 있는 설명을 옮긴다
-- 저장 → 게이트웨이가 `<데이터>/config/workspace.env`의 그 줄만 바꿈(주석·순서 그대로, 원자적 쓰기), 명령 이력에 남김. `live` 칸은 게이트웨이가 바로 다시 읽는다. `restart` 칸은 "다시 시작하면 적용" 표시가 남는다(어느 칸이 기다리는지 목록)
+- 폼은 워커 설정 창과 같은 부품(`kit.js` 스키마 폼, design.md 6.10)으로 그린다. 칸 정의는 **`install/config/workspace-settings.json`**(키·묶음·이름·형식·범위·적용 `apply`·설명). 0.86부터 모든 칸 `live`(`docs/live-settings.md`), `restart`는 형식으로만 남김. 지금 `workspace.env` 주석에 있는 설명을 옮긴다
+- 저장 → 게이트웨이가 `<데이터>/config/workspace.env`의 그 줄만 바꿈(주석·순서 그대로, 원자적 쓰기), 명령 이력에 남김. 칸마다 그 값을 쓰는 곳만 바로 다시 적용(워크스페이스 전체를 다시 시작하지 않음, `docs/live-settings.md`). 적용하지 못한 칸은 응답 `failed`에 이유(예: nginx 없음, 인증서 못 읽음): 값은 저장돼 다음 시작에 쓰인다. `pending`은 늘 `false`(칸은 그대로 둠)
 - 바꾸면 화면이 끊길 수 있는 값(받는 주소·포트·토큰·화면 켬)은 설정 탭에 없다. 관리 탭에 읽기 전용으로, 바꾸는 법 한 줄
 - 제품 화면에는 설정 탭이 없다(설정 잠금, design.md 11.4)
 
@@ -56,8 +57,8 @@
 
 | 요청 | 하는 일 |
 |---|---|
-| `GET /workspace/settings` | 칸 정의 + 지금 값 + 기본값 + 다시 시작을 기다리는 칸 |
-| `PUT /workspace/settings` `{"<키>": "<값>", ...}` | 검사(정의의 형식·범위, 정의에 없는 키 `bad_request`) 후 저장. 제품이면 `forbidden`. 응답: 저장한 키, 바로 적용한 키, 다시 시작이 필요한 키 |
+| `GET /workspace/settings` | 칸 정의 + 파일 값(`value`) + 지금 쓰는 값(`effective`) + `pending`(늘 `false`) |
+| `PUT /workspace/settings` `{"<키>": "<값>", ...}` | 검사(정의의 형식·범위, 정의에 없는 키 `bad_request`) 후 저장. 제품이면 `forbidden`. 응답 `{saved, live, restart, applied, failed}`: 저장한 키, `live` 칸, `restart` 칸(지금은 늘 빔), 실제로 적용된 키, 적용 못 한 키 → 이유. 로그인 켜기는 사용자가 없으면 `bad_request`(켜자마자 모두 503이 되지 않게) |
 
 ## 3. 정리 기준(모든 공용 패널)
 
@@ -84,15 +85,15 @@
 |---|---|
 | 목록 | 맨 위 둘, 묶음 둘, 개발 도구는 제품 화면에 없음 |
 | 탭 | 주소로 바로 열림, 다른 탭으로 가면 스트림 닫힘 |
-| 설정 | 정의 밖 키·범위 밖 값 `bad_request`, 저장하면 그 줄만 바뀜(주석 그대로), `live` 칸 바로 적용, `restart` 칸 표시, 제품 `forbidden` |
-| 보드 | 화면에서 제목·영상 주소 바꾸고 바로 보임, 로그 수준 바꾸고 "다시 시작하면 적용" |
+| 설정 | 정의 밖 키·범위 밖 값 `bad_request`, 저장하면 그 줄만 바뀜(주석 그대로), 모든 칸 바로 적용(로그 수준·로그인 다음 요청부터, HTTPS는 nginx 다시 읽기), nginx 없으면 HTTPS `failed`, 제품 `forbidden` |
+| 보드 | 화면에서 제목·영상 주소 바꾸고 바로 보임, 로그 수준·HTTPS·로그인을 바꾸고 다시 시작 없이 적용(nginx pid 그대로) |
 
 ## 9. 함께 정할 것 (초안)
 
 | # | 항목 | 초안 |
 |---|---|---|
 | 1 | 탭 이름 | 개요 · 로그 · 명령 이력 · 워커 연결 · 설정 · 관리 |
-| 2 | 바로 적용 칸 | 화면 제목, 영상 주소 틀, 명령 응답 대기. 나머지는 다시 시작 |
-| 3 | 화면에서 다시 시작 | 이번에는 없음("다시 시작하면 적용" 표시와 방법 한 줄). 화면 스스로를 끊는 일이라 따로 정함 |
+| 2 | 바로 적용 칸 | 전부(0.86, `docs/live-settings.md`). 처음 초안은 화면 제목·영상 주소 틀·명령 응답 대기만 |
+| 3 | 화면에서 다시 시작 | 없음. 0.86부터 다시 시작할 칸이 없어 필요 없음(바꾼 칸을 쓰는 곳만 다시 적용) |
 | 4 | 위 띠 | "정상"·"주의"·"이상" + "개발"/"제품" |
 | 5 | 순서 | `docs/modes.md` 먼저(토글 없앰) → 화면 개편 → 워커 패널 정리 |

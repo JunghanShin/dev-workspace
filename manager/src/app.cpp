@@ -391,6 +391,19 @@ Json App::set_access_mode(const Json& req, const std::optional<std::string>& cli
     return ok(d);
 }
 
+Json App::set_log_level_op(const Json& req, const std::optional<std::string>& client) {
+    // 로그 수준(WORKSPACE_LOG_LEVEL): 게이트웨이가 설정 탭에서 바꾼 값을 알려 준다. 저장하지 않음(다시 시작하면 workspace.env 값)
+    if (!client || *client != "rest") return error("forbidden", "set_log_level is allowed only from manager-rest.sock");
+    const Json level = jget(req, "level");
+    if (!level.is_string() || (level != "DEBUG" && level != "INFO" && level != "WARNING" && level != "ERROR"))
+        return error("bad_request", "level must be DEBUG, INFO, WARNING or ERROR");
+    PM_WARN("log level %s (settings)", level.get<std::string>().c_str());  // 바꾸기 전 수준으로 한 줄(WARNING)
+    set_log_level(level.get<std::string>());
+    Json d = Json::object();
+    d["log_level"] = level;
+    return ok(d);
+}
+
 void App::record_command(const Json& req, const std::optional<std::string>& client, const Json& resp) {
     // 쓰기 명령 이력(topic "commands"). 키가 매번 달라 최신값 덮어쓰기에서 빠지지 않는다
     ++command_seq_;
@@ -530,6 +543,10 @@ void App::handle_line(Conn& c, const std::string& line) {
         const Json resp = set_access_mode(*req, c.client);
         record_command(*req, c.client, resp);
         reply(c, resp);
+        return;
+    }
+    if (op == "set_log_level") {  // 설정 탭 바로 적용(docs/live-settings.md): 메모리 값만, 파일은 게이트웨이가 씀
+        reply(c, set_log_level_op(*req, c.client));
         return;
     }
     if (kWriteOps.count(op)) {

@@ -185,14 +185,17 @@ Decision AuthOn::authorize(const Identity& who, const RequestView& rq) {
     Decision d;
     const std::string p = starts_with(rq.path, "/api/board/") ? rq.path.substr(10) : rq.path;
     const bool health = rstrip_char(p, '/') == "/health";
-    if (cfg_.product && !health && !has_users()) {
+    // 사용자가 없으면 /health 말고 모두 503(조용히 열어 두지도, 아무도 못 들어오는 401로 두지도 않음).
+    // 제품 모드와 같고, 0.86부터 워크스페이스에서 로그인을 켰을 때도(설정 탭에서 실행 중에 켜도)
+    if (!health && !has_users()) {
         if (!warned_empty_.exchange(true))
-            GW_ERROR("product mode: no users in %s; refusing all requests but /health (add one: gateway user add)",
-                     users_.path().c_str());
+            GW_ERROR("%s: no users in %s; refusing all requests but /health (add one: gateway user add)",
+                     cfg_.product ? "product mode" : "login on", users_.path().c_str());
         d.allowed = false;
         d.status = 503;
         d.code = "unavailable";
-        d.message = "no users configured on this board (product mode requires login)";
+        d.message = cfg_.product ? "no users configured on this board (product mode requires login)"
+                                 : "no users configured on this board (login is on: add one with gateway user add)";
         return d;
     }
     const Need need = classify(rq.method, rq.path, cfg_.ui_enabled);
@@ -248,6 +251,34 @@ AuthOn::LoginResult AuthOn::login(const std::string& name, const std::string& pa
     r.who.via = "session";
     r.who.sid = r.sid;
     return r;
+}
+
+Role AuthOn::media_role(const MediaRequest& rq, std::string& who) {
+    who = "-";
+    if (rq.user.empty() && rq.password.empty() && rq.token.empty()) return Role::None;  // 처음 묻기(자격 없음): 실패로 세지 않음
+    const double now = mono_now();
+    const std::string key = "media:" + rq.ip;  // 화면 로그인과 따로 셈(같은 규칙)
+    if (limiter_.locked_for(key, now) > 0) return Role::None;
+    const auto db = users_.get();
+    std::string tname;
+    if (const User* u = media_token_user(*db, rq, &tname)) {
+        limiter_.success(key);
+        who = u->name + " (token " + tname + ")";
+        return u->role;
+    }
+    if (!rq.user.empty() && !rq.password.empty()) {  // 계정 이름 + 계정 비밀번호
+        const User* u = db->find(rq.user);
+        bool ok = false;
+        if (u && !u->password_hash.empty()) ok = verify_password(u->password_hash, rq.password);
+        else burn_password_time(rq.password);
+        if (ok) {
+            limiter_.success(key);
+            who = u->name;
+            return u->role;
+        }
+    }
+    limiter_.failure(key, now);
+    return Role::None;
 }
 
 Json AuthOn::state() {

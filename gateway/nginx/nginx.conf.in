@@ -58,7 +58,8 @@ http {
 @MEDIA_LOCATION@
 
         # 스트림(SSE): 버퍼링하면 화면에 늦게 도착하므로 끈다. 오래 열려 있다
-        location ~ /stream/?$ {
+        # (/workers/{id}/stream, 여럿을 한 연결로 /streams — docs/stream-mux.md)
+        location ~ /streams?/?$ {
             proxy_pass http://gateway;
             proxy_buffering off;
             proxy_cache off;

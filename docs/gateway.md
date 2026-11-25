@@ -48,14 +48,18 @@
 | 스레드 | 하는 일 | 대기 상한 | 큐 |
 |---|---|---|---|
 | `gw.http` × N | 요청 하나: 신분 확인 → 권한 → 전달 → 기록 큐 → 응답 | Manager 연결 1 s·응답 2 s, 워커 명령 `WORKSPACE_REST_COMMAND_TIMEOUT` | 동시 요청 N(넘치면 503) |
-| SSE 연결 | 화면 하나에 하나, 전송 간격 `hz`(최대 50) | 쓰기 상한(느리면 그 화면만 끊음) | 화면당 최신 값만(주제별로 합침) |
+| SSE 연결 | 연결 하나에 `gw.http` 하나, 전송 간격 `hz`(최대 50). `/streams`(여러 워커를 한 연결로, `docs/stream-mux.md`)도 연결 하나에 스레드 하나(워커마다 구독을 한 고리에서 돎) | 쓰기 상한(느리면 그 화면만 끊음) | 화면·워커당 최신 값만(주제별로 합침) |
 | `gw.up.<워커>` | 워커 스트림 구독(워커당 하나), 최신 상태·최근 이벤트 보관 | 끊기면 1 s마다 다시 | — |
 | `gw.mgr` | Manager 구독 하나: 워커 목록·시스템 상태 캐시, Manager의 `access_mode`가 다르면 다시 알림 | 연결 1 s, 읽기 0.5 s씩, 5 s 조용하면 끊고 1 s 뒤 다시(그동안·3 s 넘게 안 바뀐 캐시면 `GET /workers`는 Manager에 직접) | — |
 | `gw.log` | 명령 기록 쓰기 | 끝낼 때 남은 줄 2 s | 1024, 넘치면 버리고 셈(`/health?detail=1`) |
 
 **공유 상태가 작다:** 세션(만료 시각), 운용/개발 모드, 캐시, 워커 계약의 명령 종류 표. 잠금 하나로 지키고 잠금 안에서 I/O를 하지 않는다. 요청 처리는 그 밖에서 상태 없이.
 
-**코드:** `gateway/`(C++, CMake). `core/`(경로 표·권한 규칙·세션·기록 줄 만들기, 시스템 호출 모름, 단위 시험), `src/`(HTTP: cpp-httplib 사본, Unix 소켓 클라이언트, SSE, 보드 읽기), `lib/`(libworker 일부·nlohmann·cpp-httplib 사본), `nginx/`(설정 틀).
+**워커 명령 오류 → HTTP(design.md 9.6, 0.86):** `bad_request` 400 · `forbidden` 403 · `busy` 409 · `unavailable` 503 · `timeout` 504 · `internal`·모르는 code 500. 본문은 워커 `error` 그대로(+ mission `advisory`).
+
+**스트림 묶기(`GET /streams?ids=a:2,b`, `docs/stream-mux.md`):** 화면 하나가 워커 스트림 여럿을 SSE 하나로. `ids`는 쉼표, 각 `id:hz`(없으면 `hz` 인자, 그것도 없으면 10, 0.2~50), 32개까지·겹침 없음(어기면 400). 줄 = 워커 줄 그대로 + `"worker"`. 없는·꺼진 워커는 그 워커만 `{"worker", "down": true}` 한 번(Manager에 미리 묻지 않음: Manager가 없어도 200, 모두 down). 권한은 `/workers/{id}/stream`과 같음(읽기). 허브·워커당 위쪽 연결은 같이 씀. 옛 길 `/workers/{id}/stream`은 그대로(바깥 프로그램·옛 패널). nginx는 `/streams`도 버퍼링 끔
+
+**코드:** `gateway/`(C++, CMake). `core/`(경로 표·권한 규칙·세션·기록 줄 만들기·영상 로그인 판정 `media_auth`, 시스템 호출 모름, 단위 시험), `src/`(HTTP: cpp-httplib 사본, Unix 소켓 클라이언트, SSE, 보드 읽기), `lib/`(libworker 일부·nlohmann·cpp-httplib 사본), `nginx/`(설정 틀 `nginx.conf.in`·`render.sh`, 적용 `apply.sh`, 자체 서명 `make-cert.sh`).
 
 ## 3. 인터페이스
 
@@ -70,11 +74,13 @@
 | `POST /api/auth/login` `{name, password}` | 맞으면 `200 {auth, name, role, mode}` + 쿠키 `workspace_session`(HttpOnly, SameSite=Strict, Path=/, Max-Age 7일). 틀리면 `401`, 주소마다 5번 틀리면 30 s `429`(+ `Retry-After`) |
 | `POST /api/auth/logout` | 세션을 지우고 쿠키를 비움(`200 {}`) |
 | `GET /api/auth/me` | `{auth: "on", name, role, mode, via: "session"\|"token"}`, 로그인 전 `401 {error, auth: "on"}`. 인증 꺼짐이면 `{auth: "off", name: null, role: "maintainer", mode}` |
+| `GET /api/auth/check` | 영상 `/media/` 로그인 확인(nginx `auth_request`, 0.86, `docs/media-auth.md`): 쿠키·Bearer가 로그인한 사람(viewer 이상)이면 `204`, 아니면 `401`, 본문 없음. 로그인 꺼짐이면 늘 `204`. GET만(다른 메서드 405) |
+| `POST /api/auth/media`(보드 안 전용 포트 `127.0.0.1:8079`) | MediaMTX `authMethod: http`가 연결마다 부름(0.86, `docs/media-auth.md`). 본문 `{user, password, token, ip, action, path, protocol, id, query}` → `200` 허락·`401` 자격 물음·`403` 거절. 화면 쪽 포트·소켓에는 없음. 포트 `WORKSPACE_MEDIA_AUTH_PORT`(0이면 안 엶) |
 | `Authorization: Bearer <토큰>` | 프로그램(외부 운용·원격 화면)용. GET이면 `?token=`도(EventSource). 틀린 토큰이면 쿠키가 맞아도 익명 |
 | `GET /api/mode` · `PUT /api/mode {"mode": "operation"\|"development"}` | `{mode, since, by}`(+ PUT 답에 `manager`: 알림 결과). 바꾸기는 `maintainer`만. 저장하지 않음(시작하면 운용). 바꾸면 기록하고 process-manager에 `set_access_mode` op(design.md 6.2). 알림이 실패하거나 process-manager만 다시 시작되면 `gw.mgr`가 Manager의 `access_mode`를 보고 다시 알린다(모드 주인은 게이트웨이) |
 | `GET /health?detail=1` | 기본 답에 `gateway`: 신분 확인·사용자·세션 수, 모드, 명령 기록(`written`·`dropped`·`errors`), 캐시(`fresh`·`age_s`·`direct_lists`) |
 | `GET /workspace/settings` | 설정 탭(`ui/workspace-screen.md` 2장). `{groups: [{title, fields: [{<정의 칸>…, value, effective, pending}]}], pending: [키…], file, product}`. 아래 "설정" |
-| `PUT /workspace/settings` `{"<키>": 값, ...}` | 검사 후 `<데이터>/config/workspace.env`의 그 줄만 바꿈. `200 {saved, live, restart}`. `maintainer`, 운용 모드면 `development_required`, 제품이면 `403 forbidden "settings are locked in product"` |
+| `PUT /workspace/settings` `{"<키>": 값, ...}` | 검사 후 `<데이터>/config/workspace.env`의 그 줄만 바꾸고 바로 적용(`docs/live-settings.md`). `200 {saved, live, restart, applied, failed}`. `maintainer`, 운용 모드면 `development_required`, 제품이면 `403 forbidden "settings are locked in product"` |
 
 | 역할 | 할 수 있는 것(신분 확인 켜짐일 때) |
 |---|---|
@@ -90,14 +96,14 @@
 - **사용자 파일:** `<데이터>/config/users.json` `{"users": [{"name", "role", "password_hash", "tokens": [{"name", "hash"}]}]}`, 권한 0600. 비밀번호는 PBKDF2-HMAC-SHA256 `pbkdf2-sha256$<반복>$<소금 base64>$<해시 base64>`(반복 200000, 소금 16바이트, 해시 32바이트, 같은 시간 비교). 토큰은 무작위 32바이트(16진 64자)를 만들 때 한 번만 보여 주고 파일에는 sha256 16진만. 원문은 어디에도 저장하지 않음. 1 s마다 바뀌었는지 보고 다시 읽는다(재시작 없이 반영, 깨진 파일이면 마지막 값). 비밀번호를 바꾸거나 사용자를 지우면 그 사람의 세션이 끝난다. 프로필로 처음 넣거나 아래 명령으로, config-manager가 생기면 그쪽이 관리
 - **설정 명령**(보드에서, 비밀번호는 명령 줄로 받지 않음: 터미널이면 안 보이게, 아니면 표준 입력 두 줄): `WORKSPACE_DATA=<데이터> gateway user add <이름> <역할>` · `user passwd <이름>` · `user del <이름>` · `user list` · `token add <사용자> <토큰 이름>`(토큰을 한 번 출력) · `token del <사용자> <토큰 이름>`. 쓰기는 임시 파일 → fsync → rename. `WORKSPACE_AUTH_ITERATIONS`는 시험용(반복 수를 줄임)
 - **세션:** 메모리에만(게이트웨이를 다시 시작하면 다시 로그인). 쉼 12시간, 절대 7일. HTTPS가 붙으면 쿠키에 `Secure`를 더한다(3단계 미결)
-- **신분 확인 켜고 끄기:** `WORKSPACE_AUTH=on|off`. 개발 보드 기본 `off`(지금처럼, `WORKSPACE_REST_TOKEN` 토큰 검사도 그대로, 화면 위에 "인증 꺼짐" 표시). 제품 모드(`WORKSPACE_PRODUCT=1`)는 늘 `on`(기록에 남김). 제품 모드인데 사용자 파일이 없거나 비면 `/health` 말고 모두 `503`과 오류 한 줄(조용히 열어 두지 않음). `on`이면 `WORKSPACE_REST_TOKEN`은 쓰지 않는다(사용자별 토큰으로)
+- **신분 확인 켜고 끄기:** `WORKSPACE_AUTH=on|off`. 개발 보드 기본 `off`(지금처럼, `WORKSPACE_REST_TOKEN` 토큰 검사도 그대로, 화면 위에 "인증 꺼짐" 표시). 제품 모드(`WORKSPACE_PRODUCT=1`)는 늘 `on`(기록에 남김). 켬인데 사용자 파일이 없거나 비면 `/health` 말고 모두 `503`과 오류 한 줄(조용히 열어 두지 않음. 0.85까지는 제품 모드만, 0.86부터 켬이면 늘). 설정 탭에서 바로 켜고 끈다(0.86: 신분 확인 묶음을 통째로 바꿔 끼움, 진행 중인 요청은 옛 것으로 끝남, 켤 때 세션은 비어서 시작, 사용자가 없으면 켜기를 `bad_request`로 받지 않음). 켜면 영상도 로그인한 사람만(`docs/media-auth.md`) `on`이면 `WORKSPACE_REST_TOKEN`은 쓰지 않는다(사용자별 토큰으로)
 - **보낸 쪽 주소:** TCP면 접속 주소, Unix 소켓(nginx 뒤)이면 nginx가 넣는 `X-Forwarded-For`(`$remote_addr`로 덮어씀). 로그인 실패 제한과 명령 기록에 쓴다
 - **명령 기록:** GET이 아닌 요청마다(로그인 성공·실패, 로그아웃 포함) 한 줄 `{"t", "user", "role", "mode", "remote", "method", "path", "cmd", "from", "code", "ms"}`, mission이 `advisory`를 붙인 명령은 `advisory`도(0.81). **읽기 명령(`get_status`, 계약의 `read`)은 남기지 않는다**(0.81: 화면이 주기로 읽어 기록의 99% 넘게가 `get_status`였음). `cmd`는 워커 명령 이름, Manager op, `login`·`logout`·`mode:<값>`. `mode`는 요청을 받을 때의 모드. 본문·쿼리·헤더는 넣지 않는다(비밀번호·토큰). 로그인 실패에서 없는 이름은 `?`로(이름 칸에 비밀번호를 넣었을 수 있음). 파일 `<데이터>/records/gateway/gateway-<부팅 id 8자>.jsonl`(0600): logger 기록(`records/*.jsonl`)과 폴더를 나눴다. 같이 두면 logger의 전체 용량 정리가 이 파일도 지운다. 화면 명령 이력(`/records/commands`, 0.81)은 이 기록의 끝에서 읽는다(새 파일부터, 파일마다 끝부분만 거슬러 읽음). 파일 하나 64 MiB를 넘으면 `gateway-<부팅>-<ms>.jsonl`로 바꾸고 새로, 전체 512 MiB를 넘으면 오래된 것부터 지움. record-manager가 생기면 그쪽으로
 - **설정(`ui/workspace-screen.md` 2장):** 칸 정의는 `<워크스페이스>/install/config/workspace-settings.json`(요청마다 다시 읽음) `{"version", "groups": [{"title", "fields": [{key, label, type: string|number|integer|enum, min, max, unit, enum, apply: live|restart, default, description}]}]}`. 받는 주소·포트·토큰·화면 켬(`WORKSPACE_REST_BIND`·`_PORT`·`_TOKEN`·`WORKSPACE_UI`)은 화면을 끊을 수 있어 정의에 넣지 않는다
-  - `GET`: 칸마다 `value`(파일 값, 형식대로. 없거나 비면 `null`), `effective`(live 칸은 지금 게이트웨이가 쓰는 값, restart 칸은 게이트웨이가 시작할 때의 환경 값, 없으면 기본), `pending`(restart 칸의 파일 값(없으면 기본)이 시작할 때 값과 다름). 맨 위 `pending`은 그 키 목록
+  - `GET`: 칸마다 `value`(파일 값, 형식대로. 없거나 비면 `null`), `effective`(그 값을 쓰는 곳의 지금 값: 게이트웨이 값, HTTPS 칸은 nginx가 지금 쓰는 값 = 시작 값 또는 마지막으로 적용에 성공한 값, 없으면 기본), `pending`(restart 칸의 파일 값이 시작할 때 값과 다름. 0.86부터 restart 칸이 없어 늘 `false`, 칸은 남김). 맨 위 `pending`은 그 키 목록(늘 빔)
   - `PUT`: 키마다 정의대로 검사(정의 밖 키, 형식, 범위, enum). 하나라도 틀리면 아무것도 쓰지 않고 `400 {"error": {"code": "bad_request", "message", "fields": {"<키>": "<이유>"}}}`. 숫자 칸은 숫자 글(`"443"`)도 받는다. 글 칸은 앞뒤 공백을 떼고 `#`·제어 문자·앞뒤 `"`는 막는다(`read_kv`가 `#` 뒤를 버리고 `"`를 떼므로). `null`·`""`은 지움(기본값으로)
   - 파일 고치기(`core/settings.cpp` `env_edit`): 주석·순서·다른 키 그대로. 있는 줄은 그 자리에서 바꿈, `#KEY=` 주석 줄만 있으면 그 줄을 풂, 없으면 끝에 더함. 지우면 `#KEY=옛값`으로(주석 줄이 따로 있으면 그 줄만 남김). 임시 파일 → fsync → rename, 권한 그대로. 명령 기록 `cmd: "settings"`
-  - live 칸은 바로 적용: `WORKSPACE_UI_TITLE`·`WORKSPACE_UI_MEDIA_URL`(`/api/ui`), `WORKSPACE_REST_COMMAND_TIMEOUT`(워커 명령 대기). restart 칸은 `./workspace-start.sh`로 다시 시작해야 적용(시작 셸 `read_kv`가 정의의 키를 모두 넘김)
+  - 모든 칸이 live(0.86, `docs/live-settings.md`): 바꾼 칸을 쓰는 곳만 다시 적용. `WORKSPACE_UI_TITLE`·`WORKSPACE_UI_MEDIA_URL`(`/api/ui`), `WORKSPACE_REST_COMMAND_TIMEOUT`(워커 명령 대기), `WORKSPACE_LOG_LEVEL`(게이트웨이 + process-manager op `set_log_level`), `WORKSPACE_AUTH`(신분 확인 바꿔 끼움 + nginx), HTTPS 칸(`WORKSPACE_HTTPS*`·`WORKSPACE_HTTP_REDIRECT`: `gateway/nginx/apply.sh --reload`, 시작 셸과 같은 스크립트, 상한 20 s). nginx 뒤가 아니면 HTTPS 칸은 저장만 하고 `failed: "needs nginx …"`. 적용 못 한 칸은 `failed {키: 이유}`(값은 저장됨, 점검 실패면 nginx는 옛 설정 그대로)
 - **Manager 캐시:** `gw.mgr`가 Manager 구독 하나(`workers`·`system`, 1 s 주기)로 최신 값을 들고, `GET /workers`·`/workers/{id}`·`/system`을 3 s 안에 갱신된 캐시로 답한다(Manager `list`·`get`·`system`과 같은 답). 목록 순서는 Manager `list` 순서(처음과 워커 구성이 바뀔 때 `list`를 한 번 불러 배움). 오래됐거나 없는 워커면 지금처럼 직접. 쓰기는 늘 직접. 끄기 `WORKSPACE_GATEWAY_CACHE=0`. 캐시 값은 최대 약 1 s 늦다(`last_heartbeat_ms_ago` 등)
 
 ## 4. 끊겼을 때
@@ -106,7 +112,7 @@
 |---|---|---|
 | process-manager 없음 | 관리 요청 503, 캐시는 마지막 값 + `stale` 표시, 1 s마다 다시 붙음 | 워커 목록이 멈춤 표시 |
 | 워커 명령 소켓 없음·느림 | 그 요청만 503/504 | 그 버튼만 실패 |
-| 워커 스트림 끊김 | 그 워커 SSE에 `{"stream": "down"}`, 다시 붙으면 기준 상태 | 그 패널만 "끊김" |
+| 워커 스트림 끊김 | 그 워커 SSE에 `{"stream": "down"}`(`/streams`면 `{"worker", "down": true}` 한 번, 다른 워커는 계속), 다시 붙으면 기준 상태 | 그 패널만 "끊김" |
 | 화면이 느림 | 그 SSE만 끊음 | 브라우저가 다시 연결 |
 | 기록 디스크 느림·가득 | 기록만 버리고 셈(요청은 처리) | 영향 없음 |
 | 게이트웨이 죽음 | 시작 셸이 다시 띄움(지금 REST와 같음, 워커·Manager는 계속) | 잠깐 끊김 |

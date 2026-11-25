@@ -1,6 +1,7 @@
 // 스레드 시험(TSan으로도 돌림): 가짜 워커 스트림 소켓·가짜 Manager 소켓으로
 //   - Hub/Upstream/Subscriber: 기준 상태, 합치기, 위쪽 연결 하나, 워커 재시작(down → up), 화면이 떠나면 정리
 //   - SseSession: hz 간격, ping, 쓰기 실패면 끝(구독 해제)
+//   - MuxSession(/streams): 스레드 하나로 워커 여럿, 이름표, 워커마다 hz, 하나가 꺼져도 다른 것은 계속
 //   - Gateway(HTTP 끝까지): 여러 스레드가 동시에 요청·SSE, 동시 요청 상한 → 503, 상한 안 끝내기
 //   - FileRecorder(gw.log): 큐 상한·이어 쓰기·여러 스레드·파일 회전과 전체 상한
 //   - UsersFile: 읽는 중 바꿔 써도 깨진 값 없음, 깨진 파일은 마지막 값, 지우면 사용자 없음
@@ -277,6 +278,106 @@ void test_sse_session() {
     CHECK(p.first->subscribers() == 0);
     stopping.store(true);
     CHECK(!s.step(write, stopping));
+    hub.stop_all();
+}
+
+// /streams 본문: 스레드 하나가 워커 여럿을 돈다. 이름표, 없는 워커 down 한 번, 하나가 꺼져도 다른 하나는 계속, 다시 옴
+void test_mux_session() {
+    const std::string dir = tmpdir();
+    StreamTiming t;
+    t.retry_s = 0.1;
+    Hub hub([dir](const std::string& id, std::string& why) {
+        int err;
+        bool to;
+        const int fd = connect_unix(dir + "/" + id + ".sock", 1.0, err, to);
+        why = fd < 0 ? errno_text(err) : id;
+        return fd;
+    }, t);
+    auto w1 = std::make_unique<FakeWorker>(dir + "/a.sock");
+    FakeWorker w2(dir + "/b.sock");
+    auto waker = std::make_shared<Waker>();
+    std::vector<MuxSession::Feed> feeds;
+    for (auto [id, hz] : {std::pair<const char*, double>{"a", 50}, {"b", 5}, {"nobody", 10}}) {
+        auto p = hub.subscribe(id, hz, waker);
+        feeds.push_back({id, p.first, p.second});
+    }
+    auto ups = feeds;  // 끝난 뒤 구독자 수를 보려고
+    MuxSession s(std::move(feeds), waker, 0.5);
+    std::atomic<bool> stopping{false};
+    std::vector<Json> got;
+    std::vector<double> b_at;
+    auto write = [&](const std::string& x) {
+        size_t pos = 0;
+        while ((pos = x.find("data: ", pos)) != std::string::npos) {
+            const size_t end = x.find("\n\n", pos);
+            got.push_back(Json::parse(x.substr(pos + 6, end - pos - 6)));
+            if (got.back().value("worker", "") == "b") b_at.push_back(mono_now());
+            pos = end;
+        }
+        return true;
+    };
+    auto until = [&](const std::function<bool(const Json&)>& pred, double timeout_s) {
+        const double end = mono_now() + timeout_s;
+        size_t seen = 0;
+        while (mono_now() < end) {
+            CHECK(s.step(write, stopping));
+            for (; seen < got.size(); ++seen)
+                if (pred(got[seen])) return true;
+        }
+        return false;
+    };
+    auto is = [](const char* id, const char* stream) {
+        return [id, stream](const Json& m) { return m.value("worker", "") == id && m.value("stream", "") == stream; };
+    };
+    CHECK(until(is("a", "up"), 3));
+    CHECK(until(is("b", "up"), 3));
+    CHECK(until([](const Json& m) { return m.value("worker", "") == "nobody" && m.value("down", false); }, 3));
+    // 모든 줄에 이름표, 없는 워커의 down은 한 번만
+    int nobody = 0;
+    for (const auto& m : got) {
+        CHECK(m.contains("worker"));
+        if (m["worker"] == "nobody") ++nobody;
+    }
+    // 둘이 함께 흐름. b는 5 Hz
+    got.clear();
+    b_at.clear();
+    const double end = mono_now() + 1.5;
+    int k = 0;
+    while (mono_now() < end) {
+        w1->broadcast(Json{{"kf", false}, {"topics", {{"x", ++k}}}});
+        w2.broadcast(Json{{"kf", false}, {"topics", {{"y", k}}}});
+        CHECK(s.step(write, stopping));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    int na = 0, nb = 0;
+    for (const auto& m : got) {
+        if (m["worker"] == "a") ++na;
+        if (m["worker"] == "b") ++nb;
+    }
+    CHECK(na > nb && nb >= 4 && nb <= 10);
+    for (size_t i = 1; i < b_at.size(); ++i) CHECK(b_at[i] - b_at[i - 1] >= 0.19);
+    // a가 꺼짐 → a만 down, b는 계속
+    w1->close();
+    CHECK(until([](const Json& m) { return m.value("worker", "") == "a" && m.value("down", false); }, 3));
+    got.clear();
+    w2.broadcast(Json{{"kf", false}, {"topics", {{"after", 1}}}});
+    CHECK(until([](const Json& m) { return m.value("worker", "") == "b" && m["topics"].contains("after"); }, 3));
+    // a가 다시 옴 → 기준 상태부터
+    w1 = std::make_unique<FakeWorker>(dir + "/a.sock");
+    CHECK(until([](const Json& m) { return m.value("worker", "") == "a" && m.value("kf", false) && m.value("stream", "") == "up"; }, 3));
+    for (int i = 0; i < 3; ++i) s.step(write, stopping);  // ping 시간이 와도 끝나지 않음
+    CHECK(nobody == 1);
+    // 쓰기 실패 → 끝, 모두 구독 해제
+    w2.broadcast(Json{{"kf", false}, {"topics", {{"z", 1}}}});
+    bool more = true;
+    for (int i = 0; i < 10 && more; ++i) more = s.step([](const std::string&) { return false; }, stopping);
+    CHECK(!more);
+    s.finish();
+    for (auto& f : ups) CHECK(f.up->subscribers() == 0);
+    stopping.store(true);
+    CHECK(!s.step(write, stopping));
+    w1->close();
+    w2.close();
     hub.stop_all();
 }
 
@@ -626,6 +727,7 @@ int main() {
     ::signal(SIGPIPE, SIG_IGN);
     test_hub();
     test_sse_session();
+    test_mux_session();
     test_gateway();
     test_recorder();
     test_users_reload();

@@ -14,6 +14,26 @@
 
 namespace gw {
 
+// ---- Waker ----
+
+void Waker::poke() {
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        ++gen_;
+    }
+    cv_.notify_all();
+}
+
+unsigned long long Waker::gen() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return gen_;
+}
+
+void Waker::wait(unsigned long long seen, double timeout_s) {
+    std::unique_lock<std::mutex> lock(mu_);
+    cv_.wait_for(lock, std::chrono::duration<double>(timeout_s), [&] { return gen_ != seen; });
+}
+
 // ---- Subscriber ----
 
 void Subscriber::offer(const Json& msg, bool keyframe) {
@@ -22,6 +42,7 @@ void Subscriber::offer(const Json& msg, bool keyframe) {
         merge_.offer(msg, keyframe);
     }
     cv_.notify_one();
+    if (waker_) waker_->poke();
 }
 
 std::optional<Json> Subscriber::take(double timeout_s) {
@@ -216,9 +237,10 @@ Hub::Hub(SourceOpener open, StreamTiming timing) : open_(std::move(open)), timin
 
 Hub::~Hub() { stop_all(); }
 
-std::pair<std::shared_ptr<Upstream>, std::shared_ptr<Subscriber>> Hub::subscribe(const std::string& worker_id, double hz) {
+std::pair<std::shared_ptr<Upstream>, std::shared_ptr<Subscriber>> Hub::subscribe(const std::string& worker_id, double hz,
+                                                                                 std::shared_ptr<Waker> waker) {
     reap();
-    auto sub = std::make_shared<Subscriber>(hz);
+    auto sub = std::make_shared<Subscriber>(hz, std::move(waker));
     std::shared_ptr<Upstream> up;
     std::lock_guard<std::mutex> lock(mu_);
     auto it = ups_.find(worker_id);
@@ -320,6 +342,60 @@ bool SseSession::step(const std::function<bool(const std::string&)>& write, cons
     }
     if (!write("data: " + compact(*msg) + "\n\n")) return false;
     last_ = last_write_ = now;
+    return true;
+}
+
+// ---- MuxSession ----
+
+MuxSession::MuxSession(std::vector<Feed> feeds, std::shared_ptr<Waker> waker, double ping_s)
+    : waker_(std::move(waker)), ping_s_(ping_s), last_write_(mono_now()) {
+    for (auto& f : feeds) es_.push_back(Entry{std::move(f)});
+}
+
+MuxSession::~MuxSession() { finish(); }
+
+void MuxSession::finish() {
+    if (finished_.exchange(true)) return;
+    for (auto& e : es_) {
+        e.f.up->unsubscribe(e.f.sub);
+        e.f.sub->close();
+    }
+}
+
+bool MuxSession::step(const std::function<bool(const std::string&)>& write, const std::atomic<bool>& stopping) {
+    if (!retry_sent_) {
+        retry_sent_ = true;
+        last_write_ = mono_now();
+        return write("retry: 2000\n\n");
+    }
+    if (stopping.load()) return false;
+    const unsigned long long seen = waker_->gen();  // 훑기 전에: 훑는 중 온 offer도 아래 wait가 바로 깸
+    const double now = mono_now();
+    double wake = now + 0.2;  // 정지 요청을 0.2 s 안에 봄
+    std::string out;
+    for (auto& e : es_) {
+        const double at = e.last + e.f.sub->min_interval();
+        if (now < at) {  // 이 워커의 hz 간격이 아직
+            wake = std::min(wake, at);
+            continue;
+        }
+        auto msg = e.f.sub->take(0);
+        if (!msg) continue;
+        const std::string line = mux_line(e.f.id, std::move(*msg), e.down);
+        e.last = now;
+        if (!line.empty()) out += "data: " + line + "\n\n";
+    }
+    if (!out.empty()) {
+        if (!write(out)) return false;
+        last_write_ = now;
+        return true;
+    }
+    if (now - last_write_ >= ping_s_) {
+        if (!write(": ping\n\n")) return false;
+        last_write_ = now;
+        return true;
+    }
+    waker_->wait(seen, std::max(0.0, wake - now));
     return true;
 }
 

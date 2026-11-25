@@ -214,10 +214,11 @@ public:
     void lease_tick(TimePoint now);
     // 다음 임대 기한(없으면 TimePoint::max())
     TimePoint next_lease_deadline() const;
-    // 호스트가 낸 이벤트(공통 이벤트 형식, 예: lease_expired)를 꺼낸다. 스트림을 내는 모듈이 자기 이벤트에 붙여 발행
+    // 호스트가 낸 이벤트(공통 이벤트 형식, 예: lease_expired)를 꺼낸다. 스트림 줄은 worker::stream_line(worker/stream.hpp,
+    // 0.19)으로 만들면 거기서 꺼내 붙인다(직접 부르지 않아도 됨)
     std::vector<Json> take_events();
-    // 모듈이 공통 이벤트를 낸다(libworker 0.18): source = "<워커 id>.<module>". 스트림을 내는 모듈이 take_events로
-    // 꺼내 자기 events에 붙여 발행한다(예: libvideo stream_down·stream_up). 워커 루프 스레드에서만
+    // 모듈이 공통 이벤트를 낸다(libworker 0.18): source = "<워커 id>.<module>". 스트림을 내는 모듈의 다음 줄
+    // (worker::stream_line)에 실려 나간다(예: libvideo stream_down·stream_up). 워커 루프 스레드에서만
     void event(const std::string& module, const std::string& severity, const std::string& code, const std::string& text,
                const Json& detail = Json::object());
     void input_link(const std::string& name, bool up);

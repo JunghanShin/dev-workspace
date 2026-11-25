@@ -19,7 +19,7 @@
 |---|---|---|
 | ① 표 만들기 | 호스트가 시작할 때 내장 계약(`io_bundle`)의 `uses`에서 입력마다 상대 워커 id와, 그 입력이 쓴다고 적은 주제의 사본 스키마(`topics.<이름>.schema`)를 모은다. `many` 입력(여럿에서 받음)·스키마 없는 주제는 뺌 | libworker 호스트 |
 | ② 받을 때 | `Subscriber`가 줄을 받으면 상대 id로 표를 찾아, 주제마다 **주기(기본 1 s)에 한 번** 스키마로 검사. 데이터는 그대로 모듈로(막지 않음) | `Subscriber` 스레드 |
-| ③ 알리기 | 틀리면 입력마다 `bad`를 세고 마지막 이유를 남김. (입력, 주제)마다 60 s에 한 번 이벤트 `input_mismatch`(warning, 호스트 이벤트 큐 `take_events`) | 호스트 |
+| ③ 알리기 | 틀리면 입력마다 `bad`를 세고 마지막 이유를 남김. (입력, 주제)마다 60 s에 한 번 이벤트 `input_mismatch`(warning, 호스트 이벤트 큐 `take_events`(0.19부터 스트림을 내는 모듈이 `worker::stream_line`으로 저절로 실음)) | 호스트 |
 | ④ 보이기 | `get_status` `input_check: {"<입력>": {"checked", "bad", "last_error"}}`, 지표 `inputs_<입력>_bad` | 호스트 |
 
 - 스키마 규칙은 출력 대조와 같다(`type`·`enum`·범위·`required`·`properties`·`additionalProperties` 기본 false·`items`·`$ref`). 같은 정의로 내보내는 쪽(시험)과 받는 쪽(실행)을 함께 본다

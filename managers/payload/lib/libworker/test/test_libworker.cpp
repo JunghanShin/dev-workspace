@@ -1,4 +1,4 @@
-// libworker 단위 시험: BoundedQueue, ThreadWatch, WorkerThread(스레드 이름·우선순위), Publisher, Host·Module,
+// libworker 단위 시험: BoundedQueue, ThreadWatch, WorkerThread(스레드 이름·우선순위), Publisher, 스트림 한 줄, Host·Module,
 // 입력·출력 단계, Mutex, 기본 안전망(설정·상태), 명령 소켓(나중에 답하는 명령, 연결 시간 제한)
 #include <poll.h>
 #include <sys/socket.h>
@@ -28,6 +28,7 @@
 #include "worker/host.hpp"
 #include "worker/mutex.hpp"
 #include "worker/stage.hpp"
+#include "worker/stream.hpp"
 #include "worker/peer.hpp"
 #include "worker/publisher.hpp"
 #include "worker/queue.hpp"
@@ -1184,7 +1185,28 @@ static void input_check_runtime() {
     CHECK(!worker::input_check::active());
 }
 
+// 스트림 한 줄(0.19): 칸, 모듈 이벤트 먼저·호스트 이벤트 뒤, 호스트 큐는 한 번만, host 없음
+static void stream_line_events() {
+    worker::Host host("test");
+    host.event("cam", "warning", "stream_down", "down");
+    host.event("cam", "info", "stream_up", "up");
+    const worker::Json own = worker::Json::array({{{"code", "own"}}});
+    auto j = worker::Json::parse(worker::stream_line(&host, 7, true, {{"a", {{"t_mono_ns", 1}}}}, own));
+    CHECK(j["seq"] == 7 && j["kf"] == true && j["t"].is_number() && j["t"].get<double>() > 1.7e9);
+    CHECK(j["topics"]["a"]["t_mono_ns"] == 1 && j["events_next"] == 0);
+    CHECK(j["events"].size() == 3 && j["events"][0]["code"] == "own");
+    CHECK(j["events"].size() == 3 && j["events"][1]["code"] == "stream_down" && j["events"][2]["code"] == "stream_up");
+    CHECK(host.take_events().empty());
+    j = worker::Json::parse(worker::stream_line(&host, 8, false, worker::Json::object()));
+    CHECK(j["seq"] == 8 && j["kf"] == false && j["topics"].is_object() && j["topics"].empty());
+    CHECK(j["events"].is_array() && j["events"].empty());
+    j = worker::Json::parse(worker::stream_line(nullptr, 9, false, {{"b", nullptr}}, own));
+    CHECK(j["seq"] == 9 && j["topics"].contains("b") && j["topics"]["b"].is_null());
+    CHECK(j["events"].size() == 1 && j["events"][0]["code"] == "own");
+}
+
 int main() {
+    stream_line_events();
     input_check_runtime();
     command_client_via_entry();
     command_lease();

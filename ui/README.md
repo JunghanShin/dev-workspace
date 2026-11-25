@@ -10,7 +10,7 @@
 
 - 화면 제목은 보드 `<데이터>/config/workspace.env`의 `WORKSPACE_UI_TITLE`, 영상 주소 틀은 `WORKSPACE_UI_MEDIA_URL`
 - 신분 확인(C++ 게이트웨이, `docs/gateway.md` 3장): 셸이 먼저 `/api/auth/me`를 본다. 켜져 있고 세션이 없으면 패널 대신 로그인 창, 세션이 끝나면(401) 다시 로그인 창. 머리에 운용/개발 모드 배지와 사용자·역할·로그아웃(꺼짐이면 "인증 꺼짐"). 패널은 `state.auth`(`{auth, name, role, mode}`)를 받는다. Python REST(엔드포인트 없음)면 배지 없이 지금처럼
-- **건강 띠**(머리, `ui/system-panel.md` 4장): status-manager가 있으면 "시스템 정상·주의·고장"과 fault의 "이상 N". 누르면 패널 "시스템". 매니저 주제는 `web/system.js`가 매니저 스트림으로 받는다(늘 여는 것은 system·fault 둘)
+- **건강 띠**(머리, `ui/system-panel.md` 4장): status-manager가 있으면 "시스템 정상·주의·고장"과 fault의 "이상 N". 누르면 패널 "시스템". 매니저 주제는 `web/system.js`가 매니저 스트림으로 받는다(늘 받는 것은 system·fault 둘). 화면의 스트림은 모두 `web/streams.js`가 연결 하나(`/api/board/streams?ids=…`, `docs/stream-mux.md`)로 묶는다
 - 모드는 배포 형태가 정한다(워크스페이스 개발, 제품 운용, `docs/modes.md`). 화면에서 바꾸지 않는다
 
 ## 화면
@@ -82,6 +82,7 @@ export default {
 | `remote(name, params)` | 보드 읽기(정해진 명령만). `worker_log`(id, lines), `commands`(lines), `service_log`(lines), `processes`(lines), `power_modes`, `metrics_history`(id, minutes, points, keys, csv: 보드 `logger/workspace_history.py`) |
 | `act(label, fn)` | 명령 실행 + 성공·실패 알림 + 상태 다시 읽기 |
 | `history(workerId)` | 최근 3분 지표 기록(그래프용) |
+| `stream(id, hz, onLine)` | 워커 텔레메트리 스트림 구독(design.md 9.7) → 끊기 함수. mount에서 부르고 unmount에서 끊는다(빠뜨려도 셸이 패널을 내릴 때 끊음). `onLine(msg)`: 첫 줄 기준 상태(`kf`), 이후 바뀐 주제만, 끊기면 `{stream: "down"}`. 화면 하나에 연결 하나로 묶이므로(`web/streams.js`) `new EventSource(...)` 대신 이것을 쓴다(옛 길도 동작은 함) |
 | `h`, `fmt`, `stateBadge`, `spark`, `toast` | 요소 만들기, 숫자 표시, 상태 표시, 작은 그래프, 알림 |
 | `ui` | 공통 부품(`web/kit.js`). 아래 "패널 디자인 규칙" |
 
@@ -92,6 +93,7 @@ export default {
 모든 패널은 같은 모양이어야 한다. 그래서 화면 요소는 **공통 부품(`web/kit.js`, 패널에서는 `ctx.ui`)으로만** 만들고, 스타일은 `web/shell.css`의 "공통 부품" 절에만 둔다. 패널 안에 색·글자 크기를 직접 쓰지 않는다. 새 모양이 필요하면 패널이 아니라 `kit.js`·`shell.css`에 부품을 추가한다.
 
 **원칙**
+- **위험한 명령 확인은 계약에**(`docs/command-confirm.md`): 명령 정의에 `"confirm": "<문구>"`를 적으면 셸이 보내기 전에 묻는다. 패널에서 `confirm()`을 따로 띄우지 않는다
 - **워커 패널은 머리 + 탭 셋**(`ui/worker-panels.md`): **운용**(주 화면·운용 조작, 처음 탭), **상태**(장치·링크 상세 값·셈·이벤트, 보기만), **도구**(정비·시험·직접 보내기, `devOnly`라 제품 화면에 없음). `ui.panelTabs([{id, label, body, devOnly?}], {onChange})`, 탭은 주소 `?tab=`. 설정 칸은 본문에 두지 않고 설정 창(이 브라우저 값 포함). 영상은 운용 탭에서만 받는다
 - 글자보다 아이콘: 버튼은 `iconButton`(이름은 `title`, 마우스를 올리면 보임). 글자가 꼭 필요한 동작(저장, 재시작 등)만 `label`
 - 글자 단계로 위계: 로고 20, 화면 제목 22, 큰 숫자 26(`readout`)·24(`tile`), 대화창 제목 16, 본문·메뉴 14, 이름표·블록 제목 12, 메뉴 묶음·보조 11. 굵기는 제목·숫자·메뉴 항목만

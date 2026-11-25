@@ -266,7 +266,7 @@ Manager가 SIGHUP을 보내면 호스트가 설정 파일을 다시 읽어 바�
 
 ## 텔레메트리 발행 (화면 실시간 값)
 
-계속 바뀌는 값은 `get_status` 폴링 대신 발행한다(design.md 6.6.2, 9.7). 예제 모듈 `source`가 본보기다: `start()`에서 `worker::Publisher`(스레드 `<모듈>.pub`)를 `host.stream_socket()`에 열고, `on_timer`에서 구독자가 있을 때만 `{"seq", "kf", "t", "topics": {"<주제>": {...}}, "events": [], "events_next": 0}` 한 줄을 `publish`. 새 구독자(`keyframe_requested()`)와 5초마다 `kf: true`. 패널은 `EventSource("/api/board/workers/<id>/stream?hz=10")`(예제 패널 `startStream`).
+계속 바뀌는 값은 `get_status` 폴링 대신 발행한다(design.md 6.6.2, 9.7). 예제 모듈 `source`가 본보기다: `start()`에서 `worker::Publisher`(스레드 `<모듈>.pub`)를 `host.stream_socket()`에 열고, `on_timer`에서 구독자가 있을 때만 `{"seq", "kf", "t", "topics": {"<주제>": {...}}, "events": [], "events_next": 0}` 한 줄을 `publish`(줄은 `worker::stream_line`으로 만든다: 호스트 이벤트 큐를 `events`에 비워 붙임, libworker 0.19). 새 구독자(`keyframe_requested()`)와 5초마다 `kf: true`. 패널은 `ctx.stream("<id>", 10, onLine)(셸이 넘김, 화면 하나에 스트림 연결 하나, docs/stream-mux.md)`(예제 패널 `startStream`).
 
 ## 가짜 장치 모드 (장비 없이 개발, design.md 6.6.8)
 

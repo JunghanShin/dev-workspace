@@ -31,6 +31,10 @@ private:
     long long seq_ = 0;
 };
 
+// /streams(docs/stream-mux.md) 한 줄: 화면 메시지 + "worker". 꺼짐(stream "down")이면 {"worker", "down": true}를
+// 그 워커에 한 번만(down이 이미 true면 "" = 보내지 않음). 다시 올라온 줄(기준 상태)부터는 그대로
+std::string mux_line(const std::string& worker, Json msg, bool& down);
+
 class UpstreamState {
 public:
     // 워커 메시지 하나 → 화면에 나눠 줄 메시지. fresh(다시 붙은 뒤 첫 기준 상태)면 상태를 비우고 기준 상태를 만든다

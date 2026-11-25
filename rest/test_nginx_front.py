@@ -22,6 +22,7 @@ import test_rest_accept as t
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDER = os.path.join(HERE, "..", "gateway", "nginx", "render.sh")
 MAKE_CERT = os.path.join(HERE, "..", "gateway", "nginx", "make-cert.sh")
+APPLY = os.path.join(HERE, "..", "gateway", "nginx", "apply.sh")
 NGINX = shutil.which("nginx") or ("/usr/sbin/nginx" if os.path.exists("/usr/sbin/nginx") else None)
 
 
@@ -199,6 +200,26 @@ class NginxFront(unittest.TestCase):
         finally:
             sse.close()
 
+    def test_streams_not_buffered(self):
+        """/streams(여러 워커를 한 연결로, docs/stream-mux.md)도 버퍼링 없이"""
+        sse = t.SSE(self.port, "/api/board/streams?ids=s1:20")
+        try:
+            self.assertEqual(sse.status, 200)
+            first = sse.wait_msg(lambda m: m.get("stream") == "up", 5)  # 위쪽이 아직이면 down 줄이 먼저
+            self.assertTrue(first and first.get("kf") and first.get("worker") == "s1", first)
+            t0 = time.time()
+            self.stream.send({"device": {"mode": "MUX", "roll": 2}})
+            got = None
+            while time.time() - t0 < 3:
+                m = sse.msg(3)
+                if m and m.get("topics", {}).get("device", {}).get("mode") == "MUX":
+                    got = time.time() - t0
+                    break
+            self.assertIsNotNone(got, "update did not arrive")
+            self.assertLess(got, 1.0)
+        finally:
+            sse.close()
+
     def test_z_static_survives_gateway_down(self):
         """화면 파일은 nginx가 직접 준다: 게이트웨이가 없어도 화면은 열리고 API만 502"""
         self.gw.stop()
@@ -310,6 +331,110 @@ class NginxHttps(unittest.TestCase):
             c.close()
 
 
+@unittest.skipUnless(t.REST_BIN and NGINX and shutil.which("openssl"), "C++ 게이트웨이(REST_BIN)·nginx·openssl이 있어야 함")
+class NginxLive(unittest.TestCase):
+    """설정 바로 적용(docs/live-settings.md)과 영상 로그인(docs/media-auth.md): 시작 셸과 같은 apply.sh로 nginx를 띄우고,
+    설정 탭 PUT으로 로그인·HTTPS를 바꾸면 게이트웨이가 apply.sh --reload로 nginx를 다시 읽힌다(nginx는 그대로 같은 프로세스)"""
+
+    @classmethod
+    def setUpClass(cls):
+        t.setUpModule()
+        root = t.T["root"]
+        shutil.copytree(os.path.join(HERE, "..", "gateway", "nginx"), os.path.join(root, "gateway", "nginx"), dirs_exist_ok=True)
+        defs = os.path.join(root, "install", "config")
+        os.makedirs(defs, exist_ok=True)
+        shutil.copy(os.path.join(HERE, "..", "install", "config", "workspace-settings.json"), defs)
+        cls.data = t.auth_data_dir()  # 사용자 v1·o1·m1 + m1 토큰
+        cls.token = t.AUTH_USERS_TOKEN[cls.data]
+        cls.port, cls.tport = t.free_port(), t.free_port()
+        t.write(os.path.join(cls.data, "config", "workspace.env"),
+                "WORKSPACE_REST_BIND=127.0.0.1\nWORKSPACE_REST_PORT=%d\n" % cls.port)
+        cls.prefix = os.path.join(cls.data, "run", "nginx")
+        cls.sock = os.path.join(cls.data, "run", "gateway.sock")
+        cls.media = FakeMedia()
+        cls.env = dict(os.environ, RENDER_MEDIA="127.0.0.1:%d" % cls.media.port, CERT_IPS="192.0.2.10",
+                       WORKSPACE_NGINX_DIR=cls.prefix)
+        out = subprocess.check_output(["bash", APPLY, cls.data, root, cls.sock], env=cls.env, text=True)  # 시작 셸처럼
+        assert "config ready" in out, out
+        cls.gw = t.Server(t.auth_env(cls.data, WORKSPACE_AUTH="off", WORKSPACE_GATEWAY_SOCKET=cls.sock, WORKSPACE_GATEWAY_TCP="0",
+                                     RENDER_MEDIA=cls.env["RENDER_MEDIA"], CERT_IPS="192.0.2.10", WORKSPACE_NGINX_DIR=cls.prefix),
+                          name="gw-live", unix_only=cls.sock)
+        cls.ng_log = open(os.path.join(cls.prefix, "nginx.log"), "wb")
+        conf = os.path.join(cls.prefix, "nginx.conf")
+        cls.ng = subprocess.Popen([NGINX, "-p", cls.prefix, "-c", conf, "-g", "daemon off;"], stdout=cls.ng_log, stderr=cls.ng_log)
+        assert t.wait_for(lambda: NginxFront._open(cls.port), 5, 0.05), "nginx did not start"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.ng.send_signal(signal.SIGTERM)
+        try:
+            cls.ng.wait(5)
+        except subprocess.TimeoutExpired:
+            cls.ng.kill()
+        cls.ng_log.close()
+        cls.gw.stop()
+        cls.media.close()
+        t.tearDownModule()
+
+    def req(self, method, path, body=None, headers=None, raw=None):
+        return NginxFront.req(self, method, path, body, headers, raw)
+
+    def put(self, body):
+        st, _, data = self.req("PUT", "/api/board/workspace/settings", body,
+                               headers={"Content-Type": "application/json", "Authorization": "Bearer " + self.token})
+        return st, json.loads(data)
+
+    def test_live_auth_and_https(self):
+        pid = self.ng.pid
+        self.assertEqual(self.req("GET", "/media/cam/")[0], 200)  # 로그인 꺼짐: 예전처럼 열림
+        # 로그인 켜기 → nginx 다시 읽기 → /media/도 로그인한 사람만
+        st, obj = self.put({"WORKSPACE_AUTH": "on"})
+        self.assertEqual((st, obj["applied"], obj["failed"]), (200, ["WORKSPACE_AUTH"], {}), obj)
+        st, h, body = self.req("GET", "/media/cam/")
+        self.assertEqual(st, 401)
+        self.assertEqual(self.req("GET", "/api/board/workers")[0], 401)
+        bearer = {"Authorization": "Bearer " + self.token}
+        st, h, data = self.req("GET", "/media/cam/", headers=bearer)
+        self.assertEqual((st, json.loads(data)["path"]), (200, "/cam/"))
+        st, h, data = self.req("POST", "/api/auth/login", {"name": "v1", "password": t.PASSWORDS["v1"]},
+                               headers={"Content-Type": "application/json"})
+        self.assertEqual(st, 200)
+        cookie = {"Cookie": h["set-cookie"].split(";", 1)[0]}
+        # 신호(WHEP POST·DELETE)도: 안쪽 확인은 GET으로 바꿔 묻는다
+        st, h, data = self.req("POST", "/media/cam/whep", raw=b"v=0 offer", headers=dict(cookie, **{"Content-Type": "application/sdp"}))
+        self.assertEqual((st, json.loads(data)["body"]), (201, "v=0 offer"))
+        self.assertEqual(self.req("DELETE", "/media/cam/whep/abc123", headers=cookie)[0], 200)
+        self.assertEqual(self.req("DELETE", "/media/cam/whep/abc123")[0], 401)
+        self.assertEqual(self.req("GET", "/_media_auth")[0], 404)  # 안쪽 위치는 바깥에서 못 부름
+        # HTTPS 켜기 → 자체 서명 인증서를 만들고 HTTPS 포트를 연다(nginx는 같은 프로세스)
+        st, obj = self.put({"WORKSPACE_HTTPS": "on", "WORKSPACE_HTTPS_PORT": self.tport})
+        self.assertEqual((st, sorted(obj["applied"]), obj["failed"]), (200, ["WORKSPACE_HTTPS", "WORKSPACE_HTTPS_PORT"], {}), obj)
+        self.assertTrue(t.wait_for(lambda: NginxFront._open(self.tport), 5, 0.05))
+        import http.client
+        import ssl
+        ctx = ssl.create_default_context(cafile=os.path.join(self.data, "config", "tls", "workspace.crt"))
+        c = http.client.HTTPSConnection("localhost", self.tport, timeout=10, context=ctx)
+        c.request("GET", "/api/board/workers", headers=bearer)
+        self.assertEqual(c.getresponse().status, 200)
+        c.close()
+        st, _, data = self.req("GET", "/api/board/workspace/settings", headers=bearer)
+        fs = {f["key"]: f for g in json.loads(data)["groups"] for f in g["fields"]}
+        self.assertEqual((fs["WORKSPACE_HTTPS"]["effective"], fs["WORKSPACE_HTTPS_PORT"]["effective"]), ("on", self.tport))
+        # 읽을 수 없는 인증서: 옛 설정 그대로 두고 failed
+        st, obj = self.put({"WORKSPACE_HTTPS_CERT": "/no/such.crt", "WORKSPACE_HTTPS_KEY": "/no/such.key"})
+        self.assertEqual((st, obj["applied"]), (200, []))
+        self.assertIn("not readable", obj["failed"]["WORKSPACE_HTTPS_CERT"])
+        self.assertTrue(NginxFront._open(self.tport))
+        self.put({"WORKSPACE_HTTPS_CERT": None, "WORKSPACE_HTTPS_KEY": None})
+        # 끄기
+        st, obj = self.put({"WORKSPACE_HTTPS": "off", "WORKSPACE_AUTH": "off"})
+        self.assertEqual((st, obj["failed"]), (200, {}), obj)
+        self.assertTrue(t.wait_for(lambda: not NginxFront._open(self.tport), 5, 0.05))
+        self.assertEqual(self.req("GET", "/media/cam/")[0], 200)
+        self.assertEqual(self.ng.pid, pid)
+        self.assertIsNone(self.ng.poll())  # 다시 시작이 아니라 다시 읽기
+
+
 class Render(unittest.TestCase):
     """render.sh가 nginx 빌드에 맞춰 설정을 만드는지(nginx 없이: 가짜 nginx -V). 보드의 Ubuntu 22.04 nginx-light는
     limit_conn 모듈이 없어 설정 점검이 실패했던 일이 있다"""
@@ -343,6 +468,21 @@ class Render(unittest.TestCase):
         none = self.render("configure arguments: --with-http_ssl_module")
         self.assertNotIn(" ssl;", none)
         self.assertFalse([l for l in none.splitlines() if "@TLS@" in l and not l.lstrip().startswith("#")])
+
+    def test_media_auth(self):
+        """RENDER_AUTH=on(docs/media-auth.md): /media/에 auth_request, 모듈이 없으면 /media/를 뺀다(열어 두지 않음)"""
+        full = self.render("configure arguments: --with-http_auth_request_module", dict(RENDER_AUTH="on"))
+        self.assertIn("auth_request /_media_auth;", full)
+        self.assertIn("location = /_media_auth", full)
+        self.assertIn("proxy_pass http://gateway/api/auth/check;", full)
+        self.assertIn("proxy_method GET;", full)
+        self.assertIn("location ^~ /media/", full)
+        nomod = self.render("configure arguments: --with-http_ssl_module", dict(RENDER_AUTH="on"))
+        self.assertNotIn("location ^~ /media/", nomod)
+        self.assertNotIn("auth_request", nomod)
+        off = self.render("configure arguments: --with-http_auth_request_module")
+        self.assertIn("location ^~ /media/", off)
+        self.assertNotIn("auth_request", off)
 
     def test_with_and_without_limit_conn(self):
         full = self.render("configure arguments: --with-http_ssl_module")

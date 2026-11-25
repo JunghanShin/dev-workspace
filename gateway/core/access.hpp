@@ -85,8 +85,9 @@ struct CommandKinds {
 };
 CommandKinds command_kinds(const Json& io);  // io가 null(계약 없음)이면 get_status만 읽기
 
-// 게이트웨이가 직접 답하는 경로: /api/auth/{login,logout,me}, /api/mode(앞에 /api/board도, /api 없이도)
-enum class Own { None, Login, Logout, Me, ModeGet, MethodNotAllowed };
+// 게이트웨이가 직접 답하는 경로: /api/auth/{login,logout,me,check}, /api/mode(앞에 /api/board도, /api 없이도)
+// check: nginx auth_request(영상 /media/, docs/media-auth.md)가 묻는 곳. 로그인한 사람이면 204, 아니면 401
+enum class Own { None, Login, Logout, Me, Check, ModeGet, MethodNotAllowed };
 Own own_route(const std::string& method, const std::string& path);
 
 // ---- 세션(메모리에만: 게이트웨이를 다시 시작하면 다시 로그인) ----

@@ -4,7 +4,7 @@
 #     target_link_libraries(<워커> PRIVATE worker)
 # 사본은 그 워커의 것이다. 원본이 좋아졌을 때 가져올지는 워커마다 정한다.
 cmake_minimum_required(VERSION 3.16)
-project(libworker VERSION 0.18.0 LANGUAGES CXX)
+project(libworker VERSION 0.19.0 LANGUAGES CXX)
 
 # 워크스페이스 연동(heartbeat, 데이터 폴더 기준 소켓 경로). 워크스페이스 밖에서 쓰면 -DWORKER_WORKSPACE=OFF
 option(WORKER_WORKSPACE "workspace integration (Manager heartbeat, data-folder socket paths)" ON)
@@ -25,6 +25,7 @@ if(NOT TARGET worker)
         src/thread.cpp
         src/stage.cpp
         src/publisher.cpp
+        src/stream.cpp
         src/schema.cpp
         src/input_check.cpp
         src/peer.cpp

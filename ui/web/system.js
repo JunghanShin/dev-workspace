@@ -2,9 +2,12 @@
 //
 //   찾기: GET /workers에서 kind "manager"인 워커마다 계약 GET /workers/{id}/io를 한 번 읽어, 내보내는 역할
 //         (system·fault·mission·payload·config)의 매니저를 안다. record는 역할이 없어 type "record-manager"로
-//   받기: 그 매니저가 떠 있으면 스트림 /workers/{id}/stream?hz=2(SSE)를 열어 주제를 합친다. 꺼지면 닫는다
+//   받기: 그 매니저가 떠 있으면 스트림을 구독해(streams.js, 화면 하나에 연결 하나 /streams?ids=…, docs/stream-mux.md)
+//         hz 2로 주제를 합친다. 꺼지면 구독을 끊는다
 //   get(role) → null(설치 안 됨) | {worker, state: "running"|…, up, got, topic, events}
-//   브라우저는 출처마다 HTTP/1.1 연결이 6개라, 늘 여는 것은 띠에 쓰는 system·fault 둘. 나머지는 want()한 동안만(패널)
+//   늘 받는 것은 띠에 쓰는 system·fault 둘. 나머지는 want()한 동안만(패널)
+
+import { subscribe } from "/streams.js";
 
 export const ROLES = ["system", "fault", "mission", "payload", "config"];
 const HZ = 2;
@@ -15,25 +18,22 @@ let lastState = null, lastApi = null;
 
 const roles = {};      // 역할 → 워커 id
 const probed = {};     // 워커 id → "pending" | "done"
-const feeds = {};      // 워커 id → {es, up, topics, events}
+const feeds = {};      // 워커 id → {off, up, got, topics, events}
 let workers = {};      // 워커 id → /workers 한 줄
 
 function closeFeed(id) {
   const f = feeds[id];
-  if (f && f.es) f.es.close();
+  if (f && f.off) f.off();
   delete feeds[id];
 }
 
 function openFeed(id) {
-  if (feeds[id] || typeof EventSource !== "function") return;
-  const f = { es: null, up: false, got: false, topics: null, events: [] };
+  if (feeds[id]) return;
+  const f = { off: null, up: false, got: false, topics: null, events: [] };
   feeds[id] = f;
-  const es = new EventSource(`/api/board/workers/${encodeURIComponent(id)}/stream?hz=${HZ}`);
-  f.es = es;
-  es.onmessage = (m) => {
+  // 끊김·연결 오류는 streams.js가 {stream: "down"}으로 알린다(다시 붙는 것도 streams.js)
+  f.off = subscribe(id, HZ, (msg) => {
     if (feeds[id] !== f) return;
-    let msg;
-    try { msg = JSON.parse(m.data); } catch { return; }
     if (msg.stream === "down") { f.up = false; f.topics = null; return; }
     if (msg.kf || !f.topics) f.topics = { ...(msg.topics || {}) };
     else Object.assign(f.topics, msg.topics || {});
@@ -44,8 +44,7 @@ function openFeed(id) {
       for (const e of msg.events) if (!seen.has(`${e.source}|${e.seq}`)) f.events.push(e);
       if (f.events.length > MAX_EVENTS) f.events.splice(0, f.events.length - MAX_EVENTS);
     }
-  };
-  es.onerror = () => { if (feeds[id] === f) f.up = false; };  // EventSource가 알아서 다시 붙는다
+  });
 }
 
 async function probe(id, api) {

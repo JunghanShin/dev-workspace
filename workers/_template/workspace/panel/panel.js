@@ -1,6 +1,7 @@
 // 예제 워커 패널(워크스페이스 연동 ③층, 워커 폴더 workspace/panel/). 워크스페이스 화면이 이 폴더를 읽어 왼쪽 목록에 붙인다.
 // 공통 부품(ctx.ui)으로만 그린다(ui/README.md "패널 디자인 규칙"). 명령은 "<모듈>.<명령>", 상태는 get_status의 모듈 칸.
-// 실시간 값(source)은 텔레메트리 스트림(SSE /workers/<id>/stream, design.md 9.7)으로, 나머지는 2초마다 get_status.
+// 실시간 값(source)은 텔레메트리 스트림(design.md 9.7)으로, 나머지는 2초마다 get_status.
+// 스트림은 셸의 ctx.stream(화면 하나에 연결 하나, docs/stream-mux.md). 옛 길 EventSource("/workers/<id>/stream")도 그대로 된다
 const STATUS_MS = 2000;
 const STREAM_HZ = 10;
 let els = {};
@@ -10,19 +11,16 @@ async function command(ctx, cmd, args = {}) {
   return ctx.api("POST", `/workers/${ctx.workerId}/command`, { cmd, args });
 }
 
-// 스트림: 첫 메시지는 기준 상태(kf, 모든 주제), 이후 바뀐 주제만. 워커가 꺼지면 {"stream": "down"}
+// 스트림: 첫 메시지는 기준 상태(kf, 모든 주제), 이후 바뀐 주제만. 워커가 꺼지거나 연결이 끊기면 {"stream": "down"}
 function startStream(ctx) {
-  const es = new EventSource(`/api/board/workers/${encodeURIComponent(ctx.workerId)}/stream?hz=${STREAM_HZ}`);
-  els.es = es;
-  es.onmessage = (m) => {
-    if (els.es !== es) return;
-    let msg;
-    try { msg = JSON.parse(m.data); } catch { return; }
+  const mine = els;
+  els.unstream = ctx.stream(ctx.workerId, STREAM_HZ, (msg) => {
+    if (els !== mine) return;
     if (msg.stream === "down") { els.topics = null; showSource(null); return; }
     if (msg.kf) els.topics = { ...msg.topics };
     else if (els.topics) Object.assign(els.topics, msg.topics);
     if (els.topics) showSource(els.topics.source);
-  };
+  });
 }
 
 function showSource(s) {
@@ -103,7 +101,7 @@ export default {
     );
     refresh(ctx);
     timer = setInterval(() => refresh(ctx), STATUS_MS);
-    if (typeof EventSource === "function") startStream(ctx);
+    startStream(ctx);
   },
 
   update(state, ctx) {
@@ -115,7 +113,7 @@ export default {
   },
 
   unmount() {
-    if (els.es) els.es.close();
+    if (els.unstream) els.unstream();
     clearInterval(timer);
     timer = null;
     if (els.settings) els.settings.dispose();

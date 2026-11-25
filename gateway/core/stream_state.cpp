@@ -103,6 +103,18 @@ Json UpstreamState::apply(const Json& msg, bool fresh) {
     return out;
 }
 
+std::string mux_line(const std::string& worker, Json msg, bool& down) {
+    auto st = msg.find("stream");
+    if (st != msg.end() && *st == "down") {
+        if (down) return "";
+        down = true;
+        return compact(Json{{"worker", worker}, {"down", true}});
+    }
+    down = false;
+    msg["worker"] = worker;
+    return compact(msg);
+}
+
 Json UpstreamState::snapshot(bool up) const {
     Json out = Json::object();
     out["topics"] = topics_;

@@ -8,19 +8,19 @@
     {"key": "WORKSPACE_REST_COMMAND_TIMEOUT", "label": "명령 응답 대기", "type": "number", "min": 0.5, "max": 60, "unit": "s", "apply": "live", "default": 3,
      "description": "워커 명령 응답을 기다리는 시간(초). 장치 응답을 기다리는 명령(장치 ACK 등)보다 길게"}]},
   {"title": "로그", "fields": [
-    {"key": "WORKSPACE_LOG_LEVEL", "label": "로그 수준", "type": "enum", "enum": ["DEBUG", "INFO", "WARNING", "ERROR"], "apply": "restart", "default": "INFO",
+    {"key": "WORKSPACE_LOG_LEVEL", "label": "로그 수준", "type": "enum", "enum": ["DEBUG", "INFO", "WARNING", "ERROR"], "apply": "live", "default": "INFO",
      "description": "워크스페이스 서비스 로그 수준(DEBUG, INFO, WARNING, ERROR)"}]},
   {"title": "보안", "fields": [
-    {"key": "WORKSPACE_HTTPS", "label": "HTTPS", "type": "enum", "enum": ["off", "on"], "apply": "restart", "default": "off",
-     "description": "HTTPS(docs/https.md, nginx 앞단일 때만). on이면 nginx가 HTTPS 포트도 받는다(기본 off = 지금과 같음)"},
-    {"key": "WORKSPACE_HTTPS_PORT", "label": "HTTPS 포트", "type": "integer", "min": 1, "max": 65535, "apply": "restart", "default": 8443,
+    {"key": "WORKSPACE_HTTPS", "label": "HTTPS", "type": "enum", "enum": ["off", "on"], "apply": "live", "default": "off",
+     "description": "HTTPS(docs/https.md, nginx 앞단일 때만). on이면 nginx가 HTTPS 포트도 받는다(기본 off = 지금과 같음). 바꾸면 nginx 설정을 다시 만들어 끊지 않고 다시 읽음(docs/live-settings.md)"},
+    {"key": "WORKSPACE_HTTPS_PORT", "label": "HTTPS 포트", "type": "integer", "min": 1, "max": 65535, "apply": "live", "default": 8443,
      "description": "HTTPS 포트(화면 주소 https://<보드>:<포트>). 443을 쓰려면 nginx에 낮은 포트 권한(install/README.md)"},
-    {"key": "WORKSPACE_HTTPS_CERT", "label": "인증서 파일", "type": "string", "apply": "restart", "default": "",
-     "description": "인증서 파일(워크스페이스 계정이 읽을 수 있어야 함). 비우면 보드 자체 서명(<데이터>/config/tls/, 시작할 때 만듦·갱신)"},
-    {"key": "WORKSPACE_HTTPS_KEY", "label": "키 파일", "type": "string", "apply": "restart", "default": "",
-     "description": "인증서 키 파일(워크스페이스 계정이 읽을 수 있어야 함). 비우면 보드 자체 서명(<데이터>/config/tls/, 시작할 때 만듦·갱신)"},
-    {"key": "WORKSPACE_HTTP_REDIRECT", "label": "평문 → HTTPS 넘김", "type": "enum", "enum": ["on", "off"], "apply": "restart", "default": "on",
+    {"key": "WORKSPACE_HTTPS_CERT", "label": "인증서 파일", "type": "string", "apply": "live", "default": "",
+     "description": "인증서 파일(워크스페이스 계정이 읽을 수 있어야 함). 비우면 보드 자체 서명(<데이터>/config/tls/, 시작·적용할 때 만듦·갱신)"},
+    {"key": "WORKSPACE_HTTPS_KEY", "label": "키 파일", "type": "string", "apply": "live", "default": "",
+     "description": "인증서 키 파일(워크스페이스 계정이 읽을 수 있어야 함). 비우면 보드 자체 서명(<데이터>/config/tls/, 시작·적용할 때 만듦·갱신)"},
+    {"key": "WORKSPACE_HTTP_REDIRECT", "label": "평문 → HTTPS 넘김", "type": "enum", "enum": ["on", "off"], "apply": "live", "default": "on",
      "description": "평문 포트로 온 요청을 HTTPS로 넘길지(기본 on). 보드 안(127.0.0.1, SSH 터널)에서 온 것은 늘 그대로"},
-    {"key": "WORKSPACE_AUTH", "label": "로그인", "type": "enum", "enum": ["off", "on"], "apply": "restart", "default": "off",
-     "description": "게이트웨이 신분 확인(기본 off). on이면 로그인·사용자별 토큰·역할(<데이터>/config/users.json, gateway user add). 제품 모드는 늘 on"}]}
+    {"key": "WORKSPACE_AUTH", "label": "로그인", "type": "enum", "enum": ["off", "on"], "apply": "live", "default": "off",
+     "description": "게이트웨이 신분 확인(기본 off). on이면 로그인·사용자별 토큰·역할(<데이터>/config/users.json, gateway user add, 사용자가 있어야 켤 수 있음). 켜면 영상(/media/, MediaMTX 포트)도 로그인한 사람만(docs/media-auth.md). 제품 모드는 늘 on"}]}
 ]}

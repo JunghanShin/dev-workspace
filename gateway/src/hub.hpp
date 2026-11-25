@@ -8,6 +8,9 @@
 // - 화면이 느리면 그 화면의 쓰기만 시간 초과로 끊긴다(SseSession을 도는 HTTP 스레드). 워커와 다른 화면은 영향 없음
 // - 워커가 다시 시작하면 다시 붙고 새 기준 상태. 끊긴 동안은 {"stream":"down"}을 한 번
 // - 화면이 모두 떠나고 idle_close_s가 지나면 Upstream이 스스로 정리
+// - 화면 하나가 여러 워커를 한 연결로(/streams): MuxSession이 워커마다 Subscriber를 두고 HTTP 스레드 하나로 돈다
+//
+// 잠금 더: Subscriber::mu_를 놓은 뒤 Waker::mu_(겹치지 않음).
 //
 // 잠금(모두 짧고 잠금 안에서 I/O 없음): Hub::mu_(워커 → Upstream 표) → Upstream::mu_(구독자·상태) → Subscriber::mu_(합친 상태).
 // 이 순서로만 겹쳐 잡는다.
@@ -29,9 +32,24 @@
 
 namespace gw {
 
+// 여러 Subscriber를 스레드 하나가 기다릴 때(/streams, MuxSession): offer마다 세대를 올리고 깨운다
+class Waker {
+public:
+    void poke();
+    unsigned long long gen();
+    // 세대가 seen에서 바뀌거나 timeout_s가 지날 때까지
+    void wait(unsigned long long seen, double timeout_s);
+
+private:
+    std::mutex mu_;
+    std::condition_variable cv_;
+    unsigned long long gen_ = 0;
+};
+
 class Subscriber {
 public:
-    explicit Subscriber(double hz) : min_interval_(1.0 / hz) {}
+    explicit Subscriber(double hz, std::shared_ptr<Waker> waker = nullptr)
+        : min_interval_(1.0 / hz), waker_(std::move(waker)) {}
     void offer(const Json& msg, bool keyframe);
     // 합친 메시지 또는 없음(timeout_s 안에 온 것이 없음)
     std::optional<Json> take(double timeout_s);
@@ -40,6 +58,7 @@ public:
 
 private:
     const double min_interval_;
+    const std::shared_ptr<Waker> waker_;  // 없으면 cv_만
     std::mutex mu_;
     std::condition_variable cv_;
     SseMerge merge_;
@@ -114,7 +133,8 @@ public:
     Hub(const Hub&) = delete;
     Hub& operator=(const Hub&) = delete;
 
-    std::pair<std::shared_ptr<Upstream>, std::shared_ptr<Subscriber>> subscribe(const std::string& worker_id, double hz);
+    std::pair<std::shared_ptr<Upstream>, std::shared_ptr<Subscriber>> subscribe(const std::string& worker_id, double hz,
+                                                                                std::shared_ptr<Waker> waker = nullptr);
     // 끝난 Upstream 스레드를 거둔다(잠금 밖에서 join)
     void reap();
     void stop_all();
@@ -133,14 +153,23 @@ private:
     std::vector<std::shared_ptr<Upstream>> done_;  // 정리 중·끝난 것(reap이 join)
 };
 
-// 화면 하나의 SSE 응답 본문(HTTP 스레드가 step을 되풀이). 쓰기는 write가(시간 상한은 HTTP 쪽)
-class SseSession {
+// SSE 응답 본문(HTTP 스레드가 step을 되풀이). 쓰기는 write가(시간 상한은 HTTP 쪽)
+class SseBody {
+public:
+    virtual ~SseBody() = default;
+    // false면 끝(쓰기 실패·정지)
+    virtual bool step(const std::function<bool(const std::string&)>& write, const std::atomic<bool>& stopping) = 0;
+    virtual void finish() = 0;  // 구독 해제(한 번만)
+};
+
+// 화면 하나·워커 하나(/workers/{id}/stream)
+class SseSession : public SseBody {
 public:
     SseSession(std::shared_ptr<Upstream> up, std::shared_ptr<Subscriber> sub, double ping_s = 15.0);
-    ~SseSession();
-    // 한 번에 하나를 보내거나 기다린다(최대 약 1 s + hz 간격). false면 끝(쓰기 실패·정지)
-    bool step(const std::function<bool(const std::string&)>& write, const std::atomic<bool>& stopping);
-    void finish();  // 구독 해제(한 번만)
+    ~SseSession() override;
+    // 한 번에 하나를 보내거나 기다린다(최대 약 1 s + hz 간격)
+    bool step(const std::function<bool(const std::string&)>& write, const std::atomic<bool>& stopping) override;
+    void finish() override;
 
 private:
     std::shared_ptr<Upstream> up_;
@@ -149,6 +178,37 @@ private:
     bool retry_sent_ = false;
     double last_ = -1e18;   // 마지막 data 전송
     double last_write_;     // 마지막 쓰기(ping 판단)
+    std::atomic<bool> finished_{false};
+};
+
+// 화면 하나·워커 여럿(/streams, docs/stream-mux.md). HTTP 스레드 하나가 워커마다의 Subscriber를 한 고리에서 돈다
+//   - 워커마다 hz·합친 상태(Subscriber/SseMerge)는 따로 → 메모리 상한은 워커 수 × 하나짜리와 같음
+//   - 줄마다 "worker"를 붙임(mux_line). 꺼진 워커는 {"worker", "down": true} 한 번, 다시 오면 기준 상태부터
+//   - 기다림은 Waker 하나(어느 워커든 offer하면 깸). 한 step에서 보낼 때가 된 워커 줄을 모두 한 번에 씀
+class MuxSession : public SseBody {
+public:
+    struct Feed {
+        std::string id;
+        std::shared_ptr<Upstream> up;
+        std::shared_ptr<Subscriber> sub;
+    };
+    MuxSession(std::vector<Feed> feeds, std::shared_ptr<Waker> waker, double ping_s = 15.0);
+    ~MuxSession() override;
+    // 보낼 것을 모두 보내거나 기다린다(최대 0.2 s, 정지 요청을 봄)
+    bool step(const std::function<bool(const std::string&)>& write, const std::atomic<bool>& stopping) override;
+    void finish() override;
+
+private:
+    struct Entry {
+        Feed f;
+        double last = -1e18;  // 이 워커의 마지막 data 전송
+        bool down = false;    // down 줄을 보냄(다시 올라올 때까지 더 안 보냄)
+    };
+    std::vector<Entry> es_;
+    std::shared_ptr<Waker> waker_;
+    const double ping_s_;
+    bool retry_sent_ = false;
+    double last_write_;
     std::atomic<bool> finished_{false};
 };
 

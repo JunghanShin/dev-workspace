@@ -5,9 +5,12 @@
 //   panel.js    export default { mount(el, ctx), update(state, ctx), unmount?() }
 // worker_types가 있으면 보드에 그 type 워커가 있을 때마다 왼쪽 목록에 항목이 하나씩 생기고,
 // ctx.workerId로 어느 워커인지 받는다.
+// 실시간 값은 ctx.stream(id, hz, onLine) → 끊기 함수(streams.js: 화면 하나에 스트림 연결 하나, docs/stream-mux.md).
+// mount에서 부르고 unmount에서 돌려받은 함수를 부른다(빠뜨려도 셸이 패널을 내릴 때 끊는다).
 
 import * as ui from "/kit.js";
 import * as sys from "/system.js";
+import * as streams from "/streams.js";
 
 const HISTORY = 180;          // 워커별 지표 기록 개수(그래프용)
 const nav = document.getElementById("nav");
@@ -17,7 +20,7 @@ let panels = [];              // panel.json 목록
 const modules = {};           // id → 불러온 panel.js
 let state = { system: null, workers: [], byId: {}, connected: false, error: null, ui: null };
 const history = {};           // workerId → [{t, actual_state, metrics, resources}]
-let current = null;           // {key, panel, workerId, mod, ctx}
+let current = null;           // {key, panel, workerId, mod, ctx, offs}
 let refreshMs = 1000;
 
 // ---- 공용 도구 (패널이 ctx로 받는다) --------------------------------------------------
@@ -124,7 +127,41 @@ function needToken(r) {
   return true;
 }
 
+// 두 번 확인(docs/command-confirm.md): 워커 계약(GET /workers/{id}/io)의 명령 정의에 "confirm"이 있으면 보내기 전에 묻는다.
+// 계약은 워커마다 한 번 읽어 30 s 기억. 모든 패널·자동 화면이 이 길(api)로 명령을 보내므로 패널은 할 일이 없다
+const ioCache = {};
+async function confirmText(id, cmd) {
+  let c = ioCache[id];
+  if (!c || Date.now() - c.at > 30000) {
+    let io = null;
+    try {
+      const r = await fetch(`/api/board/workers/${encodeURIComponent(id)}/io`);
+      if (r.ok) io = await r.json();
+    } catch { /* 계약을 못 읽으면 묻지 않음(게이트웨이·워커 검사는 그대로) */ }
+    const defs = {};
+    const add = (cmds) => { for (const [k, v] of Object.entries(cmds || {})) defs[k] = v; };
+    if (io) {
+      add((io.common || {}).commands);
+      add((io.self || {}).commands);
+      for (const part of Object.values(io.includes || {})) add((part || {}).commands);
+      for (const role of Object.values(io.provides || {})) add((role || {}).commands);
+    }
+    c = ioCache[id] = { at: Date.now(), defs };
+  }
+  const d = c.defs[cmd];
+  return d && typeof d.confirm === "string" && d.confirm.trim() ? d.confirm : null;
+}
+
 async function api(method, path, body) {
+  const m = method === "POST" && /^\/workers\/([^/]+)\/command$/.exec(path);
+  if (m && body && typeof body.cmd === "string") {
+    const text = await confirmText(decodeURIComponent(m[1]), body.cmd);
+    if (text && !window.confirm(`${text}\n\n(${decodeURIComponent(m[1])} · ${body.cmd})`)) {
+      const err = new Error("취소함");
+      err.cancelled = true;
+      throw err;
+    }
+  }
   const r = await fetch("/api/board" + path, {
     method, headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -198,7 +235,7 @@ function toast(msg, kind = "") {
 // 명령 실행 + 결과 알림. 성공하면 바로 상태를 다시 읽는다
 async function act(label, fn) {
   try { await fn(); toast(label + " 완료", "ok"); poll(); refreshAuth(); }
-  catch (e) { toast(label + " 실패: " + e.message, "bad"); }
+  catch (e) { if (!e.cancelled) toast(label + " 실패: " + e.message, "bad"); }  // 두 번 확인에서 취소: 알림 없음
 }
 
 function h(tag, attrs = {}, ...children) {
@@ -416,6 +453,7 @@ async function route() {
   const it = items.find((i) => i.key === key) || items.find((i) => i.key === head && !i.workerId)
     || (key ? null : items.find((i) => i.key === "workspace") || items[0]);  // 처음 열리는 화면: 워크스페이스(개요)
   if (current && current.mod.unmount) { try { current.mod.unmount(current.ctx); } catch {} }
+  if (current) for (const off of [...current.offs]) off();  // 패널이 끊지 않은 스트림 구독
   current = null;
   if (!it) {
     // 워커 패널인데 아직 워커 목록이 없으면(보드 연결 전) poll()이 다시 시도한다
@@ -433,8 +471,15 @@ async function route() {
   const el = h("div");
   main.replaceChildren(el);
   const ctx = { workerId: it.workerId, panel: it.panel, sub: it.key === key ? "" : sub, api, remote, mergeConfig, act, toast, h, fmt,
-                stateBadge, spark, ui, history: (id) => history[id] || [], state: () => state };
-  current = { key: it.key, panel: it.panel, workerId: it.workerId, mod, ctx };
+                stateBadge, spark, ui, history: (id) => history[id] || [], state: () => state, stream: null };
+  const offs = new Set();
+  ctx.stream = (id, hz, onLine) => {
+    const off = streams.subscribe(id, hz, onLine);
+    const once = () => { offs.delete(once); off(); };
+    offs.add(once);
+    return once;
+  };
+  current = { key: it.key, panel: it.panel, workerId: it.workerId, mod, ctx, offs };
   navSig = "";
   renderNav();
   try { mod.mount(el, ctx); if (mod.update) mod.update(state, ctx); }

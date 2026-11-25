@@ -11,6 +11,8 @@
 #   RENDER_TLS_LISTEN=<주소:포트>  RENDER_TLS_CERT=<인증서>  RENDER_TLS_KEY=<키>
 #   RENDER_REDIRECT=on|off(기본 on): 평문 포트로 온 요청을 HTTPS로 넘김(308). 보드 안(127.0.0.1)에서 온 것은 그대로(SSH 터널)
 # 영상 넘기기(docs/media-proxy.md): RENDER_MEDIA=<주소:포트>(기본 127.0.0.1:8889, MediaMTX WebRTC), off면 /media/ 없음
+# 영상 로그인(docs/media-auth.md): RENDER_AUTH=on이면 /media/에 auth_request(게이트웨이 /api/auth/check). 모듈이 없으면 /media/를 뺀다
+# 이 스크립트를 직접 부르는 곳은 apply.sh(시작 셸·설정 탭 바로 적용이 같이 씀)와 시험
 # nginx에 ssl 모듈이 없으면 HTTPS를 빼고(경고), rewrite 모듈이 없으면 넘김만 뺀다.
 set -euo pipefail
 out="$1" prefix="$2" sock="$3" listen="$4" root="$5" ui="${6:-1}"
@@ -71,10 +73,33 @@ if [[ -n "${RENDER_TLS_LISTEN:-}" ]]; then
 fi
 media="${RENDER_MEDIA:-127.0.0.1:8889}"
 mediloc=''
+mauth='' mcheck=''
+if [[ "$media" != off && "${RENDER_AUTH:-off}" == on ]]; then
+  # 로그인 켬(docs/media-auth.md): /media/도 로그인한 사람만. 판정은 게이트웨이(/api/auth/check, 204 들여보냄·401)
+  if [[ -z "${nv:-}" ]]; then nv="$("$nginx_bin" -V 2>&1 || true)"; fi
+  if ! grep -q -- "--with-http_auth_request_module" <<<"$nv"; then
+    echo "render.sh: this nginx has no auth_request module; /media/ left out (login is on)" >&2
+    media=off  # 막을 수 없으면 열어 두지 않는다
+  else
+    mauth="
+            auth_request /_media_auth;  # 로그인 확인(쿠키·Bearer, docs/media-auth.md)"
+    mcheck="        # /media/ 로그인 확인(auth_request가 부르는 안쪽 요청): 본문 없이 GET으로 게이트웨이에 묻는다(WHEP는 POST·PATCH·DELETE)
+        location = /_media_auth {
+            internal;
+            proxy_pass http://gateway/api/auth/check;
+            proxy_method GET;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length \"\";
+            proxy_set_header Host \$http_host;
+            proxy_set_header X-Forwarded-For \$remote_addr;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+        }"
+  fi
+fi
 if [[ "$media" != off ]]; then
   mediloc="        # 영상(docs/media-proxy.md): 화면과 같은 주소·인증서로 MediaMTX WebRTC 보기 화면과 신호(WHEP)를 넘긴다.
         # 앞의 /media를 떼고 넘김. 영상 데이터는 WebRTC UDP로 바로(여기 안 거침)
-        location ^~ /media/ {
+        location ^~ /media/ {$mauth
             proxy_pass http://$media/;
             proxy_redirect / /media/;  # WHEP 세션 주소(Location: /<경로>/whep/<id>)도 /media/ 아래로(PATCH·DELETE가 같은 길로)
             absolute_redirect off;     # 상대 그대로(SSH 터널처럼 포트가 달라도 맞게)
@@ -82,6 +107,8 @@ if [[ "$media" != off ]]; then
             proxy_set_header Host \$http_host;
             proxy_read_timeout 60s;
         }"
+  [[ -n "$mcheck" ]] && mediloc+="
+$mcheck"
 fi
 awk -v prefix="$prefix" -v sock="$sock" -v listen="$listen" -v mime="$mime" -v uiloc="$uiloc" -v zone="$zone" -v conn="$conn" -v tls="$tls" -v mediloc="$mediloc" '
   { gsub(/@PREFIX@/, prefix); gsub(/@SOCK@/, sock); gsub(/@LISTEN@/, listen); gsub(/@MIME@/, mime)

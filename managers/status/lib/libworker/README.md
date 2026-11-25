@@ -84,7 +84,7 @@ pm_->start();
 
 ## 명령 임대 (0.15, 워크스페이스 docs/command-lease.md)
 
-역할 정의에 표시만 하면 호스트가 한다(모듈은 모름): 명령 `"lease_ms": 300`, 역할 `"safe_state": {"cmd": "<역할>.stop", "args": {}}`. 임대 명령이 ok로 끝나면 기한, 같은 명령·`lease.renew {"role"}`로 갱신, 기한이 지나면 호스트가 `safe_state` 명령을 모듈에 넣고 이벤트 `lease_expired`. 스트림을 내는 모듈은 `host()->take_events()`를 자기 `events`에 붙여 발행한다. 본보기: 틀 `io/example.json`의 `source.boost`·`source.normal`.
+역할 정의에 표시만 하면 호스트가 한다(모듈은 모름): 명령 `"lease_ms": 300`, 역할 `"safe_state": {"cmd": "<역할>.stop", "args": {}}`. 임대 명령이 ok로 끝나면 기한, 같은 명령·`lease.renew {"role"}`로 갱신, 기한이 지나면 호스트가 `safe_state` 명령을 모듈에 넣고 이벤트 `lease_expired`. 이벤트는 스트림 줄(`worker::stream_line`, 0.19)에 실려 나간다. 본보기: 틀 `io/example.json`의 `source.boost`·`source.normal`.
 
 ## 명령 입구로 감싸기 (0.16, 워크스페이스 managers/mission/external-link.md)
 
@@ -92,11 +92,15 @@ pm_->start();
 
 ## 모듈 이벤트 (0.18)
 
-모듈이 공통 이벤트를 내려면 `host()->event(name(), "warning", "<code>", "<글>", {detail})`(워커 루프 스레드에서만). source는 `<워커 id>.<모듈>`. 호스트 이벤트(임대 만료, 받은 칸 검사 등)와 같은 큐에 쌓이고, **스트림을 내는 모듈이 `host()->take_events()`를 자기 `events`에 붙여 발행**한다(틀 `source` 모듈이 본보기). 발행하는 모듈이 없으면 이벤트는 기록에 남지 않는다. 쓰는 곳: libvideo 0.4 `stream_down`·`stream_up`·`tap_down`·`tap_up`
+모듈이 공통 이벤트를 내려면 `host()->event(name(), "warning", "<code>", "<글>", {detail})`(워커 루프 스레드에서만). source는 `<워커 id>.<모듈>`. 호스트 이벤트(임대 만료, 받은 칸 검사 등)와 같은 큐에 쌓이고, 스트림을 내는 모듈의 다음 줄(`worker::stream_line`, 아래 0.19)에 실려 나간다. 스트림을 내는 모듈이 없는 워커는 이벤트가 기록에 남지 않는다(큐 64개, 넘으면 오래된 것부터 버림). 쓰는 곳: libvideo 0.4 `stream_down`·`stream_up`·`tap_down`·`tap_up`
+
+## 스트림 한 줄 (0.19, `worker/stream.hpp`)
+
+스트림을 내는 모듈은 줄을 손으로 만들지 않고 `worker::stream_line(host(), ++seq, kf, {{"<주제>", {...}}}, 자기_이벤트)`를 `Publisher::publish`에 넘긴다. 칸 `seq`·`kf`·`t`(unix 초)·`topics`·`events`·`events_next`(0), 모양은 `io/common.json` `stream` 그대로. `events` = 모듈 자기 이벤트 먼저, 그 뒤 호스트 이벤트 큐(`host()->take_events()`: 임대 만료, 받은 칸 검사, `host()->event`)를 비워 붙인다. 그래서 장치 워커가 이벤트를 빠뜨릴 수 없다(0.18까지는 모듈이 직접 `take_events`를 붙여야 했다). `host`가 `nullptr`이면 모듈 것만. 워커 루프 스레드에서만(모듈 `on_timer`·`on_poll`·`handle`). 본보기: 틀 `source` 모듈 `publish_stream`.
 
 ## 받은 칸 실행 중 검사 (0.17, 워크스페이스 docs/input-check.md)
 
-호스트가 시작할 때 계약 `uses` 사본의 주제 스키마로 표를 만들고, `Subscriber`가 받은 주제를 주제마다 1 s에 한 번 검사한다(막지 않음). `get_status` `input_check`, 지표 `inputs_<입력>_bad`, 이벤트 `input_mismatch`(60 s에 한 번, `host()->take_events()`). 호스트 키 `input_check` `warn`(기본)·`off`, `input_check_period_s`. 스키마 검사 함수는 `worker/schema.hpp` `validate_schema`.
+호스트가 시작할 때 계약 `uses` 사본의 주제 스키마로 표를 만들고, `Subscriber`가 받은 주제를 주제마다 1 s에 한 번 검사한다(막지 않음). `get_status` `input_check`, 지표 `inputs_<입력>_bad`, 이벤트 `input_mismatch`(60 s에 한 번, 스트림 줄로). 호스트 키 `input_check` `warn`(기본)·`off`, `input_check_period_s`. 스키마 검사 함수는 `worker/schema.hpp` `validate_schema`.
 
 시험: 이 폴더에서 `jetson-build --test`(또는 `--native --test`).
 

@@ -750,6 +750,24 @@ class Accept(unittest.TestCase):
             slow.close()
             fast.close()
 
+    # ---- 로그 수준 바로 적용(set_log_level, docs/live-settings.md) ----------------
+
+    def test_set_log_level(self):
+        """게이트웨이(manager-rest.sock)만, 값 검사, 바로 적용(DEBUG 기록이 나옴)"""
+        e = self.env({"w": {"config": {}, "autostart": False}}).start()
+        for sock in ("manager.sock", "manager-logger.sock"):
+            r = e.call(sock, {"op": "set_log_level", "level": "DEBUG"})
+            self.assertEqual((r["ok"], r["error"]["code"]), (False, "forbidden"), sock)
+        for bad in ("LOUD", None, 1, "debug"):
+            r = e.rest({"op": "set_log_level", "level": bad})
+            self.assertEqual((r["ok"], r["error"]["code"]), (False, "bad_request"), bad)
+        self.assertEqual(e.ok({"op": "set_log_level", "level": "ERROR"}), {"log_level": "ERROR"})
+        self.assertIn("log level ERROR (settings)", e.manager_log())
+        self.assertEqual(e.ok({"op": "set_log_level", "level": "WARNING"}), {"log_level": "WARNING"})
+        self.assertNotIn("log level WARNING (settings)", e.manager_log())  # ERROR 수준에서는 WARNING 줄이 안 남음 = 적용됨
+        self.assertEqual(e.ok({"op": "set_log_level", "level": "INFO"}), {"log_level": "INFO"})
+        self.assertIn("log level INFO (settings)", e.manager_log())
+
     # ---- 운용/정비 모드(set_access_mode, 원칙 17) ----------------------------
 
     def test_access_mode(self):

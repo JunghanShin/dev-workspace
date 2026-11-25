@@ -231,6 +231,7 @@ Own own_route(const std::string& method, const std::string& path) {
     if (p == "/auth/login") return method == "POST" ? Own::Login : Own::MethodNotAllowed;
     if (p == "/auth/logout") return method == "POST" ? Own::Logout : Own::MethodNotAllowed;
     if (p == "/auth/me") return method == "GET" ? Own::Me : Own::MethodNotAllowed;
+    if (p == "/auth/check") return method == "GET" ? Own::Check : Own::MethodNotAllowed;
     if (p == "/mode") return method == "GET" ? Own::ModeGet : Own::MethodNotAllowed;  // 바꾸기 없음(docs/modes.md)
     return Own::None;
 }
@@ -240,8 +241,9 @@ Need classify(const std::string& method, const std::string& path, bool ui_enable
         case Own::Login:
         case Own::Logout:
         case Own::Me:
+        case Own::Check:
         case Own::MethodNotAllowed:
-            return Need::Open;  // 처리하는 쪽이 신분을 본다(me는 401, 405는 그대로)
+            return Need::Open;  // 처리하는 쪽이 신분을 본다(me·check는 401, 405는 그대로)
         case Own::ModeGet:
             return Need::Read;
         case Own::None:

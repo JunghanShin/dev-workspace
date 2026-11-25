@@ -2,11 +2,12 @@
 //
 // 요청 하나의 길(server.cpp가 이 순서로 부른다):
 //   화면 경로(ui_route: /api/board 접두어 떼기, /api/remote, /api/panels, /api/ui, 화면 파일)
-//   → route(): /health → 제품 빌드 → 설정(/workspace/settings) → 읽기(GET) → 스트림 → 명령 → Manager op 표 → 405/404
+//   → route(): /health → 제품 빌드 → 설정(/workspace/settings) → 읽기(GET) → 스트림(/streams, /workers/{id}/stream) → 명령 → Manager op 표 → 405/404
 #pragma once
 
 #include <map>
 #include <string>
+#include <vector>
 
 namespace gw {
 
@@ -16,7 +17,7 @@ using Params = std::map<std::string, std::string>;
 Params parse_qs(const std::string& query);
 std::string unquote_plus(const std::string& s);
 
-enum class RouteKind { None, Health, ProductBuild, ProductOff, Read, Stream, Command, Manager, Settings, MethodNotAllowed };
+enum class RouteKind { None, Health, ProductBuild, ProductOff, Read, Stream, Streams, Command, Manager, Settings, MethodNotAllowed };
 
 struct Route {
     RouteKind kind = RouteKind::None;
@@ -39,6 +40,14 @@ bool reads_body(const std::string& method, const Route& r);
 
 // 워커 id 형식(reads.py ID_RE)
 bool valid_worker_id(const std::string& id);
+// GET /streams?ids=a:2,b (docs/stream-mux.md): 워커 id 목록(쉼표), 각 "id:hz" 가능(없으면 def_hz). hz는 0.2~50으로 자름.
+// 빈 목록·틀린 id·hz·겹친 id·kMaxStreamIds 넘음 → false(err에 이유)
+constexpr size_t kMaxStreamIds = 32;
+struct StreamWant {
+    std::string id;
+    double hz;
+};
+bool parse_stream_ids(const std::string& ids, double def_hz, std::vector<StreamWant>& out, std::string& err);
 // 제품 빌드 profile·power_mode 형식
 bool valid_profile(const std::string& s);
 bool valid_power_mode(const std::string& s);

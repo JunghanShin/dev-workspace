@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "worker/child.hpp"
+#include "worker/stream.hpp"
 #include "worker/workspace.hpp"
 
 namespace source {
@@ -155,10 +156,9 @@ void Module::publish_stream(worker::TimePoint now) {
         std::lock_guard<worker::Mutex> lock(gen_mu_);
         rate = gen_.config().rate_hz;
     }
-    const double t = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
-    pub_->publish(Json{{"seq", ++stream_seq_}, {"kf", kf}, {"t", t},
-                       {"topics", {{"source", {{"t_mono_ns", last_ts_ns_}, {"seq", seq_}, {"mean", last_mean_}, {"rate_hz", rate}}}}},
-                       {"events", host() ? Json(host()->take_events()) : Json::array()}, {"events_next", 0}}.dump());
+    // 줄은 stream_line으로: 호스트 이벤트 큐(임대 만료 등)를 events에 비워 붙인다(libworker 0.19)
+    pub_->publish(worker::stream_line(host(), ++stream_seq_, kf,
+                                      {{"source", {{"t_mono_ns", last_ts_ns_}, {"seq", seq_}, {"mean", last_mean_}, {"rate_hz", rate}}}}));
 }
 
 // 자식 프로세스 감시: 죽으면 2초 뒤 다시 띄운다(워커는 계속)

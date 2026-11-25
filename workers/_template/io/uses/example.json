@@ -40,6 +40,7 @@
       ]
     },
     "source.reset": {
+      "confirm": "셈(표본 번호·평균)을 처음부터 다시 시작합니다. 계속할까요?",
       "description": "생성 번호를 0으로",
       "args": {
         "type": "object"

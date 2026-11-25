@@ -11,6 +11,8 @@
 
 #include "httplib/httplib.h"  // CPPHTTPLIB_USE_POLL은 CMake가 정한다(select의 FD_SETSIZE 한계를 피함)
 #include "log.hpp"
+#include "media_auth.hpp"
+#include "proc.hpp"
 #include "settings.hpp"
 #include "ui_rules.hpp"
 
@@ -23,25 +25,16 @@ constexpr size_t kPoolSpare = 4;       // 상한을 넘은 요청에 503을 답�
 constexpr size_t kPoolQueue = 256;     // 받았지만 스레드를 기다리는 연결 상한(넘치면 닫음)
 constexpr double kStallS = 10.0;       // 받기·위쪽 스레드가 이만큼 멈추면 끝냄(exit 4)
 
-int error_status(const Json& code) {
-    // Manager 오류 code → HTTP (design.md 6.4)
-    if (!code.is_string()) return 500;
-    const std::string c = code.get<std::string>();
-    if (c == "bad_request") return 400;
-    if (c == "forbidden") return 403;
-    if (c == "not_found") return 404;
-    if (c == "conflict") return 409;
-    return 500;  // internal과 모르는 code
-}
+// Manager 오류 code → HTTP (design.md 6.4)
+int error_status(const Json& code) { return manager_error_status(code); }
 
-int command_status(const Json& code) {
-    // 워커 명령 오류 code → HTTP (design.md 9.6). busy·forbidden은 지금 REST처럼 500
-    if (!code.is_string()) return 500;
-    const std::string c = code.get<std::string>();
-    if (c == "bad_request") return 400;
-    if (c == "unavailable") return 503;
-    if (c == "timeout") return 504;
-    return 500;
+// 워커 명령 오류 code → HTTP (design.md 9.6): forbidden 403·busy 409(0.86, 예전 500), 나머지는 그대로
+int command_status(const Json& code) { return worker_error_status(code); }
+
+// nginx 쪽이 쓰는 설정 칸(바꾸면 apply.sh로 nginx 설정을 다시 만들어 다시 읽음, docs/live-settings.md)
+bool nginx_key(const std::string& k) {
+    return k == "WORKSPACE_HTTPS" || k == "WORKSPACE_HTTPS_PORT" || k == "WORKSPACE_HTTPS_CERT" ||
+           k == "WORKSPACE_HTTPS_KEY" || k == "WORKSPACE_HTTP_REDIRECT" || k == "WORKSPACE_AUTH";
 }
 
 Reply json_reply(int status, const Json& body) {
@@ -174,15 +167,12 @@ Gateway::Gateway(GatewayConfig cfg)
     mode_.mode = cfg_.product ? "operation" : cfg_.access_mode;  // docs/modes.md: 제품은 늘 운용
     mode_.since = iso_now();
     mode_.by = cfg_.product ? "product" : "workspace";
-    if (cfg_.auth_on) {
-        AuthConfig ac;
-        ac.users_file = cfg_.users_file.empty() ? path_join(path_join(cfg_.data_dir, "config"), "users.json") : cfg_.users_file;
-        ac.product = cfg_.product;
-        ac.ui_enabled = cfg_.ui_enabled;
-        auth_on_ = new AuthOn(ac);
-        auth_.reset(auth_on_);
-    } else {
-        auth_.reset(new AuthOff(cfg_.token, cfg_.ui_enabled));
+    set_auth(cfg_.auth_on);
+    // nginx가 지금 쓰는 칸: 처음은 시작할 때의 값(시작 셸이 같은 workspace.env로 nginx 설정을 만들었음)
+    for (const char* k : {"WORKSPACE_HTTPS", "WORKSPACE_HTTPS_PORT", "WORKSPACE_HTTPS_CERT", "WORKSPACE_HTTPS_KEY",
+                          "WORKSPACE_HTTP_REDIRECT"}) {
+        auto it = cfg_.start_env.find(k);
+        if (it != cfg_.start_env.end()) nginx_applied_[k] = it->second;
     }
     if (cfg_.record && !cfg_.data_dir.empty()) {
         file_rec_ = new FileRecorder(path_join(path_join(cfg_.data_dir, "records"), "gateway"), boot_id8());
@@ -193,10 +183,39 @@ Gateway::Gateway(GatewayConfig cfg)
     cache_.on_system = [this](const Json& sys) { sync_mode(sys); };
 }
 
+std::shared_ptr<const Gateway::AuthSlot> Gateway::auth_slot() {
+    std::lock_guard<std::mutex> lock(auth_mu_);
+    return auth_slot_;
+}
+
+void Gateway::set_auth(bool on) {
+    if (cfg_.product) on = true;  // 제품은 늘 켬
+    {
+        std::lock_guard<std::mutex> lock(auth_mu_);
+        if (auth_slot_ && auth_slot_->auth->on() == on) return;  // 같으면 그대로(세션 유지)
+    }
+    auto slot = std::make_shared<AuthSlot>();
+    if (on) {
+        AuthConfig ac;
+        ac.users_file = cfg_.users_file.empty() ? path_join(path_join(cfg_.data_dir, "config"), "users.json") : cfg_.users_file;
+        ac.product = cfg_.product;
+        ac.ui_enabled = cfg_.ui_enabled;
+        slot->on = std::make_shared<AuthOn>(ac);  // 사용자 파일 읽기는 잠금 밖에서
+        slot->auth = slot->on;
+    } else {
+        slot->auth = std::make_shared<AuthOff>(cfg_.token, cfg_.ui_enabled);
+    }
+    std::lock_guard<std::mutex> lock(auth_mu_);
+    const bool had = static_cast<bool>(auth_slot_);
+    auth_slot_ = slot;  // 진행 중인 요청은 옛 것을 끝까지 쓴다(shared_ptr)
+    if (had) GW_INFO("authentication turned %s (settings)", on ? "on" : "off");
+}
+
 Gateway::~Gateway() {
     stopping_.store(true);
     if (tcp_) tcp_->stop();
     if (unix_) unix_->stop();
+    if (media_) media_->stop();
     for (auto& t : listeners_)
         if (t.joinable()) t.join();
     cache_.stop();
@@ -357,6 +376,14 @@ bool Gateway::start(std::string& err) {
     }
     if (cfg_.tcp && !start_tcp(err)) return false;
     if (!cfg_.unix_socket.empty() && !start_unix(err)) return false;
+    if (cfg_.media_auth_port > 0) {
+        std::string merr;
+        // 못 열어도 게이트웨이는 계속(화면·REST는 됨). MediaMTX는 판정을 못 받아 새 영상 연결을 거절한다(docs/media-auth.md)
+        if (!start_media(merr)) {
+            GW_ERROR("media auth port: %s (MediaMTX will refuse new video sessions)", merr.c_str());
+            media_.reset();
+        }
+    }
     if (file_rec_) file_rec_->start();
     if (cfg_.cache) cache_.start(&watch_);
     if (tcp_)
@@ -369,7 +396,67 @@ bool Gateway::start(std::string& err) {
             pthread_setname_np(pthread_self(), "gw.listen");
             unix_->listen_after_bind();
         });
+    if (media_)
+        listeners_.emplace_back([this] {
+            pthread_setname_np(pthread_self(), "gw.listen");
+            media_->listen_after_bind();
+        });
     return true;
+}
+
+bool Gateway::start_media(std::string& err) {
+    // 보드 안 전용(127.0.0.1): MediaMTX authHTTPAddress가 부르는 곳 하나만. 그 밖 경로는 404
+    media_.reset(new httplib::Server());
+    auto& svr = *media_;
+    const auto sec = static_cast<time_t>(cfg_.io_timeout);
+    svr.set_read_timeout(sec, 0);
+    svr.set_write_timeout(sec, 0);
+    svr.set_keep_alive_max_count(1);
+    svr.set_idle_interval(1, 0);
+    svr.set_payload_max_length(kMaxBody);
+    svr.set_socket_options([](socket_t sock) {
+        int one = 1;
+        ::setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    });
+    svr.Post("/api/auth/media", [this](const httplib::Request& req, httplib::Response& res) {
+        std::string perr;
+        auto j = parse_json(req.body, &perr);
+        res.status = media_auth(j ? *j : Json());
+    });
+    svr.set_exception_handler([](const httplib::Request&, httplib::Response& res, std::exception_ptr) {
+        res.status = 403;  // 판정에 실패하면 거절
+    });
+    if (!svr.bind_to_port("127.0.0.1", cfg_.media_auth_port)) {
+        err = "bind 127.0.0.1:" + std::to_string(cfg_.media_auth_port) + " failed: " + errno_text(errno);
+        return false;
+    }
+    const int slot = watch_.add("gw.listen.media");  // 열린 뒤에만 감시(못 열면 멈춤으로 보지 않게)
+    svr.new_task_queue = [this, slot] { return new PoolQueue(pool_, watch_, slot); };
+    media_port_ = cfg_.media_auth_port;
+    return true;
+}
+
+int Gateway::media_auth(const Json& body) {
+    MediaRequest mr;
+    if (!parse_media_request(body, mr)) {
+        GW_WARN("media auth: body is not a JSON object; denied");
+        return 403;
+    }
+    const auto slot = auth_slot();
+    const bool on = slot->auth->on();
+    Role role = Role::None;
+    std::string who = "-";
+    if (slot->on && media_needs_identity(mr, on)) role = slot->on->media_role(mr, who);
+    const MediaVerdict v = media_verdict(mr, on, role);
+    const int st = media_status(v);
+    // 비밀번호·토큰은 남기지 않는다. 허락은 DEBUG(연결마다라 많음), 거절은 INFO
+    if (v == MediaVerdict::Allow)
+        GW_DEBUG("media auth %s %s %s/%s from %s: allow", who.c_str(), mr.action.c_str(), mr.protocol.c_str(),
+                 mr.path.c_str(), mr.ip.c_str());
+    else if (!(v == MediaVerdict::AskCredentials && mr.user.empty() && mr.password.empty() && mr.token.empty()))
+        GW_INFO("media auth %s %s %s/%s from %s: %d", mr.user.empty() ? "-" : mr.user.c_str(), mr.action.c_str(),
+                mr.protocol.c_str(), mr.path.c_str(), mr.ip.c_str(), st);
+    return st;
 }
 
 bool Gateway::start_tcp(std::string& err) {
@@ -424,6 +511,7 @@ bool Gateway::stop(double timeout_s) {
     stopping_.store(true);
     if (tcp_) tcp_->stop();
     if (unix_) unix_->stop();
+    if (media_) media_->stop();
     for (auto& t : listeners_)
         if (t.joinable()) t.join();
     listeners_.clear();
@@ -460,10 +548,12 @@ Reply Gateway::handle(const RequestView& rq, const std::function<Body()>& body, 
     Identity who;
     Ctx ctx;
     Reply r;
+    ctx.auth = auth_slot();  // 이 요청 내내 같은 것(설정 탭에서 바뀌어도)
+    Auth& auth = *ctx.auth->auth;
     try {
-        who = auth_->identify(rq);
+        who = auth.identify(rq);
         ctx.from = who.via == "token" ? "remote:" + who.token : "screen";
-        const Decision d = auth_->authorize(who, rq);
+        const Decision d = auth.authorize(who, rq);
         if (!d.allowed) r = json_error(d.status, d.code, d.message);
         else r = dispatch(rq, body, remote, who, ctx);
     } catch (const std::exception& e) {  // 처리 실패가 게이트웨이를 멈추지 않게
@@ -527,8 +617,18 @@ Reply Gateway::dispatch(const RequestView& rq, const std::function<Body()>& body
 
 Reply Gateway::own(Own o, const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
                    const Identity& who, Ctx& ctx) {
-    const std::string auth = auth_->on() ? "on" : "off";
+    const std::string auth = ctx.auth->auth->on() ? "on" : "off";
+    AuthOn* const auth_on_ = ctx.auth->on.get();
     switch (o) {
+        case Own::Check: {
+            // nginx auth_request(영상 /media/, docs/media-auth.md): 본문 없이 204(들여보냄) / 401. 꺼짐이면 늘 204
+            Reply r;
+            r.kind = Reply::Kind::Raw;
+            r.ctype = "text/plain";
+            r.status = !auth_on_ || (!who.anonymous && allows(who.role, Need::Read)) ? 204 : 401;
+            r.headers.push_back({"Cache-Control", "no-store"});
+            return r;
+        }
         case Own::Login: {
             ctx.cmd = "login";
             if (!auth_on_) return json_error(400, "bad_request", "authentication is off (WORKSPACE_AUTH=off)");
@@ -676,6 +776,8 @@ Reply Gateway::forward(const RequestView& rq, const std::function<Body()>& body,
             return read(rt, rq.query);
         case RouteKind::Stream:
             return stream(rt.id, rq.query);
+        case RouteKind::Streams:
+            return streams(rq.query);
         case RouteKind::Command:
             return command(rt.id, body, ctx);
         case RouteKind::Manager:
@@ -740,8 +842,10 @@ Reply Gateway::health(const std::string& query) {
     auto it = p.find("detail");
     if (it != p.end() && it->second == "1") {
         Json g = Json::object();
-        g["auth"] = auth_->on() ? "on" : "off";
-        if (auth_on_) g["users"] = auth_on_->state();
+        const auto slot = auth_slot();
+        g["auth"] = slot->auth->on() ? "on" : "off";
+        if (slot->on) g["users"] = slot->on->state();
+        g["media_auth_port"] = media_port_ ? Json(media_port_) : Json(nullptr);
         g["mode"] = mode_json(mode());
         g["log"] = file_rec_ ? file_rec_->stats() : Json(nullptr);
         g["cache"] = cfg_.cache ? cache_.state() : Json(nullptr);
@@ -782,17 +886,22 @@ Reply Gateway::settings(const std::string& method, const std::function<Body()>& 
     if (!settings_parse_def(*def_text, def, err)) return json_error(500, "internal", "settings definition " + def_path + ": " + err);
     const std::string env_path = settings_env_path();
 
-    // 지금 게이트웨이에서 쓰는 값(live 칸) / 시작할 때의 값(restart 칸), 파일 글 모양
+    // 지금 쓰고 있는 값(docs/live-settings.md: 칸마다 그 값을 쓰는 곳의 지금 값), 파일 글 모양
     auto start_text = [this](const Json& f) {
         auto it = cfg_.start_env.find(f["key"].get<std::string>());
         return it == cfg_.start_env.end() || it->second.empty() ? settings_default_text(f) : it->second;
     };
     auto effective = [&](const Json& f) -> Json {
         const std::string key = f["key"].get<std::string>();
-        if (f["apply"] == "live") {
-            if (key == "WORKSPACE_UI_TITLE") return ui_.title();
-            if (key == "WORKSPACE_UI_MEDIA_URL") return ui_.media_url();
-            if (key == "WORKSPACE_REST_COMMAND_TIMEOUT") return command_timeout_.load();
+        if (key == "WORKSPACE_UI_TITLE") return ui_.title();
+        if (key == "WORKSPACE_UI_MEDIA_URL") return ui_.media_url();
+        if (key == "WORKSPACE_REST_COMMAND_TIMEOUT") return command_timeout_.load();
+        if (key == "WORKSPACE_LOG_LEVEL") return log_level_name();
+        if (key == "WORKSPACE_AUTH") return auth_slot()->auth->on() ? "on" : "off";
+        if (nginx_key(key)) {  // nginx가 지금 쓰는 값(시작 값 → 바로 적용에 성공한 값)
+            std::lock_guard<std::mutex> lock(applied_mu_);
+            auto it = nginx_applied_.find(key);
+            return settings_typed(f, it == nginx_applied_.end() || it->second.empty() ? settings_default_text(f) : it->second);
         }
         return settings_typed(f, start_text(f));
     };
@@ -845,7 +954,20 @@ Reply Gateway::settings(const std::string& method, const std::function<Body()>& 
         if (!fields.empty()) eo["fields"] = fields;
         return json_reply(400, Json{{"error", eo}});
     }
-    Json saved = Json::array(), live = Json::array(), restart = Json::array();
+    // 로그인을 켜는데 사용자가 없으면 받지 않는다(켜자마자 모두 503이 되어 화면에서 되돌릴 수도 없게 되므로)
+    for (const auto& ch : changes) {
+        if (ch.first != "WORKSPACE_AUTH" || !ch.second || *ch.second != "on" || auth_slot()->auth->on()) continue;
+        UsersDb db;
+        std::string uerr;
+        const std::string uf = cfg_.users_file.empty() ? path_join(path_join(cfg_.data_dir, "config"), "users.json") : cfg_.users_file;
+        if (!load_users(uf, db, uerr) || db.users.empty()) {
+            Json eo = Json{{"code", "bad_request"}, {"message", "invalid settings"}};
+            eo["fields"] = Json{{"WORKSPACE_AUTH", "no users yet: add one first (gateway user add)"}};
+            return json_reply(400, Json{{"error", eo}});
+        }
+    }
+    Json saved = Json::array(), live = Json::array(), restart = Json::array(), applied = Json::array();
+    Json failed = Json::object();
     std::lock_guard<std::mutex> lock(settings_mu_);
     e = 0;
     const auto text = read_file(env_path, 1 << 20, &e);
@@ -859,6 +981,8 @@ Reply Gateway::settings(const std::string& method, const std::function<Body()>& 
         ::mkdir(path_join(cfg_.data_dir, "config").c_str(), 0755);
         if (!write_file_atomic(env_path, after, fmode, err)) return json_error(500, "internal", "write " + err);
     }
+    // 바로 적용(docs/live-settings.md): 칸마다 그 값을 쓰는 곳만 다시 적용한다. 워크스페이스 전체를 다시 시작하지 않음
+    std::vector<std::string> nginx_changed;
     for (const auto& ch : changes) {
         const Json& f = *settings_field(def, ch.first);
         saved.push_back(ch.first);
@@ -875,14 +999,77 @@ Reply Gateway::settings(const std::string& method, const std::function<Body()>& 
         } else if (ch.first == "WORKSPACE_REST_COMMAND_TIMEOUT") {
             double s = 0;
             if (py_float(v, s) && s > 0) command_timeout_.store(s);
+        } else if (ch.first == "WORKSPACE_LOG_LEVEL") {
+            set_log_level(v);  // 게이트웨이
+            try {              // process-manager(게이트웨이 전용 소켓의 set_log_level op)
+                const Json r = mgr_.call(Json{{"op", "set_log_level"}, {"level", v}});
+                if (!py_truthy(get_or(r, "ok", Json(nullptr))))
+                    failed[ch.first] = "process-manager: " + py_str(get_or(get_or(r, "error", Json::object()), "message", Json("refused")));
+            } catch (const ManagerUnavailable& e) {
+                failed[ch.first] = std::string("process-manager unavailable: ") + e.what();
+            }
+        } else if (ch.first == "WORKSPACE_AUTH") {
+            set_auth(v == "on");  // 게이트웨이 신분 확인을 바꿔 끼움. /media/ 막기는 nginx 쪽(아래)
+        }
+        if (nginx_key(ch.first)) nginx_changed.push_back(ch.first);
+        else if (!failed.contains(ch.first)) applied.push_back(ch.first);
+    }
+    if (!nginx_changed.empty()) {
+        std::string msg;
+        bool ok = false;
+        if (behind_nginx()) {
+            ok = apply_nginx(msg);
+        } else {
+            msg = "needs nginx (the gateway listens on TCP itself; saved for the next start)";
+        }
+        if (ok) {
+            const auto act = env_active(after);  // nginx가 이제 쓰는 값 = 파일 값
+            std::lock_guard<std::mutex> al(applied_mu_);
+            for (const char* k : {"WORKSPACE_HTTPS", "WORKSPACE_HTTPS_PORT", "WORKSPACE_HTTPS_CERT", "WORKSPACE_HTTPS_KEY",
+                                  "WORKSPACE_HTTP_REDIRECT"}) {
+                auto it = act.find(k);
+                nginx_applied_[k] = it == act.end() ? "" : it->second;
+            }
+        }
+        for (const auto& k : nginx_changed) {
+            // 로그인은 nginx 없이도 게이트웨이에서 적용됨(nginx가 없으면 /media/도 없음)
+            if (ok || (k == "WORKSPACE_AUTH" && !behind_nginx())) applied.push_back(k);
+            else failed[k] = k == "WORKSPACE_AUTH" ? "gateway applied; nginx (/media/): " + msg : msg;
         }
     }
-    GW_INFO("settings saved: %s", py_dumps(saved).c_str());
+    GW_INFO("settings saved: %s%s%s", py_dumps(saved).c_str(), failed.empty() ? "" : ", not applied: ",
+            failed.empty() ? "" : py_dumps(failed).c_str());
     Json out = Json::object();
     out["saved"] = saved;
     out["live"] = live;
     out["restart"] = restart;
+    out["applied"] = applied;
+    out["failed"] = failed;
     return json_reply(200, out);
+}
+
+bool Gateway::apply_nginx(std::string& msg) {
+    // 시작 셸과 같은 스크립트(gateway/nginx/apply.sh): workspace.env → 인증서(없으면 자체 서명) → render.sh → nginx -t → reload.
+    // 점검에 실패하면 옛 설정 그대로(nginx는 계속 돈다)
+    const std::string script = cfg_.nginx_apply.empty()
+                                   ? path_join(path_join(path_join(cfg_.workspace, "gateway"), "nginx"), "apply.sh")
+                                   : cfg_.nginx_apply;
+    const std::string dir = cfg_.nginx_dir.empty() ? path_join(path_join(cfg_.data_dir, "run"), "nginx") : cfg_.nginx_dir;
+    const RunResult r = run_capture({"bash", script, cfg_.data_dir, cfg_.workspace, cfg_.unix_socket, "--reload"},
+                                    cfg_.nginx_apply_timeout, {"WORKSPACE_NGINX_DIR=" + dir});
+    std::string text = strip(r.err.empty() ? r.out : r.err);
+    const size_t nl = text.rfind('\n');
+    if (nl != std::string::npos) text = text.substr(nl + 1);  // 마지막 줄이 결과
+    if (!r.started) msg = "cannot run " + script + ": " + errno_text(r.spawn_err);
+    else if (r.timed_out) msg = "nginx apply timed out";
+    else if (r.code != 0) msg = text.empty() ? "nginx apply failed (exit " + std::to_string(r.code) + ")" : text;
+    else msg = text;
+    if (!r.out.empty()) GW_INFO("nginx apply: %s", strip(r.out).c_str());
+    if (!r.started || r.timed_out || r.code != 0) {
+        GW_ERROR("nginx apply failed: %s", msg.c_str());
+        return false;
+    }
+    return true;
 }
 
 namespace {
@@ -1062,6 +1249,33 @@ Reply Gateway::stream(const std::string& id, const std::string& query) {
     r.headers.push_back({"Cache-Control", "no-store"});
     r.headers.push_back({"X-Accel-Buffering", "no"});
     r.sse = std::make_shared<SseSession>(sub.first, sub.second, cfg_.ping_s);
+    return r;
+}
+
+Reply Gateway::streams(const std::string& query) {
+    // 화면 하나 = 연결 하나(docs/stream-mux.md). Manager에 묻지 않는다: 없는·꺼진 워커는 그 워커만 down 줄,
+    // Manager가 없어도 연결은 열고 모두 down(다시 오면 허브가 붙는다). 응답 오류면 EventSource가 다시 붙지 않아서
+    const Params p = parse_qs(query);
+    double hz = 10;  // id에 hz가 없을 때(/workers/{id}/stream과 같은 기본)
+    auto it = p.find("hz");
+    if (it != p.end() && !py_float(it->second, hz)) return json_error(400, "bad_request", "hz must be a number");
+    hz = py_min(py_max(hz, 0.2), 50);
+    it = p.find("ids");
+    std::vector<StreamWant> want;
+    std::string why;
+    if (!parse_stream_ids(it == p.end() ? "" : it->second, hz, want, why)) return json_error(400, "bad_request", why);
+    auto waker = std::make_shared<Waker>();
+    std::vector<MuxSession::Feed> feeds;
+    for (const auto& w : want) {
+        auto sub = hub_.subscribe(w.id, w.hz, waker);
+        feeds.push_back({w.id, sub.first, sub.second});
+    }
+    Reply r;
+    r.kind = Reply::Kind::Sse;
+    r.ctype = "text/event-stream; charset=utf-8";
+    r.headers.push_back({"Cache-Control", "no-store"});
+    r.headers.push_back({"X-Accel-Buffering", "no"});
+    r.sse = std::make_shared<MuxSession>(std::move(feeds), waker, cfg_.ping_s);
     return r;
 }
 

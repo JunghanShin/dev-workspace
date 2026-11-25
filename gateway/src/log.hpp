@@ -7,7 +7,8 @@ namespace gw {
 
 enum class Level { Debug = 10, Info = 20, Warning = 30, Error = 40 };
 
-void set_log_level(const std::string& name);  // "DEBUG" | "INFO" | "WARNING" | "ERROR"
+void set_log_level(const std::string& name);  // "DEBUG" | "INFO" | "WARNING" | "ERROR"(실행 중에도, 설정 탭)
+std::string log_level_name();                 // 지금 수준 이름
 bool log_enabled(Level level);
 void log(Level level, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 

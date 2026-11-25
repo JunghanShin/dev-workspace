@@ -2,15 +2,16 @@
 //   신분 확인 → 권한 → 전달(Manager op · 워커 명령 · 스트림 · 보드 읽기 · 화면) → 기록 → 응답
 //
 // 스레드:
-//   gw.listen   받기(TCP, Unix 소켓마다 하나). 받은 연결을 gw.http 풀에 넣기만 한다(막히지 않음)
+//   gw.listen   받기(TCP, Unix 소켓, 영상 판정 포트마다 하나). 받은 연결을 gw.http 풀에 넣기만 한다(막히지 않음)
 //   gw.http ×N  요청 하나씩(SSE면 그 화면이 끝날 때까지). 동시 요청이 threads를 넘으면 503
 //               (풀 스레드는 threads + 여분 4: 503을 답할 스레드가 늘 남게)
 //   gw.up.<워커> 워커 스트림 구독(hub.hpp)
 //   gw.build    제품 빌드 출력 읽기(productbuild.hpp)
 //   gw.mgr      Manager 구독 하나로 워커·시스템 상태 캐시(mgr_cache.hpp)
 //   gw.log      명령 기록 파일 쓰기(recorder.hpp)
-// 신분 확인: WORKSPACE_AUTH=off면 AuthOff(지금 REST 토큰 검사), on·제품 모드면 AuthOn(auth.hpp).
-// 게이트웨이가 직접 답하는 경로: /api/auth/login·logout·me, /api/mode(운용/정비 모드), /workspace/settings(설정 탭).
+// 신분 확인: WORKSPACE_AUTH=off면 AuthOff(지금 REST 토큰 검사), on·제품 모드면 AuthOn(auth.hpp). 설정 탭에서 바로 바꿔 끼움.
+// 게이트웨이가 직접 답하는 경로: /api/auth/login·logout·me·check, /api/mode(운용/정비 모드), /workspace/settings(설정 탭).
+// 보드 안 전용 포트(127.0.0.1:WORKSPACE_MEDIA_AUTH_PORT): POST /api/auth/media(MediaMTX 영상 로그인 판정, docs/media-auth.md).
 // 연결 하나에 요청 하나(keep-alive 없음, Python REST의 HTTP/1.0과 같음). 읽기·쓰기 상한 5 s.
 #pragma once
 
@@ -64,8 +65,14 @@ struct GatewayConfig {
     double ping_s = 15.0;
     StreamTiming stream;
     std::string python = "python3";
-    // 시작할 때의 환경 변수(WORKSPACE_*). 설정 탭의 "다시 시작하면 적용"을 가리는 기준(main이 채움)
+    // 시작할 때의 환경 변수(WORKSPACE_*). nginx가 쓰는 칸(HTTPS 등)의 처음 "적용된 값"(main이 채움)
     std::map<std::string, std::string> start_env;
+    // 영상 로그인 판정(docs/media-auth.md): MediaMTX authHTTPAddress가 부르는 보드 안 전용 포트(127.0.0.1). 0이면 안 엶
+    int media_auth_port = 0;
+    // 설정 바로 적용(docs/live-settings.md): nginx 설정 다시 만들기·다시 읽기 스크립트와 nginx 실행 폴더
+    std::string nginx_apply;     // 비면 <워크스페이스>/gateway/nginx/apply.sh
+    std::string nginx_dir;       // 비면 <데이터>/run/nginx
+    double nginx_apply_timeout = 20.0;
 };
 
 // 응답 하나
@@ -75,7 +82,7 @@ struct Reply {
     std::string body, ctype;
     std::vector<std::pair<std::string, std::string>> headers;
     std::string file_path;
-    std::shared_ptr<SseSession> sse;
+    std::shared_ptr<SseBody> sse;  // SseSession(워커 하나) 또는 MuxSession(/streams)
 };
 
 // 요청 본문(필요할 때만 읽음)
@@ -115,6 +122,7 @@ public:
     // 받기를 멈추고 진행 중인 요청을 상한(timeout_s)까지 기다린다. 다 끝나면 true
     bool stop(double timeout_s);
     int port() const { return bound_port_; }
+    int media_port() const { return media_port_; }  // 영상 로그인 판정 포트(안 열었으면 0)
     // 멈춘 스레드 이름(없으면 "")
     std::string stalled();
     void tick();  // 주기 정리(끝난 Upstream 거두기)
@@ -128,9 +136,23 @@ public:
     };
     Mode mode();
 
+    // 신분 확인 묶음: 설정 탭에서 로그인을 켜고 끄면 통째로 바꿔 끼운다(docs/live-settings.md).
+    // 요청은 시작할 때 하나를 잡아 끝까지 쓴다(중간에 바뀌어도 그 요청은 같은 것으로)
+    struct AuthSlot {
+        std::shared_ptr<Auth> auth;
+        std::shared_ptr<AuthOn> on;  // auth가 AuthOn이면 그것(로그인·세션), 아니면 비어 있음
+    };
+    std::shared_ptr<const AuthSlot> auth_slot();
+    // 로그인 켜기·끄기(같으면 그대로: 세션 유지). 켤 때 세션은 비어서 시작
+    void set_auth(bool on);
+
+    // 영상 로그인 판정(MediaMTX가 POST하는 본문) → 상태 코드(200·401·403)
+    int media_auth(const Json& body);
+
 private:
     // 요청 하나의 기록거리(명령 이름, 로그인 이름 등)
     struct Ctx {
+        std::shared_ptr<const AuthSlot> auth;  // 이 요청이 쓰는 신분 확인
         std::string cmd, user;
         Role role = Role::None;
         bool user_set = false;
@@ -144,6 +166,11 @@ private:
     Reply finish_command(const std::string& who, const CommandResult& r);
     bool start_tcp(std::string& err);
     bool start_unix(std::string& err);
+    bool start_media(std::string& err);
+    // nginx 뒤인가(TCP를 열지 않고 Unix 소켓만: 시작 셸이 nginx를 앞에 둠)
+    bool behind_nginx() const { return !cfg_.tcp && !cfg_.unix_socket.empty(); }
+    // nginx 설정 다시 만들고 다시 읽기(apply.sh --reload). 성공이면 true, 아니면 msg에 이유
+    bool apply_nginx(std::string& msg);
     Reply dispatch(const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
                    const Identity& who, Ctx& ctx);
     Reply own(Own o, const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
@@ -155,6 +182,7 @@ private:
     Reply health(const std::string& query);
     Reply command(const std::string& id, const std::function<Body()>& body, Ctx& ctx);
     Reply stream(const std::string& id, const std::string& query);
+    Reply streams(const std::string& query);  // /streams?ids=a:2,b (docs/stream-mux.md)
     Reply product_build(const std::string& method, const std::string& path, const std::string& sub,
                         const std::string& query, const std::function<Body()>& body);
     Reply read(const Route& r, const std::string& query);
@@ -171,8 +199,8 @@ private:
     Ui ui_;
     ProductBuild build_;
     Hub hub_;
-    std::unique_ptr<Auth> auth_;
-    AuthOn* auth_on_ = nullptr;           // auth_가 AuthOn이면 그것(로그인·세션)
+    std::mutex auth_mu_;                  // auth_slot_ 바꿔 끼우기(I/O 없음)
+    std::shared_ptr<const AuthSlot> auth_slot_;
     std::unique_ptr<Recorder> recorder_;
     FileRecorder* file_rec_ = nullptr;    // recorder_가 FileRecorder면 그것(지표)
     ManagerCache cache_;
@@ -183,15 +211,17 @@ private:
     Mode mode_;
     double last_mode_push_ = -1e9;  // gw.mgr만
     std::atomic<double> command_timeout_;  // 워커 명령 응답 대기(설정 탭에서 바로 바뀜)
-    std::mutex settings_mu_;  // workspace.env 읽고-고치고-쓰기를 하나씩(파일 I/O를 잠금 안에서: 이 잠금은 PUT만 기다림)
+    std::mutex settings_mu_;  // workspace.env 읽고-고치고-쓰기·바로 적용을 하나씩(파일 I/O·apply.sh를 잠금 안에서: 이 잠금은 PUT만 기다림)
+    std::mutex applied_mu_;   // nginx_applied_ (I/O 없음)
+    std::map<std::string, std::string> nginx_applied_;  // nginx가 지금 쓰는 칸 값(HTTPS 등, 시작 값 → 적용에 성공하면 그 값)
 
     worker::ThreadWatch watch_;
     Pool pool_;
     std::atomic<size_t> in_flight_{0};
     std::atomic<bool> stopping_{false};
-    std::unique_ptr<httplib::Server> tcp_, unix_;
+    std::unique_ptr<httplib::Server> tcp_, unix_, media_;
     std::vector<std::thread> listeners_;
-    int bound_port_ = 0;
+    int bound_port_ = 0, media_port_ = 0;
 };
 
 }  // namespace gw

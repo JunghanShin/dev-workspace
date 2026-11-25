@@ -150,7 +150,7 @@ class Compliance(unittest.TestCase):
 IO_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 IO_VERSION = re.compile(r"^(\d+)\.(\d+)$")
 # 명령 정의의 칸(design.md 6.6.7.1, docs/command-path.md 3장)
-CMD_KEYS = {"description", "args", "reply", "errors", "read", "operate", "lease_ms"}
+CMD_KEYS = {"description", "args", "reply", "errors", "read", "operate", "lease_ms", "confirm"}
 IO_ERRORS = {"bad_request", "unavailable", "timeout", "busy", "forbidden", "internal"}  # 9.6
 SCHEMA_TYPES = {"object", "array", "string", "number", "integer", "boolean", "null"}
 
@@ -283,6 +283,10 @@ class IoDefinitions(unittest.TestCase):
             if k in c:
                 self.assertIs(c[k], True, where + "." + k + "는 true만(없으면 아님)")
         self.assertFalse(c.get("read") and c.get("operate"), where + ": read와 operate를 같이 쓰지 않음")
+        # 두 번 확인(docs/command-confirm.md): 화면이 보내기 전에 물을 문구. 읽기 명령에는 쓰지 않음
+        if "confirm" in c:
+            self.assertTrue(isinstance(c["confirm"], str) and c["confirm"].strip(), where + ".confirm은 비지 않은 글")
+            self.assertFalse(c.get("read"), where + ": 읽기 명령에는 confirm을 쓰지 않음")
 
     def check_parts(self, d, where, defs, allowed):
         """워커 정의·조각·공통 정의의 status·metrics·commands·topics 형식"""

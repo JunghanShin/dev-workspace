@@ -8,7 +8,8 @@
 //   WORKSPACE_LOG_LEVEL, WORKSPACE_REST_TOKEN, WORKSPACE_UI, WORKSPACE_PRODUCT, WORKSPACE_UI_DIR, WORKSPACE_UI_MEDIA_URL,
 //   WORKSPACE_UI_REFRESH_MS, WORKSPACE_UI_TITLE
 // 게이트웨이에만: WORKSPACE_GATEWAY_SOCKET(Unix 소켓도 엶, nginx용), WORKSPACE_GATEWAY_TCP=0(TCP를 열지 않음, nginx 뒤), WORKSPACE_GATEWAY_THREADS(동시 요청 상한, 기본 48: SSE도 연결마다 하나를 차지해 화면 여러 개를 넉넉히),
-//   WORKSPACE_AUTH=on|off(기본 off, 제품 모드는 늘 on), WORKSPACE_GATEWAY_CACHE=0(Manager 캐시 끔)
+//   WORKSPACE_AUTH=on|off(기본 off, 제품 모드는 늘 on, 설정 탭에서 바로 바뀜), WORKSPACE_GATEWAY_CACHE=0(Manager 캐시 끔),
+//   WORKSPACE_MEDIA_AUTH_PORT(영상 로그인 판정, 127.0.0.1, 기본 8079, 0이면 안 엶), WORKSPACE_NGINX_DIR(nginx 실행 폴더, 기본 <데이터>/run/nginx)
 // 설정 명령: gateway user add|passwd|del|list, gateway token add|del (users_cli.hpp)
 //
 // 주 스레드: 신호(SIGTERM·SIGINT)를 기다리며 0.5 s마다 스레드 멈춤을 본다. 멈추면 기록하고 exit 4(시작 셸이 다시 띄움).
@@ -148,6 +149,12 @@ int main(int argc, char** argv) {
     if (cfg.auth_on && !cfg.token.empty())
         GW_WARN("WORKSPACE_REST_TOKEN is ignored while authentication is on (use per-user tokens: gateway token add)");
     cfg.cache = env_or("WORKSPACE_GATEWAY_CACHE", "1") != "0";
+    // 영상 로그인 판정 포트(docs/media-auth.md, 127.0.0.1만). MediaMTX 서비스의 MTX_AUTHHTTPADDRESS와 같은 값. 0이면 안 엶
+    const std::string map_text = env_or("WORKSPACE_MEDIA_AUTH_PORT", "");
+    const long long map = to_int("WORKSPACE_MEDIA_AUTH_PORT", map_text.empty() ? "8079" : map_text);
+    cfg.media_auth_port = map < 0 || map > 65535 ? 0 : static_cast<int>(map);
+    // 설정 바로 적용(docs/live-settings.md): nginx 실행 폴더(시작 셸과 같은 곳, 시험은 다른 곳)
+    cfg.nginx_dir = env_or("WORKSPACE_NGINX_DIR", "");
     // 화면(ui.py): 값이 비어 있으면 기본값
     auto env_nonempty = [](const char* k, const std::string& d) {
         const std::string v = env_or(k, "");
@@ -160,7 +167,7 @@ int main(int argc, char** argv) {
     cfg.ui.media_url = env_nonempty("WORKSPACE_UI_MEDIA_URL", cfg.ui.media_default);
     cfg.ui.refresh_ms = to_int("WORKSPACE_UI_REFRESH_MS", env_nonempty("WORKSPACE_UI_REFRESH_MS", "1000"));
     cfg.ui.title = env_nonempty("WORKSPACE_UI_TITLE", "Workspace");
-    // 시작할 때의 WORKSPACE_* (설정 탭 "다시 시작하면 적용"의 기준. 시작 셸이 workspace.env 키를 넘긴다)
+    // 시작할 때의 WORKSPACE_* (nginx가 쓰는 설정 칸의 처음 값. 시작 셸이 workspace.env 키를 넘긴다)
     for (char** e = environ; e && *e; ++e) {
         const std::string kv = *e;
         const size_t eq = kv.find('=');

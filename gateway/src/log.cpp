@@ -23,6 +23,12 @@ void set_log_level(const std::string& name) {
     g_level.store(static_cast<int>(l));
 }
 
+std::string log_level_name() {
+    const int l = g_level.load();
+    return l <= static_cast<int>(Level::Debug) ? "DEBUG" : l <= static_cast<int>(Level::Info) ? "INFO"
+         : l <= static_cast<int>(Level::Warning) ? "WARNING" : "ERROR";
+}
+
 bool log_enabled(Level level) { return static_cast<int>(level) >= g_level.load(); }
 
 void log(Level level, const char* fmt, ...) {

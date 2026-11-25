@@ -188,6 +188,10 @@ Route route(const std::string& method, const std::string& path, bool product) {
         return r;
     }
     if (method == "GET" && match_read(path, r)) return r;
+    if (trimmed == "/streams") {  // 여러 워커 스트림을 한 SSE로(docs/stream-mux.md)
+        r.kind = method == "GET" ? RouteKind::Streams : RouteKind::MethodNotAllowed;
+        return r;
+    }
 
     std::vector<std::string> segs;
     if (!segments(path, segs)) return r;
@@ -233,6 +237,43 @@ bool valid_worker_id(const std::string& raw) {
         const char c = s[i];
         const bool alnum = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
         if (!(alnum || (i > 0 && (c == '_' || c == '.' || c == '-')))) return false;
+    }
+    return true;
+}
+
+bool parse_stream_ids(const std::string& ids, double def_hz, std::vector<StreamWant>& out, std::string& err) {
+    out.clear();
+    if (ids.empty()) {
+        err = "ids is required (ids=a,b:2)";
+        return false;
+    }
+    size_t start = 0;
+    while (true) {
+        const size_t comma = ids.find(',', start);
+        const std::string item = ids.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+        const size_t colon = item.find(':');
+        StreamWant w{item.substr(0, colon), def_hz};
+        if (w.id.find('\n') != std::string::npos || !valid_worker_id(w.id)) {
+            err = "bad worker id in ids";
+            return false;
+        }
+        if (colon != std::string::npos && (!py_float(item.substr(colon + 1), w.hz) || w.hz != w.hz)) {  // nan도 틀림
+            err = "hz must be a number (" + w.id + ")";
+            return false;
+        }
+        w.hz = py_min(py_max(w.hz, 0.2), 50);
+        for (const auto& x : out)
+            if (x.id == w.id) {
+                err = "duplicate worker id in ids: " + w.id;
+                return false;
+            }
+        out.push_back(std::move(w));
+        if (out.size() > kMaxStreamIds) {
+            err = "too many ids (max " + std::to_string(kMaxStreamIds) + ")";
+            return false;
+        }
+        if (comma == std::string::npos) break;
+        start = comma + 1;
     }
     return true;
 }

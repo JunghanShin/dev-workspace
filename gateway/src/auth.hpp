@@ -2,7 +2,7 @@
 //
 //   누구인가   Authorization: Bearer <토큰>(프로그램), 쿠키 workspace_session(화면 로그인), GET이면 ?token=도(EventSource)
 //   해도 되나  경로 → 필요한 권한(access.hpp classify) ↔ 역할. 익명 401, 역할 부족 403
-//   제품 모드에서 사용자 파일이 없거나 비면 /health 말고 모두 503(조용히 열어 두지 않음)
+//   사용자 파일이 없거나 비면 /health 말고 모두 503(조용히 열어 두지 않음. 제품 모드, 0.86부터 켬이면 늘)
 //
 // 공유 상태: 세션 표·실패 제한 표(각자 잠금 하나, I/O 없음), 사용자 파일 사본(shared_ptr 바꿔 끼우기).
 // 사용자 파일은 1 s마다 바뀌었는지(mtime·크기·inode) 보고, 바뀌었으면 잠금 밖에서 다시 읽는다(재시작 없이 반영).
@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 
+#include "media_auth.hpp"
 #include "pipeline.hpp"
 #include "text.hpp"
 
@@ -71,6 +72,9 @@ public:
     LoginResult login(const std::string& name, const std::string& password, const std::string& remote);
     void logout(const std::string& sid) { sessions_.remove(sid); }
     bool has_users();
+    // 영상(MediaMTX authMethod http, docs/media-auth.md) 자격 → 역할(못 알아내면 None). 사용자별 토큰(token 칸, 또는
+    // password 칸 = 토큰) 먼저, 아니면 계정 이름+비밀번호. 틀리면 주소마다 실패를 셈(로그인과 같은 제한, 따로 셈). who: 기록용
+    Role media_role(const MediaRequest& rq, std::string& who);
     Json state();
     double idle_s() const { return cfg_.idle_s; }
     double absolute_s() const { return cfg_.absolute_s; }

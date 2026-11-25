@@ -145,6 +145,7 @@ WORKERS = {
     "w2": None,                                   # 명령 소켓: 설정 command_socket(setUpModule에서 채움)
     "w3": {},                                     # 명령 소켓 없음(꺼진 워커)
     "s1": {}, "s2": {}, "s3": {}, "q1": {}, "q2": {}, "slowr": {},  # 스트림 워커
+    "x1": {}, "x2": {},                           # 묶은 스트림(/streams)
 }
 
 
@@ -334,10 +335,11 @@ class Server:
             "WORKSPACE_DATA": T["data"], "WORKSPACE_ROOT": T["root"], "WORKSPACE_REST_BIND": "127.0.0.1",
             "WORKSPACE_REST_PORT": str(self.port), "WORKSPACE_REST_COMMAND_TIMEOUT": str(COMMAND_TIMEOUT),
             "WORKSPACE_LOG_LEVEL": "WARNING", "WORKSPACE_UI_TITLE": "Test WS", "PYTHONPATH": HERE,
+            "WORKSPACE_MEDIA_AUTH_PORT": "0",  # 영상 로그인 판정 포트(기본 8079)는 보는 시험만 연다(docs/media-auth.md)
         })
         for k in ("WORKSPACE_REST_TOKEN", "WORKSPACE_UI", "WORKSPACE_PRODUCT", "WORKSPACE_UI_DIR",
                   "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_GATEWAY_SOCKET", "WORKSPACE_GATEWAY_THREADS", "WORKSPACE_GATEWAY_TCP",
-                  "WORKSPACE_AUTH", "WORKSPACE_GATEWAY_CACHE"):
+                  "WORKSPACE_AUTH", "WORKSPACE_GATEWAY_CACHE", "WORKSPACE_NGINX_DIR"):
             e.pop(k, None)
         # 모드는 시작할 때 정한다(docs/modes.md): 워크스페이스 기본 development. 운용 동작을 보는 시험은 dev=False
         if not dev:
@@ -390,13 +392,14 @@ class Server:
 class SSE:
     """SSE 클라이언트(원시 소켓). 길이 없는 응답과 chunked 둘 다 읽는다."""
 
-    def __init__(self, port, path, rcvbuf=None):
+    def __init__(self, port, path, rcvbuf=None, headers=None):
         self.s = socket.socket()
         if rcvbuf:
             self.s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
         self.s.settimeout(5.0)
         self.s.connect(("127.0.0.1", port))
-        self.s.sendall(("GET %s HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n\r\n" % path).encode())
+        extra = "".join("%s: %s\r\n" % kv for kv in (headers or {}).items())
+        self.s.sendall(("GET %s HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n%s\r\n" % (path, extra)).encode())
         self.raw = b""
         self.body = b""
         self.eof = False
@@ -951,7 +954,7 @@ class Commands(unittest.TestCase):
 
     def test_worker_errors(self):
         for code, status in (("bad_request", 400), ("unavailable", 503), ("timeout", 504), ("internal", 500),
-                             ("busy", 500), ("forbidden", 500)):
+                             ("busy", 409), ("forbidden", 403)):  # 0.86: busy 409·forbidden 403(예전 500)
             with self.subTest(code=code):
                 st, obj, _ = self.srv.json("POST", "/workers/w1/command", {"cmd": "err_" + code})
                 self.assertEqual(st, status)
@@ -1450,6 +1453,159 @@ class Streams(unittest.TestCase):
         self.assertIsNotNone(fast.wait_msg(lambda m: "after" in m["topics"], 3))
 
 
+@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(/streams)")
+class StreamsMux(unittest.TestCase):
+    """GET /streams?ids=a:2,b: 여러 워커 스트림을 한 SSE로(docs/stream-mux.md)"""
+
+    def setUp(self):
+        self.srv = T["srv"]
+        T["mgr"].mode = None
+        self.sse = []
+        self.workers = {}
+
+    def tearDown(self):
+        for s in self.sse:
+            s.close()
+        for w in self.workers.values():
+            try:
+                w.close()
+            except OSError:
+                pass
+
+    def worker(self, wid):
+        w = FakeStreamWorker(os.path.join(T["data"], "run", "stream", wid + ".sock"))
+        self.workers[wid] = w
+        return w
+
+    def open(self, query, path="/streams", **kw):
+        s = SSE(self.srv.port, path + "?" + query, **kw)
+        self.sse.append(s)
+        return s
+
+    def collect(self, s, pred, timeout=5.0):
+        """pred가 참이 될 때까지 받은 메시지 목록(마지막이 맞은 것). 시간 초과면 None"""
+        got, end = [], time.monotonic() + timeout
+        while time.monotonic() < end:
+            m = s.msg(max(0.05, end - time.monotonic()))
+            if m is None:
+                return None
+            got.append(m)
+            if pred(m):
+                return got
+        return None
+
+    def up(self, wid):
+        return lambda m: m.get("worker") == wid and m.get("stream") == "up" and m.get("kf")
+
+    def test_two_workers_tagged(self):
+        a, b = self.worker("x1"), self.worker("x2")
+        s = self.open("ids=x1:20,x2:20", path="/api/board/streams")
+        self.assertEqual(s.status, 200)
+        self.assertEqual(s.headers["content-type"], "text/event-stream; charset=utf-8")
+        self.assertEqual(s.headers["cache-control"], "no-store")
+        self.assertEqual(s.headers["x-accel-buffering"], "no")
+        self.assertEqual(s.block(), "retry: 2000")
+        seen = {}
+        end = time.monotonic() + 6
+        while len(seen) < 2 and time.monotonic() < end:
+            m = s.msg(3)
+            self.assertIsNotNone(m)
+            self.assertIn(m.get("worker"), ("x1", "x2"))
+            if m.get("stream") == "up":
+                seen[m["worker"]] = m
+        self.assertEqual(sorted(seen), ["x1", "x2"])
+        kf = seen["x1"]
+        # 워커 줄 그대로 + "worker"(끝에)
+        self.assertEqual(list(kf)[:3], ["seq", "kf", "topics"])
+        self.assertEqual(list(kf)[-1], "worker")
+        self.assertEqual(kf["topics"], {"device": {"mode": "RUN", "roll": 0}})
+        self.assertEqual(kf["events"], [{"seq": 1, "text": "device found"}])
+        a.send({"device": {"mode": "A", "roll": 1}})
+        b.send({"device": {"mode": "B", "roll": 1}}, [{"seq": 2, "text": "b event"}])
+        modes = {}
+        end = time.monotonic() + 5
+        while len(modes) < 2 and time.monotonic() < end:
+            m = s.msg(3)
+            self.assertIsNotNone(m)
+            mode = m.get("topics", {}).get("device", {}).get("mode")
+            if mode in ("A", "B"):
+                modes[m["worker"]] = (mode, [e["seq"] for e in m.get("events", [])])
+        self.assertEqual(modes, {"x1": ("A", []), "x2": ("B", [2])})
+        # 위쪽 연결은 워커마다 하나(허브를 같이 씀): /workers/{id}/stream을 더 열어도 그대로
+        one = SSE(self.srv.port, "/workers/x1/stream?hz=10")
+        self.sse.append(one)
+        self.assertIsNotNone(one.wait_msg(lambda m: m.get("stream") == "up", 5))
+        self.assertEqual((a.accepted, b.accepted), (1, 1))
+
+    def test_down_continue_back(self):
+        a, b = self.worker("x1"), self.worker("x2")
+        s = self.open("ids=x1,ghost,x2&hz=20")  # ghost: Manager가 모름 → 그 워커만 down
+        got = self.collect(s, self.up("x1"))
+        self.assertIsNotNone(got)
+        self.assertIsNotNone(self.collect(s, self.up("x2")))
+        a.close()
+        del self.workers["x1"]
+        got = self.collect(s, lambda m: m.get("worker") == "x1" and "down" in m)
+        self.assertIsNotNone(got)
+        self.assertEqual(got[-1], {"worker": "x1", "down": True})
+        b.send({"device": {"mode": "STILL", "roll": 3}})
+        got = self.collect(s, lambda m: m.get("worker") == "x2" and m.get("topics", {}).get("device", {}).get("mode") == "STILL")
+        self.assertIsNotNone(got, "x2 stopped when x1 went down")
+        a = self.worker("x1")
+        got = self.collect(s, self.up("x1"), 6)
+        self.assertIsNotNone(got)
+        self.assertEqual(got[-1]["topics"], {"device": {"mode": "RUN", "roll": 0}})
+        self.assertEqual(got[-1]["events"], [{"seq": 1, "text": "device found"}])
+        # 없는 워커: down 줄은 한 번만(2초 넘게 다시 붙기를 되풀이해도)
+        end = time.monotonic() + 2.5
+        while time.monotonic() < end:
+            m = s.msg(0.5)
+            if m:
+                got.append(m)
+        downs = [m for m in got if m.get("worker") == "x1" and m.get("down")]
+        self.assertEqual(len(downs), 0)  # 다시 온 뒤로는 down 없음
+
+    def test_ghost_once(self):
+        s = self.open("ids=ghost")
+        self.assertEqual(s.status, 200)
+        self.assertEqual(s.msg(), {"worker": "ghost", "down": True})
+        self.assertIsNone(s.msg(2.5))  # 되풀이하지 않음
+
+    def test_hz_per_worker(self):
+        a, b = self.worker("x1"), self.worker("x2")
+        s = self.open("ids=x1:50,x2:2")
+        self.assertIsNotNone(self.collect(s, self.up("x1")))
+        self.assertIsNotNone(self.collect(s, self.up("x2")))
+        for i in range(1, 41):
+            a.send({"device": {"mode": "M", "roll": i}})
+            b.send({"device": {"mode": "M", "roll": i}})
+            time.sleep(0.03)
+        n = {"x1": 0, "x2": 0}
+        last = {}
+        end = time.monotonic() + 1.5
+        while time.monotonic() < end:
+            m = s.msg(max(0.05, end - time.monotonic()))
+            if m and m.get("worker") in n:
+                n[m["worker"]] += 1
+                last[m["worker"]] = m["topics"].get("device", {}).get("roll", last.get(m["worker"]))
+        self.assertGreater(n["x1"], 10)
+        self.assertLessEqual(n["x2"], 4)
+        self.assertEqual(last["x2"], 40)  # 합쳐서 최신 값
+
+    def test_bad(self):
+        for q, why in (("", "ids is required"), ("ids=", "ids is required"), ("ids=a,,b", "bad worker id"),
+                       ("ids=-x", "bad worker id"), ("ids=x1:fast", "hz must be a number"),
+                       ("ids=x1,x1:2", "duplicate"), ("ids=x1&hz=fast", "hz must be a number"),
+                       ("ids=" + ",".join("w%d" % i for i in range(33)), "too many ids (max 32)")):
+            with self.subTest(q=q):
+                st, obj, _ = self.srv.json("GET", "/streams" + ("?" + q if q else ""))
+                self.assertEqual((st, obj["error"]["code"]), (400, "bad_request"))
+                self.assertIn(why, obj["error"]["message"])
+        self.assertEqual(self.srv.json("POST", "/streams?ids=x1")[0], 405)
+        s = self.open("ids=" + ",".join("w%d" % i for i in range(32)))
+        self.assertEqual(s.status, 200)
+
+
 class Modes(unittest.TestCase):
     """제품 모드·토큰·화면 끔·Manager 없음·화면 파일 없음(서버를 따로 띄움)"""
 
@@ -1733,6 +1889,7 @@ class AuthOn(unittest.TestCase):
         srv = self.srv
         for method, path, code in (("GET", "/workers", 401), ("GET", "/api/board/system", 401), ("GET", "/api/ui", 401),
                                    ("GET", "/api/panels", 401), ("GET", "/workers/s1/stream", 401),
+                                   ("GET", "/streams?ids=s1", 401), ("GET", "/api/board/streams?ids=s1", 401),
                                    ("POST", "/workers/w1/command", 401), ("POST", "/workers/w1/start", 401),
                                    ("PUT", "/api/mode", 405), ("GET", "/health", 200), ("GET", "/api/board/health", 200),
                                    ("GET", "/", 200), ("GET", "/kit.js", 200), ("GET", "/shell.css", 200)):
@@ -1797,6 +1954,25 @@ class AuthOn(unittest.TestCase):
                         self.assertEqual(st, 403, obj)
                         self.assertEqual(obj["error"]["code"], "forbidden")
                         self.assertIn("role " + role, obj["error"]["message"])
+
+    def test_streams_auth(self):
+        """/streams: /workers/{id}/stream과 같은 규칙(읽기 권한, 쿠키 세션 또는 ?token=)"""
+        tok = AUTH_USERS_TOKEN[self.data]
+        v = Session(self.srv)
+        self.assertEqual(v.login("v1", PASSWORDS["v1"])[0], 200)
+        for path, headers in (("/api/board/streams?ids=s1", v.headers()), ("/streams?ids=s1&token=" + tok, None),
+                              ("/workers/s1/stream?token=" + tok, None)):
+            with self.subTest(path=path.split("token=")[0]):
+                s = SSE(self.srv.port, path, headers=headers)
+                try:
+                    self.assertEqual(s.status, 200)
+                    self.assertEqual(s.block(), "retry: 2000")
+                finally:
+                    s.close()
+        for path, headers in (("/streams?ids=s1&token=nope", None),
+                              ("/streams?ids=s1", {"Cookie": "workspace_session=" + "0" * 64})):
+            st, _, _ = self.srv.request("GET", path, headers=headers)
+            self.assertEqual(st, 401)
 
     def test_bearer_token(self):
         tok = AUTH_USERS_TOKEN[self.data]
@@ -2256,8 +2432,8 @@ class Settings(unittest.TestCase):
     def test_put_live(self):
         srv = self.start()
         st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_UI_TITLE": "새 제목", "WORKSPACE_REST_COMMAND_TIMEOUT": 2})
-        self.assertEqual((st, obj), (200, {"saved": ["WORKSPACE_UI_TITLE", "WORKSPACE_REST_COMMAND_TIMEOUT"],
-                                           "live": ["WORKSPACE_UI_TITLE", "WORKSPACE_REST_COMMAND_TIMEOUT"], "restart": []}))
+        both = ["WORKSPACE_UI_TITLE", "WORKSPACE_REST_COMMAND_TIMEOUT"]
+        self.assertEqual((st, obj), (200, {"saved": both, "live": both, "restart": [], "applied": both, "failed": {}}))
         self.assertEqual(srv.json("GET", "/api/ui")[1]["title"], "새 제목")  # 바로
         # 주석 줄을 풀어 그 자리에서 바꾸고, 없던 키는 끝에. 나머지·주석·순서·권한 그대로
         self.assertEqual(slurp(self.env_path), SETTINGS_ENV.replace("#WORKSPACE_UI_TITLE=Workspace", "WORKSPACE_UI_TITLE=새 제목")
@@ -2283,21 +2459,64 @@ class Settings(unittest.TestCase):
         line = [l for l in log_lines(self.data) if l.get("cmd") == "settings"][0]
         self.assertEqual((line["method"], line["code"]), ("PUT", 200))
 
-    def test_put_restart_pending(self):
+    def test_no_restart_fields(self):
+        """docs/live-settings.md: 모든 칸이 바로 적용(apply live), 다시 시작을 기다리는 칸 없음"""
+        self.assertEqual({f["apply"] for g in self.defn["groups"] for f in g["fields"]}, {"live"})
+
+    def test_put_log_level_and_https_live(self):
+        """로그 수준은 게이트웨이·process-manager에 바로. HTTPS 칸은 nginx 뒤가 아니면 저장만 하고 failed "needs nginx" """
         srv = self.start()
+        T["mgr"].requests.clear()
         st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_LOG_LEVEL": "DEBUG", "WORKSPACE_HTTPS_PORT": "443"})
-        self.assertEqual((st, obj), (200, {"saved": ["WORKSPACE_LOG_LEVEL", "WORKSPACE_HTTPS_PORT"], "live": [],
-                                           "restart": ["WORKSPACE_LOG_LEVEL", "WORKSPACE_HTTPS_PORT"]}))
+        self.assertEqual(st, 200)
+        self.assertEqual((obj["saved"], obj["live"], obj["restart"], obj["applied"]),
+                         (["WORKSPACE_LOG_LEVEL", "WORKSPACE_HTTPS_PORT"], ["WORKSPACE_LOG_LEVEL", "WORKSPACE_HTTPS_PORT"], [],
+                          ["WORKSPACE_LOG_LEVEL"]))
+        self.assertEqual(list(obj["failed"]), ["WORKSPACE_HTTPS_PORT"])
+        self.assertIn("needs nginx", obj["failed"]["WORKSPACE_HTTPS_PORT"])
+        self.assertIn({"op": "set_log_level", "level": "DEBUG"}, T["mgr"].requests)  # process-manager에도
         obj = srv.json("GET", "/workspace/settings")[1]
-        self.assertEqual(obj["pending"], ["WORKSPACE_LOG_LEVEL", "WORKSPACE_HTTPS_PORT"])
+        self.assertEqual(obj["pending"], [])
         fs = self.fields(obj)
-        self.assertEqual([fs["WORKSPACE_LOG_LEVEL"][k] for k in ("value", "effective", "pending")], ["DEBUG", "WARNING", True])
-        self.assertEqual([fs["WORKSPACE_HTTPS_PORT"][k] for k in ("value", "effective", "pending")], [443, 8443, True])
-        self.assertIs(fs["WORKSPACE_AUTH"]["pending"], False)
+        self.assertEqual([fs["WORKSPACE_LOG_LEVEL"][k] for k in ("value", "effective", "pending")], ["DEBUG", "DEBUG", False])
+        self.assertEqual([fs["WORKSPACE_HTTPS_PORT"][k] for k in ("value", "effective", "pending")], [443, 8443, False])
+        # 바로 적용: 시작 수준(WARNING)에서는 안 남던 요청 줄(INFO)이 남음
+        self.assertTrue(wait_for(lambda: '"GET /workspace/settings" 200' in slurp(srv.log_path), 5))
         self.assertIn("\nWORKSPACE_LOG_LEVEL=DEBUG\nOTHER=1\nWORKSPACE_HTTPS_PORT=443\n", slurp(self.env_path))
-        # 시작할 때의 값으로 되돌리면 기다림 없음(지워서 기본값이 시작 값과 같아도)
         srv.json("PUT", "/workspace/settings", {"WORKSPACE_LOG_LEVEL": "WARNING", "WORKSPACE_HTTPS_PORT": None})
-        self.assertEqual(srv.json("GET", "/workspace/settings")[1]["pending"], [])
+        self.assertEqual(self.fields(srv.json("GET", "/workspace/settings")[1])["WORKSPACE_LOG_LEVEL"]["effective"], "WARNING")
+
+    def test_put_auth_live(self):
+        """로그인 켜기·끄기가 바로(다음 요청부터). 사용자가 없으면 켜기를 받지 않음"""
+        empty = self.start()
+        st, obj, _ = empty.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "on"})
+        self.assertEqual((st, list(obj["error"]["fields"])), (400, ["WORKSPACE_AUTH"]))
+        self.assertIn("no users", obj["error"]["fields"]["WORKSPACE_AUTH"])
+        self.assertEqual(empty.json("GET", "/workers")[0], 200)  # 그대로 꺼짐
+        data = auth_data_dir()
+        srv = self.start(data=data)
+        self.assertEqual(srv.request("GET", "/api/auth/check")[0], 204)  # 꺼짐: 늘 들여보냄
+        st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "on"})
+        self.assertEqual((st, obj["applied"], obj["failed"]), (200, ["WORKSPACE_AUTH"], {}))  # nginx 없음: 게이트웨이만
+        self.assertEqual(srv.json("GET", "/workers")[0], 401)
+        self.assertEqual(srv.json("GET", "/api/auth/me")[1]["auth"], "on")
+        self.assertEqual(srv.request("GET", "/api/auth/check")[0], 401)
+        tok = {"Authorization": "Bearer " + AUTH_USERS_TOKEN[data]}
+        self.assertEqual(srv.json("GET", "/workers", headers=tok)[0], 200)
+        self.assertEqual(srv.request("GET", "/api/auth/check", headers=tok)[0], 204)
+        s = Session(srv)
+        self.assertEqual(s.login("v1", PASSWORDS["v1"])[0], 200)
+        self.assertEqual(s.json("GET", "/workers")[0], 200)
+        fs = self.fields(srv.json("GET", "/workspace/settings", headers=tok)[1])
+        self.assertEqual((fs["WORKSPACE_AUTH"]["effective"], fs["WORKSPACE_AUTH"]["pending"]), ("on", False))
+        self.assertEqual(s.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "off"})[0], 403)  # viewer는 못 바꿈
+        st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "off"}, headers=tok)
+        self.assertEqual((st, obj["applied"]), (200, ["WORKSPACE_AUTH"]))
+        self.assertEqual(srv.json("GET", "/workers")[0], 200)
+        self.assertEqual(srv.json("GET", "/api/auth/me")[1]["auth"], "off")
+        # 다시 켜면 세션은 비어서 시작(로그인 다시)
+        self.assertEqual(srv.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "on"})[0], 200)
+        self.assertEqual(s.json("GET", "/workers")[0], 401)
 
     def test_bad_values(self):
         srv = self.start()
@@ -2349,6 +2568,83 @@ class Settings(unittest.TestCase):
         maint = Session(srv)
         maint.login("m1", PASSWORDS["m1"])
         self.assertEqual(maint.json("PUT", "/api/board/workspace/settings", {"WORKSPACE_UI_TITLE": "x"})[0], 200)
+
+
+class MediaAuth(unittest.TestCase):
+    """영상 로그인 판정(docs/media-auth.md): MediaMTX authMethod http가 부르는 보드 안 포트 POST /api/auth/media,
+    nginx auth_request가 부르는 GET /api/auth/check"""
+
+    def media(self, port, **body):
+        req = dict({"user": "", "password": "", "token": "", "ip": "10.0.0.5", "action": "read", "path": "cam",
+                    "protocol": "rtsp", "id": None, "query": ""}, **body)
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            c.request("POST", "/api/auth/media", body=json.dumps(req).encode(), headers={"Content-Type": "application/json"})
+            r = c.getresponse()
+            r.read()
+            return r.status
+        finally:
+            c.close()
+
+    def test_media_port(self):
+        data = auth_data_dir()
+        mport = free_port()
+        srv = Server(dict(auth_env(data), WORKSPACE_MEDIA_AUTH_PORT=str(mport)), name="mediaauth")
+        self.addCleanup(srv.stop)
+        tok = AUTH_USERS_TOKEN[data]  # m1(maintainer)
+        self.assertEqual(srv.json("GET", "/health?detail=1")[1]["gateway"]["media_auth_port"], mport)
+        self.assertEqual(self.media(mport, ip="127.0.0.1", action="publish"), 200)  # 보드 안 송출
+        self.assertEqual(self.media(mport), 401)                                     # 자격 없음 → 물음
+        self.assertEqual(self.media(mport, token=tok), 200)                          # Bearer·?token=
+        self.assertEqual(self.media(mport, user="any", password=tok, protocol="srt"), 200)  # 비밀번호 자리에 토큰
+        self.assertEqual(self.media(mport, user="v1", password=PASSWORDS["v1"]), 200)       # 계정 이름+비밀번호
+        self.assertEqual(self.media(mport, action="playback", token=tok), 200)
+        self.assertEqual(self.media(mport, action="publish", token=tok), 403)        # 바깥 송출은 늘 거절
+        self.assertEqual(self.media(mport, action="api", ip="10.0.0.5"), 403)
+        self.assertEqual(self.media(mport, user="v1", password="wrong", ip="10.0.0.7"), 401)
+        # 틀리면 주소마다 셈(로그인과 같은 5번 제한): 그 뒤에는 맞는 토큰도 잠깐 거절, 다른 주소는 그대로
+        for i in range(5):
+            self.media(mport, token="bad-%d" % i, ip="10.0.0.9")
+        self.assertEqual(self.media(mport, token=tok, ip="10.0.0.9"), 401)
+        self.assertEqual(self.media(mport, token=tok, ip="10.0.0.8"), 200)
+        # 본문이 이상하면 거절, 다른 경로는 없음
+        c = http.client.HTTPConnection("127.0.0.1", mport, timeout=5)
+        c.request("POST", "/api/auth/media", body=b"[1]")
+        self.assertEqual(c.getresponse().status, 403)
+        c.close()
+        c = http.client.HTTPConnection("127.0.0.1", mport, timeout=5)
+        c.request("GET", "/workers")
+        self.assertEqual(c.getresponse().status, 404)
+        c.close()
+        # 화면 쪽 포트에는 /api/auth/media가 없음(보드 안 포트에서만)
+        self.assertNotEqual(srv.request("POST", "/api/auth/media", {"ip": "127.0.0.1"})[0], 200)
+        # 로그인을 끄면(설정 탭) 바깥도 모두 허락: MediaMTX는 다시 시작하지 않음
+        root = tempfile.mkdtemp(prefix="maroot", dir=T["tmp"])
+        os.makedirs(os.path.join(root, "install", "config"))
+        shutil.copy(os.path.join(REPO, "install", "config", "workspace-settings.json"), os.path.join(root, "install", "config"))
+        srv2 = Server(dict(auth_env(data), WORKSPACE_ROOT=root, WORKSPACE_MEDIA_AUTH_PORT=str(free_port())), name="mediaauth2")
+        self.addCleanup(srv2.stop)
+        m2 = srv2.json("GET", "/health?detail=1")[1]["gateway"]["media_auth_port"]
+        self.assertEqual(self.media(m2, ip="10.1.1.1"), 401)
+        st, obj, _ = srv2.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "off"}, headers={"Authorization": "Bearer " + tok})
+        self.assertEqual(st, 200, obj)
+        self.assertEqual(self.media(m2, ip="10.1.1.1"), 200)
+        self.assertEqual(self.media(m2, ip="10.1.1.1", action="publish"), 200)  # 꺼짐은 예전과 같음
+
+    def test_check(self):
+        data = auth_data_dir()
+        srv = Server(auth_env(data), name="authcheck")
+        self.addCleanup(srv.stop)
+        st, _, body = srv.request("GET", "/api/auth/check")
+        self.assertEqual((st, body), (401, b""))
+        self.assertEqual(srv.request("GET", "/api/auth/check", headers={"Authorization": "Bearer nope"})[0], 401)
+        self.assertEqual(srv.request("GET", "/api/auth/check", headers={"Authorization": "Bearer " + AUTH_USERS_TOKEN[data]})[0], 204)
+        s = Session(srv)
+        s.login("v1", PASSWORDS["v1"])
+        st, _, body = srv.request("GET", "/api/board/auth/check", headers=s.headers())
+        self.assertEqual((st, body), (204, b""))
+        self.assertEqual(srv.request("POST", "/api/auth/check")[0], 405)
+        self.assertEqual(T["srv"].request("GET", "/api/auth/check")[0], 204)  # 로그인 꺼짐: 늘
 
 
 if __name__ == "__main__":
