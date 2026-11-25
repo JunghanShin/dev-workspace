@@ -390,8 +390,8 @@ class NginxLive(unittest.TestCase):
         # 로그인 켜기 → nginx 다시 읽기 → /media/도 로그인한 사람만
         st, obj = self.put({"WORKSPACE_AUTH": "on"})
         self.assertEqual((st, obj["applied"], obj["failed"]), (200, ["WORKSPACE_AUTH"], {}), obj)
-        st, h, body = self.req("GET", "/media/cam/")
-        self.assertEqual(st, 401)
+        # nginx -s reload는 신호만 보내고 돌아온다: 새 worker가 받기 전 잠깐은 옛 worker가 옛 설정으로 답할 수 있다
+        self.assertTrue(t.wait_for(lambda: self.req("GET", "/media/cam/")[0] == 401, 5, 0.05))
         self.assertEqual(self.req("GET", "/api/board/workers")[0], 401)
         bearer = {"Authorization": "Bearer " + self.token}
         st, h, data = self.req("GET", "/media/cam/", headers=bearer)
@@ -430,7 +430,7 @@ class NginxLive(unittest.TestCase):
         st, obj = self.put({"WORKSPACE_HTTPS": "off", "WORKSPACE_AUTH": "off"})
         self.assertEqual((st, obj["failed"]), (200, {}), obj)
         self.assertTrue(t.wait_for(lambda: not NginxFront._open(self.tport), 5, 0.05))
-        self.assertEqual(self.req("GET", "/media/cam/")[0], 200)
+        self.assertTrue(t.wait_for(lambda: self.req("GET", "/media/cam/")[0] == 200, 5, 0.05))
         self.assertEqual(self.ng.pid, pid)
         self.assertIsNone(self.ng.poll())  # 다시 시작이 아니라 다시 읽기
 

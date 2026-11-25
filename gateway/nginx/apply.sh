@@ -6,7 +6,8 @@
 #   apply.sh <데이터> <워크스페이스> <게이트웨이 소켓> [--reload]
 #
 #   --reload 없이  설정만 만들고 점검(시작 셸: 그 뒤 nginx를 띄움)
-#   --reload       점검에 통과하면 떠 있는 nginx에 다시 읽기(nginx -s reload: 연결을 끊지 않고 새 worker로 바꿈)
+#   --reload       점검에 통과하면 떠 있는 nginx에 다시 읽기(nginx -s reload: 연결을 끊지 않고 새 worker로 바꿈).
+#                  옛 worker가 새 연결을 그만 받을 때까지 기다린 뒤 돌아옴(최대 5 s)
 #
 # 읽는 키(<데이터>/config/workspace.env, 파일에 없으면 기본값. 환경 변수의 같은 키는 쓰지 않는다: 지운 칸이 시작 값으로 남지 않게)
 #   WORKSPACE_REST_BIND·_PORT, WORKSPACE_UI, WORKSPACE_HTTPS·_PORT·_CERT·_KEY, WORKSPACE_HTTP_REDIRECT, WORKSPACE_AUTH
@@ -80,10 +81,26 @@ if ! out="$("$nginx_bin" -t -q -p "$dir" -c "$new" -g 'daemon off;' 2>&1)"; then
 fi
 mv -f "$new" "$dir/nginx.conf"
 if [[ "$reload" == --reload ]]; then
+  # nginx -s reload는 신호만 보내고 돌아온다. 옛 worker가 QUIT를 받아 새 연결을 그만 받기 전에는 옛 설정으로도 답하므로
+  # "적용됨"은 옛 worker가 모두 끝났거나 "shutting down"이 된 뒤에(열린 스트림은 옛 worker가 끝까지 들고 있어도 됨)
+  master="$(cat "$dir/nginx.pid" 2>/dev/null || true)"
+  old_workers=""
+  [[ -n "$master" ]] && old_workers="$(pgrep -P "$master" 2>/dev/null | tr '\n' ' ' || true)"
   if ! out="$("$nginx_bin" -p "$dir" -c "$dir/nginx.conf" -g 'daemon off;' -s reload 2>&1)"; then
     [[ -n "$out" ]] && echo "$out" >&2
     code=3 fail "reload failed: $(tail -n 1 <<<"$out")"
   fi
+  switched=0
+  for _ in $(seq 1 100); do  # 최대 5 s
+    busy=0
+    for w in $old_workers; do
+      [[ -r /proc/$w/cmdline ]] || continue
+      tr '\0' ' ' </proc/$w/cmdline | grep -q "shutting down" || busy=1
+    done
+    (( busy )) || { switched=1; break; }
+    sleep 0.05
+  done
+  (( switched )) || echo "apply.sh: nginx reloaded but old worker still taking connections after 5 s" >&2
   echo "nginx: applied and reloaded (listen $bind:$port$https, login $auth)"
 else
   echo "nginx: config ready (listen $bind:$port$https, login $auth)"

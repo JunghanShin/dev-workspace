@@ -30,6 +30,7 @@ step() { printf '\n== %s\n' "$*"; }
 run_py() {  # run_py <이름> <폴더> <unittest 인자>
   local name=$1 dir=$2 out rc; shift 2
   out="$(cd "$dir" && WORKER_BIN="$OUT/_template-ON/example-worker" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest "$@" 2>&1)"; rc=$?
+  printf '%s\n' "$out" >"$OUT/$name.log"  # 전체 출력(실패 trace 포함, CI는 artifact로 올림)
   echo "$name: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)"
   ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:|Error" | head -10; fail+=("$name"); }
   return 0
@@ -48,6 +49,7 @@ if (( ! QUICK )); then
     echo "$out" | grep -E "tests passed|tests failed|FAIL" | head -5
     (( rc == 0 )) || fail+=("manager-cpp unit")
     out="$(cd "$ROOT/manager" && MANAGER_BIN="$b/process-manager" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_manager_api test_manager_accept 2>&1)"; rc=$?
+    printf '%s\n' "$out" >"$OUT/manager-accept.log"  # 전체 출력(실패 trace 포함, CI는 artifact로 올림)
     echo "manager-cpp accept: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)"
     ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:" | head -10; fail+=("manager-cpp accept"); }
   else
@@ -64,10 +66,12 @@ if (( ! QUICK )); then
     echo "$out" | grep -E "tests passed|tests failed|FAIL" | head -5
     (( rc == 0 )) || fail+=("gateway-cpp unit")
     out="$(cd "$ROOT/rest" && REST_BIN="$b/gateway" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_rest_accept 2>&1)"; rc=$?
+    printf '%s\n' "$out" >"$OUT/gateway-accept.log"  # 전체 출력(실패 trace 포함, CI는 artifact로 올림)
     echo "gateway-cpp accept: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)"
     ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:" | head -10; fail+=("gateway-cpp accept"); }
     # nginx 앞단(docs/gateway.md 2장): nginx가 깔려 있을 때만(없으면 시험이 건너뜀)
     out="$(cd "$ROOT/rest" && REST_BIN="$b/gateway" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_nginx_front 2>&1)"; rc=$?
+    printf '%s\n' "$out" >"$OUT/gateway-nginx-front.log"  # 전체 출력(실패 trace 포함, CI는 artifact로 올림)
     echo "gateway-cpp nginx front: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)$(echo "$out" | grep -q "skipped" && echo " (skipped: no nginx)")"
     ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:" | head -10; fail+=("gateway-cpp nginx"); }
   else
@@ -102,6 +106,7 @@ if (( ! QUICK )); then
       (( rc == 0 )) || fail+=("$name-manager test")
       if [[ -f "$m/test_compare.py" ]]; then
         out="$(cd "$ROOT" && RECORD_BIN="$b/$name-manager" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest "managers/$name/test_compare.py" 2>&1)"; rc=$?
+        printf '%s\n' "$out" >"$OUT/$name-manager-compare.log"  # 전체 출력(실패 trace 포함, CI는 artifact로 올림)
         echo "test_compare: $(echo "$out" | grep -E "^Ran " | head -1) $( ((rc)) && echo FAILED || echo OK)"
         ((rc)) && { echo "$out" | grep -E "FAIL:|ERROR:|Error" | head -10; fail+=("$name-manager compare"); }
       fi
