@@ -109,7 +109,7 @@ function render(state, ctx) {
       Object.entries(mt.queues || {}).map(([k, q]) => [h("span", { class: "mono" }, k), String(q.waiting ?? 0),
         q.inflight ? h("span", {}, h("span", { class: "mono" }, q.inflight.cmd),
           h("span", { class: "muted" }, ` · ${q.inflight.origin || "—"} · ${q.inflight.age_ms} ms`)) : "—"]),
-      "명령 큐 없음(아직 보낸 명령 없음)"),
+      (mt.sent ?? 0) ? "기다리는 명령 없음(큐는 비면 지워짐)" : "명령 큐 없음(아직 보낸 명령 없음)"),
     mEvents.length ? table(h, ["최근 거절", "내용"], mEvents.map((e) => [e.code.replace("command_", ""), h("span", { class: "muted" }, e.text)]), "") : null,
   ].filter(Boolean) : []);
 
