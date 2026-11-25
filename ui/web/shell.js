@@ -413,7 +413,8 @@ async function route() {
   const items = navItems();
   // "#/<패널>/<탭>"(예 #/workspace/logs): 워커 패널이 아니면 뒤는 패널이 읽는 탭(ctx.sub)
   const head = key.split("/")[0], sub = key.includes("/") ? key.slice(head.length + 1) : "";
-  const it = items.find((i) => i.key === key) || items.find((i) => i.key === head && !i.workerId) || (key ? null : items[0]);
+  const it = items.find((i) => i.key === key) || items.find((i) => i.key === head && !i.workerId)
+    || (key ? null : items.find((i) => i.key === "workspace") || items[0]);  // 처음 열리는 화면: 워크스페이스(개요)
   if (current && current.mod.unmount) { try { current.mod.unmount(current.ctx); } catch {} }
   current = null;
   if (!it) {
