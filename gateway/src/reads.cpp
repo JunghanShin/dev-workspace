@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <deque>
+#include <functional>
 #include <map>
 #include <thread>
 
@@ -65,8 +66,10 @@ std::vector<std::string> jsonl_files(const std::string& dir) {
     return out;
 }
 
-// 파일 끝의 줄 n개(빈 줄·CR 뺌). 끝에서 조금씩 거슬러 읽는다(큰 기록 파일을 다 읽지 않음)
-std::vector<std::string> tail_lines(const std::string& path, size_t n) {
+// 파일 끝의 줄 n개(빈 줄·CR 뺌, keep이 있으면 맞는 줄만). 끝에서 조금씩 거슬러 읽는다(큰 기록 파일을 다
+// 읽지 않음, 많아야 끝 64 MiB)
+std::vector<std::string> tail_lines(const std::string& path, size_t n,
+                                    const std::function<bool(const std::string&)>& keep = nullptr) {
     std::vector<std::string> out;
     const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0 || n == 0) {
@@ -91,7 +94,7 @@ std::vector<std::string> tail_lines(const std::string& path, size_t n) {
         }
         out.clear();
         for (auto& l : splitlines(buf.substr(from)))
-            if (!l.empty()) out.push_back(utf8_replace(l));
+            if (!l.empty() && (!keep || keep(l))) out.push_back(utf8_replace(l));
         if (out.size() >= n || start == 0 || want >= (64u << 20)) break;
         want *= 4;
     }
@@ -165,7 +168,13 @@ ReadResult Reads::handle(const std::string& name, const std::string& id, bool ha
         std::sort(by_time.begin(), by_time.end());
         std::deque<std::string> out;
         for (auto it = by_time.rbegin(); it != by_time.rend() && static_cast<long long>(out.size()) < n; ++it) {
-            const auto got = tail_lines(it->second, static_cast<size_t>(n - static_cast<long long>(out.size())));
+            // 읽기 명령 줄은 뺀다(0.81 전 게이트웨이가 남긴 get_status가 같은 부팅의 파일에 남아 있음)
+            const auto got = tail_lines(it->second, static_cast<size_t>(n - static_cast<long long>(out.size())),
+                                        [](const std::string& l) {
+                                            if (l.find("get_status") == std::string::npos) return true;
+                                            const Json j = Json::parse(l, nullptr, false);
+                                            return !(j.is_object() && j.value("cmd", Json()) == "get_status");
+                                        });
             out.insert(out.begin(), got.begin(), got.end());
         }
         r.body = Json{{"lines", Json(std::vector<std::string>(out.begin(), out.end()))}};

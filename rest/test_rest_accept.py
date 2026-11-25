@@ -1146,7 +1146,7 @@ class Reads(unittest.TestCase):
         gw = os.path.join(data, "records", "gateway")
         gl = lambda cmd: json.dumps({"t": "x", "user": "-", "method": "POST", "path": "/workers/w1/command", "cmd": cmd, "code": 200})
         write(os.path.join(gw, "gateway-zzzz-1.jsonl"), "\n".join(gl(c) for c in ("b1", "c1")) + "\n")
-        write(os.path.join(gw, "gateway-aaaa.jsonl"), "\n".join(gl(c) for c in ("d1", "d2")) + "\r\n")
+        write(os.path.join(gw, "gateway-aaaa.jsonl"), "\n".join(gl(c) for c in ("d1", "get_status", "d2", "get_status")) + "\r\n")
         os.utime(os.path.join(gw, "gateway-zzzz-1.jsonl"), (1000, 1000))
         srv = Server({"WORKSPACE_DATA": data, "WORKSPACE_MANAGER_SOCKET": T["mgr"].path}, name="cmdlog")
         try:
