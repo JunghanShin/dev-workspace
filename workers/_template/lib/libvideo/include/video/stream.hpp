@@ -86,6 +86,8 @@ public:
     static constexpr std::chrono::seconds kFpsWindow{3};
     unsigned long restarts() const { return restarts_; }
     nlohmann::json status() const;
+    // 끊김·복구 이벤트(libvideo 0.4): [{severity, code: stream_down|stream_up, text, detail}]. 꺼내면 비움
+    std::vector<nlohmann::json> take_events();
 
 private:
     void start(Clock::time_point now);
@@ -111,6 +113,8 @@ private:
     Clock::time_point retry_at_{};
     unsigned long restarts_ = 0;
     std::string last_error_;
+    std::vector<nlohmann::json> events_;
+    Clock::time_point down_since_{};  // 끊긴 때(이어 붙을 때 끊긴 시간)
 };
 
 // 장치 워커가 가진 송출 전체. poll 루프에 붙이고, 명령(stream_start, stream_stop)을 처리한다
@@ -131,6 +135,7 @@ public:
     std::string metrics() const;    // heartbeat: "stream_main_link=1 stream_main_fps=30.0 ..."
     // stream_start / stream_stop {"name"}. 처리한 명령이면 true(reply에 응답)
     bool handle(const std::string& cmd, const nlohmann::json& args, nlohmann::json* reply);
+    std::vector<nlohmann::json> take_events();  // 모든 송출의 끊김·복구 이벤트
 
 private:
     std::vector<std::unique_ptr<Stream>> streams_;

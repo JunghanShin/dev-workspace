@@ -148,6 +148,10 @@ struct FakePm {
                 if (c < 0) continue;
                 conns.emplace_back([this, c] {
                     const Json req = Json::parse(read_line(c, 3000), nullptr, false);
+                    // 진짜 process-manager처럼 구독한 주제만 보낸다(system을 구독하지 않으면 모드를 못 받음)
+                    bool want_system = false;
+                    if (req.is_object() && req.contains("topics") && req["topics"].is_array())
+                        for (const auto& t : req["topics"]) want_system = want_system || t == "system";
                     if (!req.is_object() || req.value("op", "") != "subscribe") {
                         send_line(c, R"({"ok":false,"error":{"code":"not_found","message":"fake"}})");
                         close(c);
@@ -155,7 +159,7 @@ struct FakePm {
                     }
                     send_line(c, R"({"ok":true,"data":{}})");
                     while (!stop) {
-                        send_line(c, Json{{"event", "system"}, {"data", {{"access_mode", mode}}}}.dump());
+                        if (want_system) send_line(c, Json{{"event", "system"}, {"data", {{"access_mode", mode}}}}.dump());
                         std::this_thread::sleep_for(200ms);
                     }
                     close(c);

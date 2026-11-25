@@ -39,7 +39,7 @@ host.add<video::TapModule>([&cam] { video::TapConfig t; t.source = cam.rtsp_url(
 
 설정 폼: `stream-schema.json`은 송출 한 항목의 화면 설정 폼 스키마 원본이다(워크스페이스 design.md 6.10). 송출하는 장치 워커는 자기 `worker-types.json`의 `config_schema` 안 `streams` 목록 `fields`에 이 내용을 그대로 넣는다. `StreamConfig` 키를 바꾸면 이 파일도 같이 고친다.
 
-송출 모듈(워커 모듈 구조, 워크스페이스 design.md 6.6.3): `video/module.hpp`의 `video::StreamsModule`(모듈 이름 `stream`). 장치 워커가 `host.add<video::StreamsModule>([&cam] { return cam.stream_defaults(); })`로 붙인다(입력 기본값은 장치 모듈이 줌). 설정 `{"stream": {"streams": [...]}}`, 명령 `stream.start|stop {name}`, 상태 `get_status` → `data.stream`(송출 목록), 지표 `stream_<이름>_link|fps|restarts`. `fps`는 ffmpeg 진행 보고의 `frame=` 변화로 센 최근 3 s 값(0.3.1). ffmpeg의 `fps=`는 시작부터의 평균이라 다시 시작한 직후 한참 낮게 나와 쓰지 않는다. 프레임이 2 s 넘게 안 늘면 0
+송출 모듈(워커 모듈 구조, 워크스페이스 design.md 6.6.3): `video/module.hpp`의 `video::StreamsModule`(모듈 이름 `stream`). 장치 워커가 `host.add<video::StreamsModule>([&cam] { return cam.stream_defaults(); })`로 붙인다(입력 기본값은 장치 모듈이 줌). 설정 `{"stream": {"streams": [...]}}`, 명령 `stream.start|stop {name}`, 상태 `get_status` → `data.stream`(송출 목록), 지표 `stream_<이름>_link|fps|restarts`. `fps`는 ffmpeg 진행 보고의 `frame=` 변화로 센 최근 3 s 값(0.3.1). ffmpeg의 `fps=`는 시작부터의 평균이라 다시 시작한 직후 한참 낮게 나와 쓰지 않는다. 프레임이 2 s 넘게 안 늘면 0. 이벤트(0.4, libworker 0.18 `Host::event`): 끊기면 `stream_down`(warning, `{name, reason, restarts}`, 같은 이유가 이어지면 한 번), 다시 붙으면 `stream_up`(notice, `{name, down_s, restarts}`). tap은 `tap_down`·`tap_up`. 스트림을 내는 모듈이 `host()->take_events()`를 발행해야 기록에 남는다
 
 ## 입출력 정의 조각 (워크스페이스 design.md 6.6.7.1)
 

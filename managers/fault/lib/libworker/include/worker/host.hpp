@@ -216,6 +216,10 @@ public:
     TimePoint next_lease_deadline() const;
     // 호스트가 낸 이벤트(공통 이벤트 형식, 예: lease_expired)를 꺼낸다. 스트림을 내는 모듈이 자기 이벤트에 붙여 발행
     std::vector<Json> take_events();
+    // 모듈이 공통 이벤트를 낸다(libworker 0.18): source = "<워커 id>.<module>". 스트림을 내는 모듈이 take_events로
+    // 꺼내 자기 events에 붙여 발행한다(예: libvideo stream_down·stream_up). 워커 루프 스레드에서만
+    void event(const std::string& module, const std::string& severity, const std::string& code, const std::string& text,
+               const Json& detail = Json::object());
     void input_link(const std::string& name, bool up);
     const std::map<std::string, InputAddress>& inputs() const { return inputs_; }
     Json status() const;

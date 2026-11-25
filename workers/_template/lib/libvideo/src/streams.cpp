@@ -92,6 +92,13 @@ void Streams::on_timer(Clock::time_point now) {
     for (const auto& s : streams_) s->on_timer(now);
 }
 
+std::vector<nlohmann::json> Streams::take_events() {
+    std::vector<nlohmann::json> out;
+    for (const auto& s : streams_)
+        for (auto& e : s->take_events()) out.push_back(std::move(e));
+    return out;
+}
+
 Streams::Clock::time_point Streams::next_wakeup(Clock::time_point now) const {
     auto t = now + std::chrono::seconds(1);
     for (const auto& s : streams_) t = std::min(t, s->next_wakeup(now));

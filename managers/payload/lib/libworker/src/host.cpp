@@ -846,9 +846,14 @@ TimePoint Host::next_lease_deadline() const {
 }
 
 void Host::push_event(const std::string& severity, const std::string& code, const std::string& text, const Json& detail) {
+    event("host", severity, code, text, detail);
+}
+
+void Host::event(const std::string& module, const std::string& severity, const std::string& code, const std::string& text,
+                 const Json& detail) {
     const auto mono = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
     const double unix_s = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
-    host_events_.push_back({{"seq", ++host_event_seq_}, {"t_mono_ns", mono}, {"t_unix", unix_s}, {"source", id_ + ".host"},
+    host_events_.push_back({{"seq", ++host_event_seq_}, {"t_mono_ns", mono}, {"t_unix", unix_s}, {"source", id_ + "." + module},
                             {"severity", severity}, {"code", code}, {"text", text}, {"detail", detail}});
     if (host_events_.size() > 64) host_events_.erase(host_events_.begin());
 }

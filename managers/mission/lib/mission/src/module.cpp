@@ -65,7 +65,7 @@ void Module::start(worker::Host& host) {
     std::string error;
     if (!pub_->open(host.stream_socket(), &error)) throw std::runtime_error("stream: " + error);
     worker::ManagerSubscription::Options mo;
-    mo.topics = {"workers"};
+    mo.topics = {"workers", "system"};  // system: 모드(access_mode, 명령 조건·advisory, docs/modes.md). 빠뜨리면 모드를 몰라 운용처럼 막음
     mo.thread_name = "mission.pm";
     pm_ = std::make_unique<worker::ManagerSubscription>(host.watch(), mo);
     pm_->start();

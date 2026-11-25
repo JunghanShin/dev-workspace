@@ -1,5 +1,6 @@
 #include "video/tap.hpp"
 
+#include <cmath>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -171,6 +172,12 @@ void Tap::end_child() {
     worker::kill_wait(pid_);
 }
 
+std::vector<nlohmann::json> Tap::take_events() {
+    std::vector<nlohmann::json> out;
+    out.swap(events_);
+    return out;
+}
+
 void Tap::failed(Clock::time_point now, const std::string& why) {
     linked_ = false;
     fps_ = 0;
@@ -179,6 +186,10 @@ void Tap::failed(Clock::time_point now, const std::string& why) {
     std::lock_guard<std::mutex> lock(mu_);
     if (why != last_error_) {
         std::fprintf(stderr, "tap: down (%s); retrying every %.1f s\n", why.c_str(), c_.retry_sec);
+        if (last_error_.empty()) down_since_ = now;
+        events_.push_back({{"severity", "warning"}, {"code", "tap_down"}, {"text", "tap down: " + why},
+                           {"detail", {{"reason", why}, {"restarts", restarts_}}}});
+        if (events_.size() > 32) events_.erase(events_.begin());
         last_error_ = why;
     }
 }
@@ -207,7 +218,13 @@ void Tap::on_timer(Clock::time_point now) {
         if (last_frame_ns_.load() && !linked_) {
             linked_ = true;
             std::lock_guard<std::mutex> lock(mu_);
-            if (!last_error_.empty()) std::printf("tap: up again\n");
+            if (!last_error_.empty()) {
+                std::printf("tap: up again\n");
+                const double down_s = std::chrono::duration<double>(now - down_since_).count();
+                events_.push_back({{"severity", "notice"}, {"code", "tap_up"},
+                                   {"text", "tap up again after " + std::to_string(static_cast<int>(down_s + 0.5)) + " s"},
+                                   {"detail", {{"down_s", std::round(down_s * 10) / 10}, {"restarts", restarts_}}}});
+            }
             last_error_.clear();
         }
         if (now - fps_at_ >= std::chrono::seconds(1)) {

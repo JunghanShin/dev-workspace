@@ -73,6 +73,7 @@ public:
     unsigned long restarts() const { return restarts_; }
     framebus::Stats bus_stats() const;
     nlohmann::json status() const;
+    std::vector<nlohmann::json> take_events();  // tap_down·tap_up(libvideo 0.4)
 
 private:
     void start(Clock::time_point now);
@@ -97,6 +98,8 @@ private:
     unsigned long restarts_ = 0;
     std::string last_error_;
     mutable std::mutex mu_;
+    std::vector<nlohmann::json> events_;  // 루프 스레드만
+    Clock::time_point down_since_{};
 };
 
 // 워커 모듈 "tap". 장치 워커가 붙인다: host.add<video::TapModule>([&cam] { return cam.tap_defaults(); });
@@ -109,7 +112,11 @@ public:
     void configure(const worker::Json& config) override;
     void start(worker::Host& host) override;
     void on_timer(worker::TimePoint now) override {
-        if (tap_) tap_->on_timer(now);
+        if (!tap_) return;
+        tap_->on_timer(now);
+        if (host())
+            for (const auto& e : tap_->take_events())
+                host()->event(name(), e.value("severity", "notice"), e.value("code", ""), e.value("text", ""), e.value("detail", worker::Json::object()));
     }
     worker::TimePoint next_wakeup(worker::TimePoint now) const override {
         return tap_ ? tap_->next_wakeup(now) : now + std::chrono::seconds(1);

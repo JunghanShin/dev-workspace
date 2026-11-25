@@ -1,5 +1,6 @@
 #include "video/stream.hpp"
 
+#include <cmath>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -139,7 +140,13 @@ void Stream::on_readable(Clock::time_point now) {
             last_progress_ = now;
             if (!linked_) {
                 linked_ = true;
-                if (!last_error_.empty()) std::printf("stream %s: up again\n", c_.name.c_str());
+                if (!last_error_.empty()) {
+                    std::printf("stream %s: up again\n", c_.name.c_str());
+                    const double down_s = std::chrono::duration<double>(now - down_since_).count();
+                    events_.push_back({{"severity", "notice"}, {"code", "stream_up"},
+                                       {"text", "stream " + c_.name + " up again after " + std::to_string(static_cast<int>(down_s + 0.5)) + " s"},
+                                       {"detail", {{"name", c_.name}, {"down_s", std::round(down_s * 10) / 10}, {"restarts", restarts_}}}});
+                }
                 last_error_.clear();
             }
         }
@@ -177,16 +184,26 @@ void Stream::reap(Clock::time_point now) {
     failed(now, why);
 }
 
+std::vector<nlohmann::json> Stream::take_events() {
+    std::vector<nlohmann::json> out;
+    out.swap(events_);
+    return out;
+}
+
 void Stream::failed(Clock::time_point now, const std::string& why) {
     linked_ = false;
     fps_ = 0;
     samples_.clear();
     retry_at_ = now + ms(c_.retry_sec);
     ++restarts_;
-    // 같은 이유가 반복되면(카메라를 뺀 채로 둠) 로그는 한 번만
+    // 같은 이유가 반복되면(카메라를 뺀 채로 둠) 로그·이벤트는 한 번만
     if (why != last_error_) {
         std::fprintf(stderr, "stream %s: down (%s); retrying every %.1f s\n", c_.name.c_str(), why.c_str(),
                      c_.retry_sec);
+        if (last_error_.empty()) down_since_ = now;
+        events_.push_back({{"severity", "warning"}, {"code", "stream_down"}, {"text", "stream " + c_.name + " down: " + why},
+                           {"detail", {{"name", c_.name}, {"reason", why}, {"restarts", restarts_}}}});
+        if (events_.size() > 32) events_.erase(events_.begin());
         last_error_ = why;
     }
 }

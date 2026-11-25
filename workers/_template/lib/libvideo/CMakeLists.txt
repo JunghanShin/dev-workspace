@@ -6,7 +6,7 @@
 #     add_subdirectory(lib/libvideo)
 #     target_link_libraries(<워커> PRIVATE video)
 cmake_minimum_required(VERSION 3.16)
-project(libvideo VERSION 0.3.1 LANGUAGES CXX)
+project(libvideo VERSION 0.4.0 LANGUAGES CXX)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # 이 폴더에서 직접 빌드(단위 시험): 형제 사본을 쓴다(원본 틀이면 _template/lib/*)

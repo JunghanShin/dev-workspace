@@ -28,7 +28,13 @@ public:
     void configure(const worker::Json& config) override;
     void add_pollfds(std::vector<pollfd>& fds) override { streams_.add_pollfds(fds); }
     void on_poll(const std::vector<pollfd>& fds, worker::TimePoint now) override { streams_.on_poll(fds, now); }
-    void on_timer(worker::TimePoint now) override { streams_.on_timer(now); }
+    void on_timer(worker::TimePoint now) override {
+        streams_.on_timer(now);
+        // 끊김·복구 이벤트를 호스트로(스트림을 내는 모듈이 발행, libworker 0.18 Host::event)
+        if (host())
+            for (const auto& e : streams_.take_events())
+                host()->event(name(), e.value("severity", "notice"), e.value("code", ""), e.value("text", ""), e.value("detail", worker::Json::object()));
+    }
     worker::TimePoint next_wakeup(worker::TimePoint now) const override { return streams_.next_wakeup(now); }
     bool handle(const std::string& cmd, const worker::Json& args, worker::Reply reply) override;
     worker::Json status() const override { return streams_.status(); }

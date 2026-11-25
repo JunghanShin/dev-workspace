@@ -90,6 +90,10 @@ pm_->start();
 
 `CommandClient`는 허용 목록(`WORKSPACE_PEERS_FILE`)에 `entry`가 있고 상대가 입구가 아니면 명령을 `mission.send {"target", "cmd", "args"}`로 감싸 입구에 보낸다(`get_status`는 그대로). 응답은 대상 워커의 것이 그대로 온다. 모듈 코드는 바꾸지 않는다. 끄기: `Options::via_entry = false`(입구 자신), `Options::socket`을 직접 준 경우. 기다리는 동안 200 ms마다 맥박(`send_request(..., tick)`).
 
+## 모듈 이벤트 (0.18)
+
+모듈이 공통 이벤트를 내려면 `host()->event(name(), "warning", "<code>", "<글>", {detail})`(워커 루프 스레드에서만). source는 `<워커 id>.<모듈>`. 호스트 이벤트(임대 만료, 받은 칸 검사 등)와 같은 큐에 쌓이고, **스트림을 내는 모듈이 `host()->take_events()`를 자기 `events`에 붙여 발행**한다(틀 `source` 모듈이 본보기). 발행하는 모듈이 없으면 이벤트는 기록에 남지 않는다. 쓰는 곳: libvideo 0.4 `stream_down`·`stream_up`·`tap_down`·`tap_up`
+
 ## 받은 칸 실행 중 검사 (0.17, 워크스페이스 docs/input-check.md)
 
 호스트가 시작할 때 계약 `uses` 사본의 주제 스키마로 표를 만들고, `Subscriber`가 받은 주제를 주제마다 1 s에 한 번 검사한다(막지 않음). `get_status` `input_check`, 지표 `inputs_<입력>_bad`, 이벤트 `input_mismatch`(60 s에 한 번, `host()->take_events()`). 호스트 키 `input_check` `warn`(기본)·`off`, `input_check_period_s`. 스키마 검사 함수는 `worker/schema.hpp` `validate_schema`.

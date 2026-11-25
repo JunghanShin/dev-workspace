@@ -166,9 +166,21 @@ int main() {
         // 한쪽(main ffmpeg)이 끝나도 다른 쪽은 그대로, main은 다시 시작
         std::ofstream(dir + "/a/exit") << "";
         CHECK(run_until(s, 4, [&] { return st("main").value("restarts", 0) >= 1; }));
+        {  // 끊김 이벤트(libvideo 0.4)
+            auto ev = s.take_events();
+            bool down = false;
+            for (const auto& e : ev) down = down || (e["code"] == "stream_down" && e["detail"]["name"] == "main" && e["severity"] == "warning");
+            CHECK(down);
+        }
         CHECK(st("proc").value("link", "") == "up" && st("proc").value("restarts", 0) == 0);
         unlink((dir + "/a/exit").c_str());
         CHECK(run_until(s, 6, [&] { return st("main").value("link", "") == "up"; }));
+        {  // 복구 이벤트: 끊긴 시간과 함께
+            auto ev = s.take_events();
+            bool up = false;
+            for (const auto& e : ev) up = up || (e["code"] == "stream_up" && e["detail"]["name"] == "main" && e["detail"]["down_s"].get<double>() >= 0);
+            CHECK(up);
+        }
         // 명령: 끄기·켜기
         Json reply;
         CHECK(s.handle("stream_stop", {{"name", "proc"}}, &reply) && reply.value("ok", false));
