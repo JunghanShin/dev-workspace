@@ -1,7 +1,7 @@
 {
   "name": "fault",
-  "version": "1.1",
-  "description": "이상 목록(managers/fault/design.md 3·4장, 조합·단계 escalate.md). fault-manager가 낸다. 이벤트 fault_raised·fault_escalated·fault_cleared·fault_action_failed",
+  "version": "1.2",
+  "description": "이상 목록(managers/fault/design.md 3·4장, 조합·단계 escalate.md, 개발 모드 잡아 두기 docs/modes.md 3장). fault-manager가 낸다. 이벤트 fault_raised·fault_escalated·fault_cleared·fault_action_failed·fault_action_held(notice, 개발 모드에서 잡아 둔 대응: detail {fault, rule, stage, actions}). 지표 fault_held_actions(잡아 둔 대응 수)",
   "topics": {
     "fault": {
       "description": "올라간 이상. 바뀌면 바로, 그대로면 1 s",
@@ -12,10 +12,17 @@
         "active": {"type": "object", "additionalProperties": {"type": "object", "required": ["rule", "severity", "text", "since_ns", "acked", "actions"],
           "properties": {"rule": {"type": "string"}, "worker": {"type": ["string", "null"]}, "severity": {"type": "string", "enum": ["warning", "error", "critical"]},
                          "text": {"type": "string"}, "since_ns": {"type": "integer", "unit": "ns"}, "age_ms": {"type": "integer", "unit": "ms"},
-                         "acked": {"type": "boolean"}, "actions": {"type": "array"},
+                         "acked": {"type": "boolean"}, "actions": {"type": "array", "description": "대응 {target, cmd, ok, error?, stage?, held?(잡아 둠), manual?(fault.run_action으로 보냄)}"},
                          "stage": {"type": "integer", "description": "단계 대응에서 지금 단계(0 = 처음, escalate.md)"}}}},
         "counts": {"type": "object"},
-        "worst": {"type": "string", "enum": ["none", "warning", "error", "critical"]}
+        "worst": {"type": "string", "enum": ["none", "warning", "error", "critical"]},
+        "held_actions": {"type": "array", "description": "개발 모드에서 보내지 않고 잡아 둔 대응(이상·단계마다 하나, docs/modes.md 3장). 운용에서는 비어 있음. get_status fault.held_actions도 같음",
+          "items": {"type": "object", "required": ["id", "stage", "actions", "held_ns", "age_ms"],
+            "properties": {"id": {"type": "string", "description": "이상 이름"}, "stage": {"type": "integer", "description": "0 = 처음 do, n = stages[n-1].do"},
+                           "actions": {"type": "array", "items": {"type": "object", "required": ["target", "cmd", "args"],
+                             "properties": {"target": {"type": "string"}, "cmd": {"type": "string"}, "args": {"type": "object"}}}},
+                           "held_ns": {"type": "integer", "unit": "ns", "description": "잡아 둔 시각(보드 CLOCK_MONOTONIC)"},
+                           "age_ms": {"type": "integer", "unit": "ms"}}}}
       }
     }
   },
@@ -24,6 +31,13 @@
                    "reply": {"type": "object", "additionalProperties": true}, "errors": []},
     "fault.ack": {"description": "사람이 봤다는 표시(조건이 남아 있으면 이상은 그대로)", "operate": true,
                   "args": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
-                  "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request"]}
+                  "reply": {"type": "object", "additionalProperties": true}, "errors": ["bad_request"]},
+    "fault.run_action": {"description": "개발 모드에서 잡아 둔 대응을 mission에 보냄(자동 대응과 같은 mission.send, 보내면 목록에서 뺌, docs/modes.md 3장). 운용에서는 대응이 저절로 나가므로 forbidden. 잡아 둔 것이 없으면 bad_request, mission이 끊기면 unavailable(잡아 둔 것은 그대로)", "operate": true,
+                         "args": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "이상 이름"},
+                                  "stage": {"type": "integer", "minimum": 0, "description": "단계 번호(없으면 0 = 처음 do)"}}},
+                         "reply": {"type": "object", "required": ["id", "stage", "sent"],
+                                   "properties": {"id": {"type": "string"}, "stage": {"type": "integer"},
+                                                  "sent": {"type": "array", "items": {"type": "object", "properties": {"target": {"type": "string"}, "cmd": {"type": "string"}, "args": {"type": "object"}}}}}},
+                         "errors": ["bad_request", "forbidden", "unavailable"]}
   }
 }

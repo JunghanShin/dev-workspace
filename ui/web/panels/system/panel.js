@@ -98,7 +98,14 @@ function render(state, ctx) {
                 ctx.act("이상 확인", () => ctx.api("POST", `/workers/${encodeURIComponent(F.worker)}/command`,
                   { cmd: "fault.ack", args: { id: key } })) })];
       }), "올라간 이상 없음"),
-  ] : []);
+    // 잡아 둔 대응(워크스페이스는 대응을 보내지 않고 잡아 둠, docs/modes.md 3장): 하나씩 실행
+    (ft.held_actions || []).length ? table(h, ["잡아 둔 대응", "보낼 명령", "지난 시간", ""],
+      ft.held_actions.map((x) => [h("span", { class: "mono" }, `${x.id} · ${x.stage ? "단계 " + x.stage : "처음"}`),
+        h("span", { class: "mono" }, (x.actions || []).map((c) => `${c.target} ${c.cmd}`).join(", ")), ago(x.age_ms),
+        ui.iconButton({ icon: "play", title: "이 대응 보내기(fault.run_action)", onClick: () =>
+          ctx.act("대응 실행", () => ctx.api("POST", `/workers/${encodeURIComponent(F.worker)}/command`,
+            { cmd: "fault.run_action", args: { id: x.id, stage: x.stage } })) })]), "") : null,
+  ].filter(Boolean) : []);
 
   // 명령
   const mEvents = M ? M.events.filter((e) => /^command_(busy|forbidden|timeout)$/.test(e.code)).slice(-5).reverse() : [];

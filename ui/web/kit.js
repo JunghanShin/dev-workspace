@@ -401,7 +401,7 @@ export function isProduct() { return PRODUCT; }
 // 운용/개발 모드(워크스페이스 docs/command-path.md 3장): 운용 모드에서는 시작/정지·설정 저장이 막힌다.
 // 셸이 /api/auth/me의 mode로 알려 준다. 모르면(예전 게이트웨이) 막지 않는다
 let DEV = true;
-export const DEV_ONLY_TITLE = "개발 모드에서만 됩니다(워크스페이스 설정에서 켜기)";
+export const DEV_ONLY_TITLE = "제품(운용)에서는 안 됩니다. 워크스페이스에서 하세요(docs/modes.md)";
 export function setMode(mode) { DEV = mode !== "operation"; }
 export function isDevMode() { return DEV; }
 

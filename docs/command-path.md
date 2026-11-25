@@ -54,9 +54,9 @@
 | 워커 전용 명령 | 워커 정의(`io/self.json`)에만 있는 명령, **어느 계약에도 없는 명령** | 막음 | 됨 |
 | 관리 조작 | 설정·프리셋·자동 시작 바꾸기, 시작/정지, 연결 선언 바꾸기, 제품 빌드 | 막음 | 됨 |
 
-- **모드:** 운용 모드(기본) / 개발 모드. 워크스페이스 설정 화면의 토글(관리 역할만), 저장하지 않음(시작하면 운용). 바꾼 시각·사람과 그동안의 명령은 기록(원칙 17). 모드 주인은 게이트웨이, process-manager는 알림을 받아 `access_mode`로 들고 `peers.json`에 반영
+- **모드(0.79, `docs/modes.md`):** 배포 형태가 정한다. 워크스페이스 개발, 제품 묶음 운용, 실행 중 바꾸지 않음(토글·`PUT /mode` 없음, 제품 동작 미리 보기는 시작할 때 `WORKSPACE_ACCESS_MODE=operation`). 게이트웨이가 시작할 때 정해 process-manager에 알리고, process-manager는 `access_mode`로 들고 `peers.json`에 반영
 - **사용자 역할은 그대로:** 역할 명령은 `operator` 이상, 워커 전용 명령·관리 조작은 `maintainer`(design.md 6.4·`docs/gateway.md` 3장). 모드는 그 위에 더 거는 조건이다
-- **막을 때 답:** `403 {"error": {"code": "forbidden", "message": "development mode required"}, "need": "development"}`. 화면은 이 답을 "개발 모드에서만 됩니다(워크스페이스 설정에서 켜기)"로 보여 주고, 운용 모드에서는 그 버튼을 미리 흐리게 한다
+- **막을 때 답:** `403 {"error": {"code": "forbidden", "message": "development mode required"}, "need": "development"}`. 화면은 이 답을 "제품(운용)에서는 안 됩니다"로 보여 주고, 운용 모드에서는 그 버튼을 미리 흐리게 한다
 
 ## 4. 허용 목록
 

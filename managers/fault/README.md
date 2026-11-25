@@ -2,7 +2,7 @@
 
 이상 판단 매니저(기본 탑재). 설계는 `design.md`, 매니저 공통 틀은 `../../docs/managers.md`.
 
-규칙(조건 → 심각도 → 대응)으로 이상을 올리고 내린다. 조건은 워커 건강(status 주제 `system`), heartbeat 지표, 이벤트, 시스템 건강. 이상을 올릴 때 규칙의 대응(`do`)을 mission-manager에 `mission.send`로 한 번 요청한다(운용 모드에서만, 개발 모드에서는 "할 뻔한 대응"만 남김). **기본 규칙은 없다**(플랫폼은 장비를 모름). 주제 `fault`(정의 `io/fault.json`).
+규칙(조건 → 심각도 → 대응)으로 이상을 올리고 내린다. 조건은 워커 건강(status 주제 `system`), heartbeat 지표, 이벤트, 시스템 건강. 이상을 올릴 때 규칙의 대응(`do`)을 mission-manager에 `mission.send`로 한 번 요청한다(운용 모드. 개발 모드에서는 보내지 않고 잡아 둠 → `fault.run_action`으로 하나씩, `../../docs/modes.md` 3장). **기본 규칙은 없다**(플랫폼은 장비를 모름). 주제 `fault`(정의 `io/fault.json`).
 
 ## 빌드·시험
 
@@ -36,3 +36,4 @@ cmake -S managers/fault -B ~/fault-build && cmake --build ~/fault-build -j && ct
 |---|---|
 | `fault.list` | 올라간 이상(읽기) |
 | `fault.ack` | `{"id"}` 사람이 봤다는 표시(운용 조작) |
+| `fault.run_action` | `{"id", "stage"?}` 개발 모드에서 잡아 둔 대응 보내기(운용에서는 `forbidden`, `design.md` 3.1) |

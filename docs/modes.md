@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | 설계(2026-11-25), 구현 전. 9장은 초안 값(바꿀 수 있음) |
+| 상태 | 구현(2026-11-25, 0.79). 9장 초안 값대로. 제품 동작 미리 보기는 시작할 때 `WORKSPACE_ACCESS_MODE=operation`(시험·보드 확인용) |
 | 바꾸는 것 | 운용/개발 모드를 **화면 토글**에서 **배포 형태**로. 워크스페이스(개발 작업대)는 늘 개발, 제품 묶음(장비 탑재, design.md 11.4)은 늘 운용. 토글이 없어진다 |
 | 규칙 | 명령 조건·fault 대응 같은 운용 규칙은 두 곳에서 **똑같이 검사**한다. 워크스페이스는 막지 않고 "운용이었으면 막힘"을 알리고, 제품은 막는다 |
 | 바탕 | design.md 원칙 17(운용 모드 기본·개발 모드 토글, 0.40·0.55), `docs/command-path.md` 3장(명령 종류와 모드), `managers/mission/conditions.md`, `managers/fault/escalate.md`, design.md 11.4(제품 묶음) |
@@ -56,7 +56,7 @@
 
 | 어디 | 지금 | 바꾼 뒤 |
 |---|---|---|
-| 게이트웨이 | 모드를 메모리에 두고 `PUT /mode`로 바꿈, 시작하면 운용 | 시작할 때 `product`로 정함(아니면 개발). `PUT /mode` 없앰(405), `GET /mode`는 `{"mode", "fixed": true}`. process-manager에 알리는 것(`set_access_mode`, 다시 붙으면 맞춤)은 그대로 |
+| 게이트웨이 | 모드를 메모리에 두고 `PUT /mode`로 바꿈, 시작하면 운용 | 시작할 때 정함: 제품이면 운용, 아니면 `WORKSPACE_ACCESS_MODE`(기본 `development`). `PUT /mode` 없앰(405), `GET /mode`는 `{"mode", "since", "by": "workspace"|"product", "fixed": true}`. mission 응답의 `advisory`는 머리 `X-Workspace-Advisory`(오류 응답이면 본문에도). process-manager에 알리는 것(`set_access_mode`, 다시 붙으면 맞춤)은 그대로 |
 | process-manager | 게이트웨이가 알려 준 값으로 쓰기 op 검사·`peers.json` | 그대로(값이 바뀌지 않을 뿐) |
 | libworker | `peers.json` `mode`대로 명령 검사 | 그대로 |
 | mission-manager | 개발 모드면 조건 검사를 건너뜀 | 개발이면 검사하고 `advisory`를 붙여 보냄. 지표 `would_block`, 이벤트 `command_would_block`. 역할 정의 `mission` 1.3 |

@@ -339,6 +339,9 @@ class Server:
                   "WORKSPACE_MANAGER_SOCKET", "WORKSPACE_GATEWAY_SOCKET", "WORKSPACE_GATEWAY_THREADS", "WORKSPACE_GATEWAY_TCP",
                   "WORKSPACE_AUTH", "WORKSPACE_GATEWAY_CACHE"):
             e.pop(k, None)
+        # 모드는 시작할 때 정한다(docs/modes.md): 워크스페이스 기본 development. 운용 동작을 보는 시험은 dev=False
+        if not dev:
+            e.setdefault("WORKSPACE_ACCESS_MODE", "operation")
         e.update(env or {})
         cmd = [REST_BIN]
         self.log_path = os.path.join(T["tmp"], "%s-%d.log" % (name, self.port))
@@ -347,17 +350,6 @@ class Server:
         if not wait_for(self._up, START_TIMEOUT, 0.05):
             self.stop()
             raise RuntimeError("server did not start: %s" % open(self.log_path, errors="replace").read()[-2000:])
-        # 대부분의 시험은 쓰기(시작·설정·워커 명령)를 보므로 개발 모드로 시작한다(docs/command-path.md 3장).
-        # 운용 모드 동작을 보는 시험은 dev=False
-        if dev and not unix_only:
-            hdrs = {}
-            tok = AUTH_USERS_TOKEN.get(e.get("WORKSPACE_DATA"))
-            if tok and (e.get("WORKSPACE_AUTH") == "on" or e.get("WORKSPACE_PRODUCT") == "1"):
-                hdrs["Authorization"] = "Bearer " + tok
-            try:
-                self.request("PUT", "/api/mode", {"mode": "development"}, hdrs)
-            except OSError:
-                pass
 
     def _up(self):
         if self.proc.poll() is not None:
@@ -1725,7 +1717,7 @@ class AuthOn(unittest.TestCase):
         for method, path, code in (("GET", "/workers", 401), ("GET", "/api/board/system", 401), ("GET", "/api/ui", 401),
                                    ("GET", "/api/panels", 401), ("GET", "/workers/s1/stream", 401),
                                    ("POST", "/workers/w1/command", 401), ("POST", "/workers/w1/start", 401),
-                                   ("PUT", "/api/mode", 401), ("GET", "/health", 200), ("GET", "/api/board/health", 200),
+                                   ("PUT", "/api/mode", 405), ("GET", "/health", 200), ("GET", "/api/board/health", 200),
                                    ("GET", "/", 200), ("GET", "/kit.js", 200), ("GET", "/shell.css", 200)):
             with self.subTest(method=method, path=path):
                 st, _, data = srv.request(method, path, {"cmd": "x"} if method == "POST" else None)
@@ -1772,7 +1764,7 @@ class AuthOn(unittest.TestCase):
             ("POST", "/workers/w2/command", {"cmd": "x"}, "operate"), ("POST", "/api/board/workers/w2/command", {"cmd": "y"}, "operate"),
             ("POST", "/workers/w1/start", None, "maintain"), ("POST", "/workers/w1/stop", None, "maintain"),
             ("PUT", "/workers/w1/config", {"a": 1}, "maintain"), ("PUT", "/workers/w1/autostart", {"autostart": True}, "maintain"),
-            ("POST", "/workers/w1/presets", {"name": "x"}, "maintain"), ("PUT", "/api/mode", {"mode": "operation"}, "maintain"),
+            ("POST", "/workers/w1/presets", {"name": "x"}, "maintain"),
             ("GET", "/system/product-build", None, "maintain"),
         ]
         allowed = {"viewer": {"read"}, "operator": {"read", "operate"}, "maintainer": {"read", "operate", "maintain"}}
@@ -1918,54 +1910,50 @@ class AuthLimits(unittest.TestCase):
             srv.stop()
 
 
-@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(운용/개발 모드)")
+@unittest.skipUnless(REST_BIN, "C++ 게이트웨이 전용(모드)")
 class AccessMode(unittest.TestCase):
-    def test_mode(self):
+    """모드는 배포 형태가 정하고 바꾸지 않는다(docs/modes.md)"""
+
+    def test_mode_fixed(self):
         data = auth_data_dir()
-        srv = Server(auth_env(data), name="mode", dev=False)
+        srv = Server(auth_env(data), name="mode")  # 워크스페이스: development
         try:
-            m, o = Session(srv), Session(srv)
+            m = Session(srv)
             m.login("m1", PASSWORDS["m1"])
-            o.login("o1", PASSWORDS["o1"])
-            st, obj, _ = o.json("GET", "/api/mode")
-            self.assertEqual((st, obj), (200, {"mode": "operation", "since": None, "by": None}))
-            st, obj, _ = o.json("PUT", "/api/mode", {"mode": "development"})
-            self.assertEqual((st, obj["error"]["code"]), (403, "forbidden"))
-            for bad in ({"mode": "maint"}, {"mode": None}, {}, ["development"]):
-                self.assertEqual(m.json("PUT", "/api/mode", bad)[0], 400, bad)
-            n = len(T["mgr"].requests)
-            st, obj, _ = m.json("PUT", "/api/board/mode", {"mode": "development"})
-            self.assertEqual(st, 200)
-            self.assertEqual((obj["mode"], obj["by"], obj["manager"]), ("development", "m1", "ok"))
-            self.assertRegex(obj["since"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d\d:\d\d$")
-            self.assertIn({"op": "set_access_mode", "mode": "development"}, T["mgr"].requests[n:])  # process-manager에 알림
-            st, obj, _ = o.json("GET", "/api/mode")
-            self.assertEqual((obj["mode"], obj["by"]), ("development", "m1"))
-            self.assertEqual(o.json("GET", "/api/auth/me")[1]["mode"], "development")
-            self.assertEqual(m.json("DELETE", "/api/mode")[0], 405)
+            st, obj, _ = m.json("GET", "/api/mode")
+            self.assertEqual((st, obj["mode"], obj["by"], obj["fixed"]), (200, "development", "workspace", True))
+            self.assertEqual(m.json("GET", "/api/auth/me")[1]["mode"], "development")
+            for method in ("PUT", "DELETE"):
+                self.assertEqual(m.json(method, "/api/mode", {"mode": "operation"})[0], 405)
         finally:
             srv.stop()
-        # 저장하지 않음: 다시 시작하면 운용
-        srv = Server(auth_env(data), name="mode2", dev=False)
+        srv = Server(auth_env(data), name="mode2", dev=False)  # 운용(제품 동작을 미리 봄)
         try:
             s = Session(srv)
             s.login("v1", PASSWORDS["v1"])
-            self.assertEqual(s.json("GET", "/api/mode")[1], {"mode": "operation", "since": None, "by": None})
+            self.assertEqual(s.json("GET", "/api/mode")[1]["mode"], "operation")
         finally:
             srv.stop()
-        cmds = [l["cmd"] for l in log_lines(data)]
-        self.assertIn("mode:development", cmds)
+        srv = Server(dict(auth_env(data), WORKSPACE_PRODUCT="1", WORKSPACE_ACCESS_MODE="development"), name="mode3")
+        try:
+            s = Session(srv)
+            s.login("v1", PASSWORDS["v1"])
+            st, obj, _ = s.json("GET", "/api/mode")
+            self.assertEqual((obj["mode"], obj["by"]), ("operation", "product"))  # 제품은 늘 운용
+        finally:
+            srv.stop()
 
-    def test_manager_down(self):
-        """process-manager가 없어도 모드는 바뀜(manager: unreachable), 다시 붙으면 gw.mgr가 맞춤"""
+    def test_bad_mode_env(self):
+        with self.assertRaises(RuntimeError):
+            Server({"WORKSPACE_ACCESS_MODE": "maint"}, name="modebad")
+
+    def test_manager_resync(self):
+        """process-manager가 다시 떠서 운용으로 돌아가면 gw.mgr가 게이트웨이 값(development)을 다시 알림"""
         data = tempfile.mkdtemp(prefix="modemgr", dir=T["tmp"])
         path = os.path.join(data, "sub-manager.sock")
         srv = Server({"WORKSPACE_DATA": data, "WORKSPACE_MANAGER_SOCKET": path}, name="modemgr")
         try:
-            st, obj, _ = srv.json("PUT", "/api/mode", {"mode": "development"})  # 인증 꺼짐: 누구나
-            self.assertEqual((st, obj["mode"]), (200, "development"))
-            self.assertTrue(obj["manager"].startswith("unreachable"))
-            fake = SubManager(path)  # 이제 뜬 Manager는 운용 모드(다시 시작한 process-manager처럼)
+            fake = SubManager(path)  # 운용 모드로 뜬 Manager
             try:
                 self.assertTrue(wait_for(lambda: fake.count("set_access_mode") >= 1, 8))
                 with fake.lock:
@@ -2005,8 +1993,11 @@ class CommandPathModes(unittest.TestCase):
             # 없는 경로·메서드는 모드보다 먼저 404/405
             self.assertEqual(srv.json("POST", "/workers/w1/nothing")[0], 404)
             self.assertEqual(srv.json("DELETE", "/workers/w1")[0], 405)
-            # 개발 모드: 전부
-            self.assertEqual(srv.json("PUT", "/api/mode", {"mode": "development"})[0], 200)
+        finally:
+            srv.stop()
+        srv = Server(name="modes-dev")  # 개발 모드(워크스페이스 기본): 전부
+        try:
+            cmd = lambda c, wid="w2": srv.json("POST", "/workers/%s/command" % wid, {"cmd": c, "args": {}})[:2]
             self.assertEqual(cmd("diag.dump")[0], 200)
             self.assertEqual(srv.json("POST", "/workers/w1/start")[0], 202)
             n = len(T["mgr"].requests)
@@ -2077,16 +2068,15 @@ class CommandLog(unittest.TestCase):
             self.assertEqual(o.json("POST", "/workers/w1/start")[0], 403)
             m = Session(srv, token=tok)
             self.assertEqual(m.json("PUT", "/workers/w1/config?token=" + tok, {"key": "v"})[0], 403)  # 운용 모드
-            self.assertEqual(m.json("PUT", "/api/mode", {"mode": "development"})[0], 200)
-            self.assertEqual(m.json("POST", "/workers/w1/stop")[0], 202)
+            self.assertEqual(m.json("POST", "/workers/w1/stop")[0], 403)  # 운용
             self.assertEqual(srv.json("POST", "/workers/w1/start")[0], 401)
             for _ in range(3):
                 o.json("GET", "/workers")  # 읽기는 남기지 않음
             self.assertEqual(srv.request("POST", "/api/auth/logout", headers=o.headers())[0], 200)
             st, obj, _ = srv.json("GET", "/health?detail=1")
             g = obj["gateway"]
-            self.assertEqual((g["auth"], g["mode"]["mode"], g["log"]["dropped"]), ("on", "development", 0))
-            self.assertTrue(wait_for(lambda: srv.json("GET", "/health?detail=1")[1]["gateway"]["log"]["written"] >= 10, 5))
+            self.assertEqual((g["auth"], g["mode"]["mode"], g["log"]["dropped"]), ("on", "operation", 0))
+            self.assertTrue(wait_for(lambda: srv.json("GET", "/health?detail=1")[1]["gateway"]["log"]["written"] >= 9, 5))
         finally:
             srv.stop()
         lines = log_lines(data)
@@ -2101,10 +2091,9 @@ class CommandLog(unittest.TestCase):
             ("o1", "operator", "operation", "POST", "/workers/w2/command", "source.set_rate", 200),
             ("o1", "operator", "operation", "POST", "/workers/w1/start", None, 403),
             ("m1", "maintainer", "operation", "PUT", "/workers/w1/config", "set_config", 403),
-            ("m1", "maintainer", "operation", "PUT", "/api/mode", "mode:development", 200),
-            ("m1", "maintainer", "development", "POST", "/workers/w1/stop", "stop", 202),
-            ("-", "-", "development", "POST", "/workers/w1/start", None, 401),
-            ("o1", "operator", "development", "POST", "/api/auth/logout", "logout", 200),
+            ("m1", "maintainer", "operation", "POST", "/workers/w1/stop", "stop", 403),
+            ("-", "-", "operation", "POST", "/workers/w1/start", None, 401),
+            ("o1", "operator", "operation", "POST", "/api/auth/logout", "logout", 200),
         ])
         self.assertEqual({l["remote"] for l in lines}, {"127.0.0.1"})
         self.assertEqual([l["from"] for l in lines if l["cmd"] == "source.set_rate"], ["screen"])  # 세션 = 화면

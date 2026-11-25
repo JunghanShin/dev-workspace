@@ -1,6 +1,6 @@
 {
   "name": "mission",
-  "version": "1.2",
+  "version": "1.3",
   "description": "명령 입구(managers/mission/design.md 2·4장). 이 역할을 내보내는 워커가 있으면 게이트웨이가 읽기가 아닌 워커 명령을 이리로 보낸다",
   "topics": {
     "mission": {
@@ -18,12 +18,13 @@
         "forbidden": {"type": "integer", "description": "via 허락이 없어 거절한 수(external-link.md)"},
         "preempted": {"type": "integer", "description": "더 높은 우선순위에 밀려난 수(priority.md)"},
         "held": {"type": "integer", "description": "잡아 둔 역할이라 거절한 수(priority.md)"},
-        "blocked": {"type": "integer", "description": "명령 조건이 안 맞아 거절한 수(conditions.md)"}
+        "blocked": {"type": "integer", "description": "명령 조건이 안 맞아 거절한 수(conditions.md, 운용)"},
+        "would_block": {"type": "integer", "description": "개발 모드에서 조건이 안 맞았지만 보낸 수(응답에 advisory, docs/modes.md)"}
       }
     }
   },
   "commands": {
-    "mission.send": {"description": "대상 워커에 명령을 넘김. 답은 대상 워커의 응답 그대로(mission 자신의 오류: busy·timeout·unavailable·forbidden). 읽기·lease.renew는 큐를 기다리지 않음(external-link.md)",
+    "mission.send": {"description": "대상 워커에 명령을 넘김. 답은 대상 워커의 응답 그대로(mission 자신의 오류: busy·timeout·unavailable·forbidden). 개발 모드에서 명령 조건이 안 맞으면 보내고 응답 겉에 advisory {code, message, condition}(docs/modes.md). 읽기·lease.renew는 큐를 기다리지 않음(external-link.md)",
                      "operate": true,
                      "args": {"type": "object", "required": ["target", "cmd"],
                               "properties": {"target": {"type": "string"}, "cmd": {"type": "string"}, "args": {"type": "object"}}},

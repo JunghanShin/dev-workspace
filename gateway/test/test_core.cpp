@@ -495,8 +495,7 @@ void test_roles() {
         {"GET", "/system/product-build", Need::Maintain},
         {"POST", "/api/board/system/product-build", Need::Maintain},
         {"GET", "/system/product-build/download", Need::Maintain},
-        {"PUT", "/api/mode", Need::Maintain},
-        {"PUT", "/api/board/mode", Need::Maintain},
+        {"PUT", "/api/mode", Need::Open},  // 바꾸기 없음: 405(docs/modes.md)
         {"POST", "/workers/w1/command/x", Need::Maintain},  // 명령 경로가 아님(없는 경로, 쓰기로 봄)
         {"POST", "/kit.js", Need::Maintain},
     };
@@ -525,7 +524,7 @@ void test_roles() {
     CHECK(own_route("GET", "/api/auth/me/") == Own::Me);
     CHECK(own_route("POST", "/auth/logout") == Own::Logout);
     CHECK(own_route("GET", "/api/mode") == Own::ModeGet);
-    CHECK(own_route("PUT", "/api/board/mode") == Own::ModeSet);
+    CHECK(own_route("PUT", "/api/board/mode") == Own::MethodNotAllowed);
     CHECK(own_route("DELETE", "/api/mode") == Own::MethodNotAllowed);
     CHECK(own_route("GET", "/workers") == Own::None);
     CHECK(own_route("GET", "/api/board/workers") == Own::None);

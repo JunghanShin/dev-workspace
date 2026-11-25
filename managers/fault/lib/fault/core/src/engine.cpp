@@ -263,20 +263,71 @@ void Engine::raise(const std::string& key, const Rule& r, const std::string& wor
     a.severity = r.severity;
     a.text = r.text + (worker.empty() ? "" : " (" + worker + ")");
     a.since = now;
-    add_actions(a, key, r.actions, 0, operation, out);
     out.events.push_back({{"severity", r.severity}, {"code", "fault_raised"}, {"text", a.text},
                           {"detail", {{"fault", key}, {"rule", r.id}, {"worker", worker.empty() ? Json(nullptr) : Json(worker)}}}});
+    add_actions(a, key, r.actions, 0, operation, now, out);  // 잡아 둔 이벤트는 fault_raised 뒤에
     active_[key] = std::move(a);
 }
 
-void Engine::add_actions(Active& a, const std::string& key, const std::vector<Action>& acts, size_t stage, bool operation, Out& out) {
+void Engine::add_actions(Active& a, const std::string& key, const std::vector<Action>& acts, size_t stage, bool operation, int64_t now,
+                         Out& out) {
+    if (acts.empty()) return;
+    Json held = Json::array();
     for (const Action& act : acts) {
         Json e = {{"target", act.target}, {"cmd", act.cmd}, {"ok", nullptr}};
         if (stage > 0) e["stage"] = stage;
-        if (!operation) e["skipped"] = "development mode";
-        else out.sends.push_back({key, a.actions.size(), act});
+        if (operation) {
+            out.sends.push_back({key, a.actions.size(), act});
+        } else {  // 개발 모드: 보내지 않고 잡아 둠(docs/modes.md 3장)
+            e["held"] = true;
+            a.held[stage].at = now;
+            a.held[stage].actions.push_back({a.actions.size(), act});
+            held.push_back({{"target", act.target}, {"cmd", act.cmd}, {"args", act.args}});
+        }
         a.actions.push_back(e);
     }
+    if (!operation)
+        out.events.push_back({{"severity", "notice"}, {"code", "fault_action_held"},
+                              {"text", a.text + ": action held (development, fault.run_action)"},
+                              {"detail", {{"fault", key}, {"rule", a.rule}, {"stage", stage}, {"actions", held}}}});
+}
+
+bool Engine::run_held(const std::string& fault, size_t stage, std::vector<Send>* sends) {
+    auto it = active_.find(fault);
+    if (it == active_.end()) return false;
+    auto h = it->second.held.find(stage);
+    if (h == it->second.held.end()) return false;
+    for (const auto& [index, act] : h->second.actions) {
+        if (index < it->second.actions.size()) {
+            it->second.actions[index].erase("held");
+            it->second.actions[index]["manual"] = true;  // 사람이 fault.run_action으로 보냄
+        }
+        if (sends) sends->push_back({fault, index, act});
+    }
+    it->second.held.erase(h);
+    return true;
+}
+
+bool Engine::has_held(const std::string& fault, size_t stage) const {
+    auto it = active_.find(fault);
+    return it != active_.end() && it->second.held.count(stage) > 0;
+}
+
+Json Engine::held(int64_t now_ns) const {
+    Json out = Json::array();
+    for (const auto& [key, a] : active_)
+        for (const auto& [stage, h] : a.held) {
+            Json acts = Json::array();
+            for (const auto& [index, act] : h.actions) acts.push_back({{"target", act.target}, {"cmd", act.cmd}, {"args", act.args}});
+            out.push_back({{"id", key}, {"stage", stage}, {"actions", acts}, {"held_ns", h.at}, {"age_ms", (now_ns - h.at) / 1000000}});
+        }
+    return out;
+}
+
+size_t Engine::held_count() const {
+    size_t n = 0;
+    for (const auto& [key, a] : active_) n += a.held.size();
+    return n;
 }
 
 // 단계 대응: 올라간 때부터 after_s가 지난 단계마다 한 번(심각도·말을 바꾸고 그 단계 대응)
@@ -291,9 +342,9 @@ void Engine::escalate(int64_t now, bool operation, Out& out) {
             ++a.stage;
             a.severity = st.severity;
             if (!st.text.empty()) a.text = st.text + (a.worker.empty() ? "" : " (" + a.worker + ")");
-            add_actions(a, key, st.actions, a.stage, operation, out);
             out.events.push_back({{"severity", st.severity}, {"code", "fault_escalated"}, {"text", a.text},
                                   {"detail", {{"fault", key}, {"rule", a.rule}, {"stage", a.stage}}}});
+            add_actions(a, key, st.actions, a.stage, operation, now, out);
         }
     }
 }
@@ -433,7 +484,7 @@ Json Engine::snapshot(int64_t now_ns) const {
                   {"stage", a.stage}, {"actions", a.actions}};
         counts[a.severity] = counts[a.severity].get<int>() + 1;
     }
-    return {{"active", act}, {"counts", counts}, {"worst", worst()}};
+    return {{"active", act}, {"counts", counts}, {"worst", worst()}, {"held_actions", held(now_ns)}};
 }
 
 }  // namespace fault

@@ -16,7 +16,7 @@
 | 화면 파일 내주기(ui/web, 워커 패널) | nginx | 지금은 REST가 함 |
 | HTTPS, 요청 크기·접속 수·속도 제한, 압축 | nginx | 새로 |
 | 신분 확인(로그인 세션 · API 토큰)과 역할 | 게이트웨이 | 새로 |
-| 운용/개발 모드(원칙 17): 토글, 재시작하면 운용, process-manager에 알림. 운용 모드에서 막는 명령 종류는 `docs/command-path.md` 3장 | 게이트웨이 | 새로 |
+| 모드(원칙 17, 0.79 `docs/modes.md`): 시작할 때 정함(워크스페이스 개발, 제품 운용, `WORKSPACE_ACCESS_MODE`), 바꾸지 않음(`PUT /mode` 405), process-manager에 알림. 운용 모드에서 막는 명령 종류는 `docs/command-path.md` 3장. mission 응답의 `advisory`는 머리 `X-Workspace-Advisory`로 | 게이트웨이 | 새로 |
 | 전달: Manager API(워커 관리), 워커 명령, 스트림 중계(SSE), 보드 읽기(로그·기록·프로세스), 계약(`/io`) | 게이트웨이 | 지금과 같음 |
 | 명령 기록: 누가·언제·무엇을·결과(쓰기 요청 전부) | 게이트웨이(`gw.log`) | 새로 |
 | 화면 상태 요청을 캐시로 답하기: Manager 구독 하나를 유지하며 최신 워커 목록·시스템 상태를 들고 있음 | 게이트웨이 | 새로(Manager 부담 줄임) |
@@ -150,7 +150,7 @@ Python 판과 다른 점: HEAD·PATCH·OPTIONS는 JSON 501, Range 요청은 206,
 | 수락 시험 | `test_rest_accept` C++ 52(새 게이트웨이 전용 14: 인증 꺼짐 그대로, 익명 401, 로그인·로그아웃·쿠키, 역할 표(사용자 3 × 경로 16), 토큰·폐기, 사용자 파일 다시 읽기·설정 명령, 기본 반복 수, 실패 제한·X-Forwarded-For, 제품 모드 강제·사용자 없음 503, 모드·재시작·Manager 알림·Manager 없을 때 다시 맞춤, 명령 기록 줄·비밀 없음, 캐시 같은 답·멈춤·오래됨·끔), Python 35(17 건너뜀). `test_nginx_front` 8(nginx 뒤 보낸 쪽 주소). `test_manager_accept`에 `test_access_mode`(두 판) |
 | TSan | 게이트웨이·process-manager 단위 시험 경고 0, TSan 판 게이트웨이로 수락 시험 63개(`test_rest_accept`·`test_stream`·`test_nginx_front`) 통과. `dev/check.sh` 전체 통과 |
 | 캐시 효과(PC, 워커 5개 heartbeat 0.2 s, 30 s) | 화면 요청 20개/s(`/workers`·`/system`): process-manager 0.27~0.43 → 0.20%, 게이트웨이 0.43~0.50 → 0.33%. 2개/s(화면 하나)에서는 차이가 측정 잡음(0.03%) 안 |
-| 화면 | 로그인 창, 머리 배지(운용/정비·사용자·역할·로그아웃, "인증 꺼짐"), 워크스페이스 패널 모드 카드(관리 역할만 토글, 확인 창). 브라우저로 확인(PC) |
+| 화면 | 로그인 창, 머리 표시(개발·제품, 사용자·역할·로그아웃, "인증 꺼짐"), 0.79에서 모드 카드 없앰. 브라우저로 확인(PC) |
 
 Python 판과 다른 점(더한 것): 위 3장 경로 전부, `GET /health?detail=1`, 쓰기 요청 기록 파일. 제품 모드는 신분 확인이 늘 켜져 사용자 파일이 있어야 열린다(Python 판은 `WORKSPACE_REST_TOKEN`).
 

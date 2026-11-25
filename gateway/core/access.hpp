@@ -86,7 +86,7 @@ struct CommandKinds {
 CommandKinds command_kinds(const Json& io);  // io가 null(계약 없음)이면 get_status만 읽기
 
 // 게이트웨이가 직접 답하는 경로: /api/auth/{login,logout,me}, /api/mode(앞에 /api/board도, /api 없이도)
-enum class Own { None, Login, Logout, Me, ModeGet, ModeSet, MethodNotAllowed };
+enum class Own { None, Login, Logout, Me, ModeGet, MethodNotAllowed };
 Own own_route(const std::string& method, const std::string& path);
 
 // ---- 세션(메모리에만: 게이트웨이를 다시 시작하면 다시 로그인) ----

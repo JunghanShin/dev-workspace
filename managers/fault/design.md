@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | 확정·구현(2026-11-24, 0.69). 단위·통합·process-manager 수락 시험. 보드 확인(2026-11-24): 떠 있음, 이상 없음(status_lost 없음), 입력 연결을 알리지 않아 status가 degraded로 보던 것 고침(다시 확인: 시스템 ok, 입력 link true) |
+| 상태 | 확정·구현(2026-11-24, 0.69). 단위·통합·process-manager 수락 시험. 보드 확인(2026-11-24): 떠 있음, 이상 없음(status_lost 없음), 입력 연결을 알리지 않아 status가 degraded로 보던 것 고침(다시 확인: 시스템 ok, 입력 link true). 개발 모드 잡아 두기·`fault.run_action`(2026-11-25, 역할 정의 `fault` 1.2, `docs/modes.md`): 단위·통합 시험 |
 | 대상 | **이상 판단**: 규칙으로 이상을 올리고 내리며(심각도), 올릴 때 정해 둔 대응을 mission-manager에 요청한다 |
 | 실행 파일 | `bin/fault-manager`(C++, libworker 호스트 + 모듈 `fault`). 소스 `src/`, `lib/fault/` |
 | 바탕 | `docs/managers.md`(공통 틀, 요청 방향 fault → mission), `docs/layers.md` 4장(다른 매니저가 죽어도 이상 판단은 돎), 원칙 15(장치 자체 안전장치가 최후, 매니저는 시스템 수준 감독)·원칙 18(엔진은 코드, 규칙은 데이터) |
@@ -60,18 +60,30 @@
 | 확인 | `fault.ack {"id"}`: 사람이 봤다고 표시(목록에 `acked: true`). 확인해도 조건이 남아 있으면 이상은 그대로 |
 | 대응 결과 | mission 답을 이상에 붙임(`actions: [{"cmd", "ok", "error"}]`), 실패면 이벤트 `fault_action_failed` |
 
-- **대응은 운용 모드에서만.** 개발 모드에서는 "할 뻔한 대응"만 남긴다(`actions[].skipped: "development mode"`). 장비 하나씩 시험할 때 자동 대응이 끼어들지 않게(원칙 17)
+- **대응은 운용 모드에서 저절로.** 개발 모드(워크스페이스)에서는 판정·단계·심각도는 같게 돌고, 대응은 보내지 않고 잡아 둔다(3.1). 장비 하나씩 시험할 때 자동 대응이 끼어들지 않게, 그러나 규칙은 보드에서 그대로 보이게(`docs/modes.md` 3장)
 - **다시 하지 않음:** 같은 이상이 올라가 있는 동안 대응을 되풀이하지 않는다. 내렸다가 다시 올라가면 다시 한다
 - **장치 자체 안전장치가 먼저:** fault는 시스템 수준 감독이다. 빠른 보호(전원, 통신 끊김 대응)는 장치가 스스로 한다(원칙 15)
+
+### 3.1 개발 모드: 잡아 둔 대응 (`docs/modes.md` 3장)
+
+| 항목 | 내용 |
+|---|---|
+| 잡아 둠 | 올림(`do`)·단계(`stages[].do`)마다 대응을 보내지 않고 목록에 남김. 단위 = 이상 + 단계(0 = 처음 `do`, n = `stages[n-1].do`), 칸 = 대응들·잡은 시각. `do`가 없는 단계는 잡을 것 없음 |
+| 알림 | 잡을 때 한 번 이벤트 `fault_action_held`(notice, `detail {fault, rule, stage, actions}`). 이상의 `actions[]`에는 `held: true` |
+| 보임 | 주제 `fault`·`fault.list`·get_status `fault` 칸의 `held_actions: [{"id", "stage", "actions": [{"target", "cmd", "args"}], "held_ns", "age_ms"}]`, 지표 `fault_held_actions`(지금 수) |
+| 실행 | `fault.run_action {"id", "stage"?}`(stage 없으면 0): 자동 대응과 같은 길(`mission.send`)로 보내고 목록에서 뺌. 이상의 `actions[]`는 `manual: true`, 답은 자동과 같이 `ok`·`error`. 응답 `{"id", "stage", "sent": [...]}` |
+| 오류 | 잡아 둔 것 없음·틀린 인자 `bad_request`, 운용 모드 `forbidden`("actions run automatically in operation"), mission 끊김 `unavailable`(잡아 둔 것은 그대로) |
+| 지움 | 이상이 내려가면 잡아 둔 대응도 지움(다시 올라가면 다시 잡음) |
+| 운용 | 지금처럼 바로 보냄. 잡아 두지 않음 |
 
 ## 4. 내보내는 것 (ICD)
 
 | 무엇 | 내용 |
 |---|---|
-| 주제 `fault` | `{"active": {"<이상>": {"rule", "worker", "severity", "text", "since_ns", "acked", "actions": [...]}}, "counts": {"warning", "error", "critical"}, "worst": "none\|warning\|error\|critical"}`, 바뀌면 바로, 그대로면 1 s |
-| 이벤트 | `fault_raised`, `fault_cleared`, `fault_action_failed` |
-| 명령 | `fault.list`(읽기), `fault.ack {"id"}`(운용 조작) |
-| 지표 | `fault_active`, `fault_worst`(0 none … 3 critical), `fault_raised`, `fault_actions`, `fault_action_failed` |
+| 주제 `fault` | `{"active": {"<이상>": {"rule", "worker", "severity", "text", "since_ns", "acked", "stage", "actions": [...]}}, "counts": {"warning", "error", "critical"}, "worst": "none\|warning\|error\|critical", "held_actions": [...]}`, 바뀌면 바로, 그대로면 1 s. 역할 정의 `fault` 1.2 |
+| 이벤트 | `fault_raised`, `fault_escalated`, `fault_cleared`, `fault_action_failed`, `fault_action_held`(개발 모드) |
+| 명령 | `fault.list`(읽기), `fault.ack {"id"}`(운용 조작), `fault.run_action {"id", "stage"?}`(개발 모드만, 3.1) |
+| 지표 | `fault_active`, `fault_worst`(0 none … 3 critical), `fault_raised`, `fault_escalated`, `fault_actions`, `fault_action_failed`, `fault_held_actions` |
 | 입력 | `system`(status, 하나), `streams`(`many`, 이벤트), `mission`(명령 보낼 곳, 하나), process-manager 구독 |
 
 ## 5. 다른 곳에서 바꾸는 것
@@ -93,8 +105,8 @@
 
 | 무엇 | 어떻게 |
 |---|---|
-| 코어 | 단위 시험: 조건 종류별 올림·내림, `for_s`·`hold_s`(가짜 시계), 워커 글롭으로 여럿, 대응 한 번만, 개발 모드에서 대응 건너뜀, 규칙 검사 |
-| 통합 | 가짜 status 주제·가짜 mission 명령 소켓 → 건강 fault 3 s → 이상 올림·`mission.send` 한 번, 풀리면 내림 |
+| 코어 | 단위 시험: 조건 종류별 올림·내림, `for_s`·`hold_s`(가짜 시계), 워커 글롭으로 여럿, 대응 한 번만, 개발 모드에서 대응 잡아 둠·`run_held`로 꺼냄·내리면 지움, 규칙 검사 |
+| 통합 | 가짜 status 주제·가짜 mission 명령 소켓 → 건강 fault 3 s → 이상 올림·`mission.send` 한 번, 풀리면 내림, 운용에서 `fault.run_action` → `forbidden`. 개발(가짜 process-manager `access_mode: development`): 이상·단계 그대로, 보냄 없음, `held_actions` 둘·이벤트 `fault_action_held` 둘 → `run_action`으로 하나 보냄·목록에서 빠짐, 없는 것 `bad_request`, 풀리면 남은 것 지움 |
 | process-manager | 역할 `mission`을 쓰는 매니저가 mission의 `peers.json`에 `mission.send`로 들어감 |
 | 동시성 | TSan |
 
@@ -105,7 +117,7 @@
 | 1 | 기본 규칙 | 없음(플랫폼은 장비를 모름). 프로젝트가 규칙 데이터로 넣음 |
 | 2 | 조건 종류 | 워커 건강, heartbeat 지표, 이벤트, 시스템 건강. 한 규칙에 조건 하나(조합은 다음 판) |
 | 3 | 대응 | `do`의 명령을 mission-manager에 `mission.send`로(워커에 직접 안 보냄), 올릴 때 한 번 |
-| 4 | 개발 모드 | 대응은 건너뛰고 "할 뻔한 대응"만 남김. 이상 판단·목록은 그대로 |
+| 4 | 개발 모드 | 대응은 건너뛰고 "할 뻔한 대응"만 남김. 이상 판단·목록은 그대로. → 2026-11-25 바꿈: 잡아 두고 `fault.run_action`으로 실행(3.1, `docs/modes.md`) |
 | 5 | 확인(ack) | 사람이 봤다는 표시만. 조건이 남아 있으면 이상은 그대로 |
 | 6 | mission 허용 | 역할 `mission`을 쓰는 매니저는 process-manager가 mission 허용 목록에 자동으로 넣음 |
 | 7 | 이번 판에서 하지 않는 것 | 조건 조합(그리고·또는), 단계별 대응(오래가면 더 센 대응), 격리(모듈을 자동으로 끄는 것은 `do`로 payload에 요청해서 함), 화면 표시 |

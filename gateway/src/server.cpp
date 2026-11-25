@@ -169,6 +169,9 @@ Gateway::Gateway(GatewayConfig cfg)
       cache_(cfg_.manager_socket, cfg_.connect_timeout, cfg_.response_timeout),
       watch_(std::chrono::milliseconds(static_cast<long>(kStallS * 1000))),
       pool_(cfg_.threads + kPoolSpare, kPoolQueue) {
+    mode_.mode = cfg_.product ? "operation" : cfg_.access_mode;  // docs/modes.md: 제품은 늘 운용
+    mode_.since = iso_now();
+    mode_.by = cfg_.product ? "product" : "workspace";
     if (cfg_.auth_on) {
         AuthConfig ac;
         ac.users_file = cfg_.users_file.empty() ? path_join(path_join(cfg_.data_dir, "config"), "users.json") : cfg_.users_file;
@@ -500,6 +503,7 @@ Json mode_json(const Gateway::Mode& m) {
     o["mode"] = m.mode;
     o["since"] = m.since.empty() ? Json(nullptr) : Json(m.since);
     o["by"] = m.by.empty() ? Json(nullptr) : Json(m.by);
+    o["fixed"] = true;  // 바꾸는 길 없음(docs/modes.md)
     return o;
 }
 
@@ -583,17 +587,6 @@ Reply Gateway::own(Own o, const RequestView& rq, const std::function<Body()>& bo
         }
         case Own::ModeGet:
             return json_reply(200, mode_json(mode()));
-        case Own::ModeSet: {
-            Body b = body();
-            if (!b.ok) return json_error(400, "bad_request", "invalid JSON body: " + b.error);
-            const std::string m = body_str(b.value, "mode");
-            if (m != "operation" && m != "development") {
-                ctx.cmd = "mode";
-                return json_error(400, "bad_request", "body must be {\"mode\": \"operation\" | \"development\"}");
-            }
-            ctx.cmd = "mode:" + m;
-            return set_mode(m, who);
-        }
         case Own::MethodNotAllowed: {
             std::string p = starts_with(rq.path, "/api/board/") ? rq.path.substr(10) : rq.path;
             return json_error(405, "method_not_allowed", rq.method + " not allowed on " + p);
@@ -602,38 +595,6 @@ Reply Gateway::own(Own o, const RequestView& rq, const std::function<Body()>& bo
             break;
     }
     return json_error(404, "not_found", "no route " + rq.path);
-}
-
-Reply Gateway::set_mode(const std::string& m, const Identity& who) {
-    const std::string now = iso_now();
-    Mode snap;
-    bool changed;
-    {
-        std::lock_guard<std::mutex> lock(mode_mu_);
-        changed = mode_.mode != m;
-        if (changed) {
-            mode_.mode = m;
-            mode_.since = now;
-            mode_.by = who.user;
-        }
-        snap = mode_;
-    }
-    if (changed) GW_WARN("mode -> %s by %s", m.c_str(), who.user.c_str());
-    // process-manager에 알림(잠금 밖). 실패해도 모드는 바뀐 것: gw.mgr가 다시 붙을 때 맞춘다
-    std::string mgr = "ok";
-    try {
-        const Json resp = mgr_.call(Json{{"op", "set_access_mode"}, {"mode", m}});
-        if (!py_truthy(get_or(resp, "ok", Json(nullptr)))) {
-            const Json err = get_or(resp, "error", Json::object());
-            mgr = "error: " + py_str(get_or(err, "code", Json("?")));
-        }
-    } catch (const ManagerUnavailable& e) {
-        mgr = std::string("unreachable: ") + e.what();
-    }
-    if (mgr != "ok") GW_WARN("set_access_mode %s: %s", m.c_str(), mgr.c_str());
-    Json out = mode_json(snap);
-    out["manager"] = mgr;
-    return json_reply(200, out);
 }
 
 void Gateway::sync_mode(const Json& system) {
@@ -866,9 +827,19 @@ Reply Gateway::finish_command(const std::string& id, const CommandResult& r) {
         case CommandResult::Ok:
             break;
     }
-    if (py_truthy(get_or(r.reply, "ok", Json(nullptr)))) return json_reply(200, get_or(r.reply, "data", Json(nullptr)));
-    const Json& err = get_or(r.reply, "error", Json::object());
-    return json_reply(command_status(get_or(err, "code", Json(nullptr))), Json{{"error", err}});
+    // advisory(docs/modes.md 3장): mission이 "운용이었으면 막힘"을 붙이면 머리 X-Workspace-Advisory로(본문 data는 그대로)
+    const Json adv = get_or(r.reply, "advisory", Json(nullptr));
+    Reply out;
+    if (py_truthy(get_or(r.reply, "ok", Json(nullptr)))) {
+        out = json_reply(200, get_or(r.reply, "data", Json(nullptr)));
+    } else {
+        const Json& err = get_or(r.reply, "error", Json::object());
+        Json body{{"error", err}};
+        if (adv.is_object()) body["advisory"] = adv;
+        out = json_reply(command_status(get_or(err, "code", Json(nullptr))), body);
+    }
+    if (adv.is_object()) out.headers.push_back({"X-Workspace-Advisory", adv.dump(-1, ' ', true)});
+    return out;
 }
 
 std::string Gateway::mission_entry() {

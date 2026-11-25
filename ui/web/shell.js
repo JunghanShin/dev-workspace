@@ -78,19 +78,20 @@ async function logout() {
   location.reload();
 }
 
-// 머리: 운용/개발 모드 배지, 사용자(역할)·로그아웃 또는 "인증 꺼짐"
+// 머리: 개발·제품 표시(누를 것 없음), 사용자(역할)·로그아웃 또는 "인증 꺼짐"
 let whoSig = "";
 function renderWho() {
-  const sig = JSON.stringify(auth);
+  const sig = JSON.stringify([auth, state.ui && state.ui.product]);
   if (sig === whoSig) return;
   whoSig = sig;
   const modeEl = document.getElementById("mode"), whoEl = document.getElementById("who");
   modeEl.replaceChildren();
   whoEl.replaceChildren();
   if (!auth || auth.auth === "none") return;
-  if (auth.mode) {
-    const maint = auth.mode === "development";
-    modeEl.appendChild(ui.pill(maint ? "wrench" : "check", maint ? "개발" : "운용", maint ? "warn" : "ok"));
+  if (auth.mode) {  // 배포 형태 표시(docs/modes.md): 워크스페이스 "개발", 제품 "제품", 운용 미리보기 "운용"
+    const dev = auth.mode === "development";
+    const label = dev ? "개발" : state.ui && state.ui.product ? "제품" : "운용";
+    modeEl.appendChild(ui.pill(dev ? "wrench" : "check", label, dev ? "info" : "ok"));
   }
   if (auth.auth === "on" && auth.name) {
     whoEl.append(ui.pill("lock", `${auth.name} · ${ROLE_KO[auth.role] || auth.role}`, "info"),
@@ -129,6 +130,13 @@ async function api(method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   needToken(r);
+  // 워크스페이스(개발)는 명령 조건이 안 맞아도 보내고 알려 준다(docs/modes.md 3장)
+  const adv = r.headers.get("X-Workspace-Advisory");
+  if (adv) {
+    let m = adv;
+    try { m = JSON.parse(adv).message || adv; } catch { /* 그대로 */ }
+    toast("운용이었으면 막힘: " + m, "warn");
+  }
   const text = await r.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { error: { message: text } }; }
@@ -184,7 +192,7 @@ function toast(msg, kind = "") {
   t.className = "toast " + kind;
   t.textContent = msg;
   document.getElementById("toasts").appendChild(t);
-  setTimeout(() => t.remove(), kind === "bad" ? 7000 : 3500);
+  setTimeout(() => t.remove(), kind === "ok" ? 3500 : 7000);
 }
 
 // 명령 실행 + 결과 알림. 성공하면 바로 상태를 다시 읽는다

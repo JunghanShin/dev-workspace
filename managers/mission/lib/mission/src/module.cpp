@@ -306,7 +306,20 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
         send_fast(r);
         return true;
     }
-    if (auto why = check_conditions(s_.conditions, world_, r)) {  // 명령 조건(conditions.md)
+    if (auto why = check_conditions(s_.conditions, world_, r); why && world_.mode == "development") {
+        // 워크스페이스(늘 개발, docs/modes.md): 막지 않고 보내되 응답에 advisory "운용이었으면 막힘"
+        ++would_block_;
+        dirty_ = true;
+        event("notice", "command_would_block", r.target + " " + r.cmd + " from " + r.origin + ": " + *why,
+              {{"target", r.target}, {"cmd", r.cmd}, {"origin", r.origin}, {"reason", *why}});
+        std::string cond = why->rfind("condition ", 0) == 0 ? why->substr(10, why->find(':') - 10) : std::string();
+        const Json adv = {{"code", "forbidden"}, {"message", *why}, {"condition", cond}};
+        reply = [inner = std::move(reply), adv](const Json& resp) {
+            Json out = resp;
+            if (out.is_object()) out["advisory"] = adv;
+            inner(out);
+        };
+    } else if (why) {  // 명령 조건(conditions.md): 운용(제품)이면 막음
         ++blocked_;
         dirty_ = true;
         event("warning", "command_blocked", r.target + " " + r.cmd + " from " + r.origin + ": " + *why,
@@ -391,7 +404,7 @@ void Module::publish(worker::TimePoint now, bool force) {
     if (kf) next_kf_ = now + std::chrono::seconds(5);
     const Json topic = {{"t_mono_ns", mono_ns()}, {"queues", disp_->snapshot(mono_ns())}, {"sent", sent_}, {"busy", busy_},
                         {"timeouts", timeouts_}, {"unavailable", unavailable_}, {"forbidden", forbidden_},
-                        {"preempted", preempted_}, {"held", held_}, {"blocked", blocked_}};
+                        {"preempted", preempted_}, {"held", held_}, {"blocked", blocked_}, {"would_block", would_block_}};
     Json line = {{"seq", ++seq_}, {"kf", kf}, {"t", unix_s()}, {"topics", {{"mission", topic}}},
                  {"events", pending_events_}, {"events_next", 0}};
     pending_events_.clear();
@@ -413,6 +426,7 @@ void Module::metrics(worker::Metrics& m) const {
     m.set("preempted", preempted_);
     m.set("held", held_);
     m.set("blocked", blocked_);
+    m.set("would_block", would_block_);
     m.set("queues", static_cast<long long>(lanes_.size()));
     m.set("waiting", static_cast<long long>(disp_ ? disp_->waiting() : 0));
     m.set("pm_link", pm_ && pm_->connected());

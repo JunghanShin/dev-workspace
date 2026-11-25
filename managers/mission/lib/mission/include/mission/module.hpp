@@ -97,7 +97,7 @@ private:
     std::vector<Json> pending_events_;
     uint64_t next_id_ = 0, seq_ = 0, ev_seq_ = 0;
     uint64_t sent_ = 0, busy_ = 0, timeouts_ = 0, unavailable_ = 0, forbidden_ = 0, fast_sent_ = 0;
-    uint64_t preempted_ = 0, held_ = 0, blocked_ = 0;
+    uint64_t preempted_ = 0, held_ = 0, blocked_ = 0, would_block_ = 0;
     bool dirty_ = true;
     worker::TimePoint next_pub_{}, next_kf_{}, next_io_{};
 };

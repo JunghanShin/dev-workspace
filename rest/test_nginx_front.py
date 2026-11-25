@@ -43,12 +43,7 @@ class NginxFront(unittest.TestCase):
         cls.ng_log = open(os.path.join(prefix, "nginx.log"), "wb")
         cls.ng = subprocess.Popen([NGINX, "-p", prefix, "-c", conf, "-g", "daemon off;"], stdout=cls.ng_log, stderr=cls.ng_log)
         assert t.wait_for(lambda: cls._open(cls.port), 5, 0.05), "nginx did not start"
-        # 워커 명령(계약 없는 가짜 워커)을 보므로 개발 모드로(docs/command-path.md 3장)
-        import http.client
-        c = http.client.HTTPConnection("127.0.0.1", cls.port, timeout=10)
-        c.request("PUT", "/api/mode", body=json.dumps({"mode": "development"}).encode())
-        assert c.getresponse().status == 200
-        c.close()
+        # 워커 명령(계약 없는 가짜 워커)을 보는데, 워크스페이스는 늘 개발 모드(docs/modes.md)
 
     @staticmethod
     def _open(port):

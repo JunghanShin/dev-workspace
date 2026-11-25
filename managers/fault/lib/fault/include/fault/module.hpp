@@ -3,7 +3,8 @@
 // 설정 config["fault"]: rules(규칙 목록, design.md 2장). 비우면 아무것도 판단하지 않음
 // 스레드: 코어(호스트 루프, 200 ms마다 판정) · fault.sys(status 주제 system, 입력 "system") · fs.<id>(이벤트, 입력 "streams" many)
 //         · fault.pm(process-manager 구독: 지표·운용 모드) · fault.cmd(mission.send, 입력 "mission") · fault.pub
-// 명령: list(읽기), ack {"id"}(운용 조작). 지표: active, worst, raised, actions, action_failed
+// 명령: list(읽기), ack {"id"}(운용 조작), run_action {"id", "stage"?}(개발 모드에서 잡아 둔 대응 보내기, docs/modes.md 3장)
+// 지표: active, worst, raised, escalated, actions, action_failed, held_actions
 #pragma once
 
 #include <map>
@@ -42,6 +43,8 @@ private:
     void drain();
     void sync_subs();
     void evaluate();
+    void send_action(const Engine::Send& s);  // mission.send 하나(자동·run_action 같은 길)
+    bool mission_up() const;
     void event(const Json& e);  // 엔진 이벤트 → 공통 형식으로 쌓기
     void publish(worker::TimePoint now);
 

@@ -162,29 +162,37 @@ void Module::evaluate() {
         if (e.value("code", "") == "fault_escalated") ++escalated_;
         event(e);
     }
-    for (const auto& s : out.sends) {
-        ++actions_;
-        uint64_t id = 0;
-        if (mission_)
-            id = mission_->send("mission.send", {{"target", s.action.target}, {"cmd", s.action.cmd}, {"args", s.action.args}});
-        if (id == 0) {
-            ++action_failed_;
-            const Json err = {{"code", "unavailable"}, {"message", mission_ ? "command queue full" : "no mission input"}};
-            engine_->action_result(s.fault, s.index, false, err);
-            event({{"severity", "warning"}, {"code", "fault_action_failed"}, {"text", s.fault + ": action failed"},
-                   {"detail", {{"fault", s.fault}, {"error", err}}}});
-            continue;
-        }
-        sent_[id] = {s.fault, s.index};
+    for (const auto& s : out.sends) send_action(s);
+}
+
+// 대응 하나를 mission에 mission.send로(자동 대응·fault.run_action이 같이 씀). 결과는 drain에서 이상에 붙임
+void Module::send_action(const Engine::Send& s) {
+    ++actions_;
+    uint64_t id = 0;
+    if (mission_) id = mission_->send("mission.send", {{"target", s.action.target}, {"cmd", s.action.cmd}, {"args", s.action.args}});
+    if (id == 0) {
+        ++action_failed_;
+        const Json err = {{"code", "unavailable"}, {"message", mission_ ? "command queue full" : "no mission input"}};
+        engine_->action_result(s.fault, s.index, false, err);
+        event({{"severity", "warning"}, {"code", "fault_action_failed"}, {"text", s.fault + ": action failed"},
+               {"detail", {{"fault", s.fault}, {"error", err}}}});
+        return;
     }
+    sent_[id] = {s.fault, s.index};
+    dirty_ = true;
+}
+
+bool Module::mission_up() const {
+    if (!mission_ || !host_) return false;
+    const worker::InputAddress* in = host_->uses("mission");
+    return mission_->reachable() || (in && ::access(in->command.c_str(), F_OK) == 0);
 }
 
 void Module::on_timer(worker::TimePoint now) {
     // 입력 연결 알리기(지표 inputs_<입력>_link). mission은 명령 소켓이 있으면 붙은 것으로(명령은 요청마다 연결)
     if (host_) {
         if (host_->uses("system")) host_->input_link("system", sys_ && sys_->connected());
-        if (const worker::InputAddress* in = host_->uses("mission"))
-            host_->input_link("mission", mission_ && (mission_->reachable() || ::access(in->command.c_str(), F_OK) == 0));
+        if (host_->uses("mission")) host_->input_link("mission", mission_up());
     }
     if (now >= next_sync_) {
         sync_subs();
@@ -233,12 +241,50 @@ bool Module::handle(const std::string& cmd, const worker::Json& args, worker::Re
         reply(worker::ok_reply({{"id", id}, {"acked", true}}));
         return true;
     }
+    if (cmd == "run_action") {  // 잡아 둔 대응 보내기(개발 모드만, docs/modes.md 3장)
+        if (access_mode_ != "development") {
+            reply(worker::error_reply("forbidden", "actions run automatically in operation"));
+            return true;
+        }
+        if (!args.is_object() || !args.contains("id") || !args["id"].is_string()) {
+            reply(worker::error_reply("bad_request", "args need \"id\" (fault id)"));
+            return true;
+        }
+        const std::string id = args["id"].get<std::string>();
+        size_t stage = 0;
+        if (args.contains("stage")) {
+            if (!args["stage"].is_number_integer() || args["stage"].get<long long>() < 0) {
+                reply(worker::error_reply("bad_request", "stage must be an integer >= 0"));
+                return true;
+            }
+            stage = args["stage"].get<size_t>();
+        }
+        if (!engine_->has_held(id, stage)) {
+            reply(worker::error_reply("bad_request", "no held action for " + id + " stage " + std::to_string(stage)));
+            return true;
+        }
+        if (!mission_up()) {  // 잡아 둔 것은 그대로(다시 붙으면 다시 실행)
+            reply(worker::error_reply("unavailable", mission_ ? "mission not reachable" : "no mission input"));
+            return true;
+        }
+        std::vector<Engine::Send> sends;
+        engine_->run_held(id, stage, &sends);
+        Json sent = Json::array();
+        for (const auto& s : sends) {
+            send_action(s);
+            sent.push_back({{"target", s.action.target}, {"cmd", s.action.cmd}, {"args", s.action.args}});
+        }
+        dirty_ = true;
+        reply(worker::ok_reply({{"id", id}, {"stage", stage}, {"sent", sent}}));
+        return true;
+    }
     return false;
 }
 
 worker::Json Module::status() const {
     return {{"rules", rules_.size()}, {"active", engine_ ? engine_->active() : 0}, {"worst", engine_ ? engine_->worst() : "none"},
-            {"access_mode", access_mode_}, {"mission_link", mission_ != nullptr}, {"status_link", sys_ && sys_->connected()}};
+            {"access_mode", access_mode_}, {"mission_link", mission_ != nullptr}, {"status_link", sys_ && sys_->connected()},
+            {"held_actions", engine_ ? engine_->held(mono_ns()) : Json::array()}};
 }
 
 void Module::metrics(worker::Metrics& m) const {
@@ -248,6 +294,7 @@ void Module::metrics(worker::Metrics& m) const {
     m.set("escalated", escalated_);
     m.set("actions", actions_);
     m.set("action_failed", action_failed_);
+    m.set("held_actions", static_cast<long long>(engine_ ? engine_->held_count() : 0));
     m.set("pm_link", pm_ && pm_->connected());
 }
 

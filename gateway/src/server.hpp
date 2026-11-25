@@ -57,6 +57,7 @@ struct GatewayConfig {
     bool record = true;          // 명령 기록(데이터 폴더가 있을 때)
     bool cache = true;           // Manager 캐시(gw.mgr)
     bool ui_enabled = true, product = false;
+    std::string access_mode = "development";  // 시작할 때 정함, 바꾸지 않음(docs/modes.md). 제품이면 늘 operation
     UiConfig ui;
     double io_timeout = 5.0;     // HTTP 읽기·쓰기 상한(느린 클라이언트가 스레드를 붙잡지 못하게)
     double ping_s = 15.0;
@@ -118,9 +119,9 @@ public:
     // 요청 단계(시험에서도 부름). body: 본문을 읽는 함수(필요할 때만 부름)
     Reply handle(const RequestView& rq, const std::function<Body()>& body, const std::string& remote);
 
-    // 운용/정비 모드(원칙 17): 게이트웨이가 주인. 메모리에만(시작하면 운용)
+    // 모드(docs/modes.md): 배포 형태가 정한다. 워크스페이스 development, 제품 operation. 실행 중 바꾸지 않음
     struct Mode {
-        std::string mode = "operation", since, by;
+        std::string mode = "development", since, by;
     };
     Mode mode();
 
@@ -143,7 +144,6 @@ private:
                    const Identity& who, Ctx& ctx);
     Reply own(Own o, const RequestView& rq, const std::function<Body()>& body, const std::string& remote,
               const Identity& who, Ctx& ctx);
-    Reply set_mode(const std::string& m, const Identity& who);
     void sync_mode(const Json& system);  // gw.mgr: Manager가 다른 모드를 들고 있으면 다시 알림
     Reply forward(const RequestView& rq, const std::function<Body()>& body, Ctx& ctx);
     Reply manager_op(const Route& r, const std::function<Body()>& body);

@@ -1,4 +1,4 @@
-// fault 코어 단위 시험: 조건별 올림·내림, for_s·hold_s, 워커마다, 대응 한 번, 개발 모드 건너뜀, status_lost, ack, 규칙 검사
+// fault 코어 단위 시험: 조건별 올림·내림, for_s·hold_s, 워커마다, 대응 한 번, 개발 모드 잡아 두기·run_held, status_lost, ack, 규칙 검사
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -56,8 +56,58 @@ static void test_dev_mode_and_many() {
       {"id": "any", "when": {"health": {"worker": "cam*", "is": "fault"}}, "do": [{"target": "t", "cmd": "c"}]}])")));
     e.set_system(sys("degraded", "fault", "fault"), 0);
     auto o = e.tick(0, false);  // 개발 모드
-    CHECK(o.events.size() == 2 && o.sends.empty());  // 워커마다 따로, 대응은 건너뜀
-    CHECK(e.snapshot(0)["active"]["any:cam2"]["actions"][0]["skipped"] == "development mode");
+    CHECK(o.events.size() == 4 && o.sends.empty());  // 워커마다 따로(raised·held 둘씩), 대응은 잡아 둠
+    CHECK(e.snapshot(0)["active"]["any:cam2"]["actions"][0]["held"] == true);
+    CHECK(e.held_count() == 2);
+}
+
+// 개발 모드 잡아 두기(docs/modes.md 3장): 이상·단계는 같게, 대응은 안 보내고 잡아 둠 → run_held로 보냄, 내리면 지움
+static void test_held() {
+    fault::Engine e(fault::parse_rules(Json::parse(R"([
+      {"id": "cam", "when": {"health": {"worker": "cam1", "is": "fault"}}, "severity": "warning",
+       "do": [{"target": "payload-manager", "cmd": "payload.restart", "args": {"module": "cam1"}},
+              {"target": "payload-manager", "cmd": "payload.log"}],
+       "stages": [{"after_s": 5, "severity": "error",
+                   "do": [{"target": "payload-manager", "cmd": "payload.power", "args": {"module": "cam1", "on": false}}]},
+                  {"after_s": 20, "severity": "critical"}]}])")));
+    e.set_system(sys("degraded", "fault"), 0);
+    auto o = e.tick(0, false);
+    CHECK(o.sends.empty() && e.active() == 1 && e.worst() == "warning");
+    CHECK(o.events.size() == 2 && o.events[0]["code"] == "fault_raised" && o.events[1]["code"] == "fault_action_held");
+    CHECK(o.events[1]["severity"] == "notice" && o.events[1]["detail"]["fault"] == "cam:cam1" && o.events[1]["detail"]["stage"] == 0);
+    CHECK(o.events[1]["detail"]["actions"].size() == 2 && o.events[1]["detail"]["actions"][0]["cmd"] == "payload.restart");
+    CHECK(o.events[1]["detail"]["actions"][0]["args"]["module"] == "cam1");
+    CHECK(e.tick(1 * S, false).events.empty());  // 잡아 둔 것을 다시 알리지 않음
+    Json h = e.held(2 * S);
+    CHECK(h.size() == 1 && h[0]["id"] == "cam:cam1" && h[0]["stage"] == 0 && h[0]["actions"].size() == 2 && h[0]["age_ms"] == 2000);
+    CHECK(e.snapshot(2 * S)["held_actions"].size() == 1);
+    // 단계는 그대로 오르고 그 단계 대응도 잡아 둠(단계 2는 do가 없어 잡을 것 없음)
+    o = e.tick(5 * S, false);
+    CHECK(o.sends.empty() && e.worst() == "error" && e.held_count() == 2);
+    CHECK(o.events.size() == 2 && o.events[0]["code"] == "fault_escalated" && o.events[1]["code"] == "fault_action_held");
+    CHECK(o.events[1]["detail"]["stage"] == 1);
+    o = e.tick(20 * S, false);
+    CHECK(o.events.size() == 1 && e.worst() == "critical" && e.held_count() == 2);
+    // 보내기: 없는 것은 false, 있는 것은 sends(actions 칸 번호 그대로) + 목록에서 빠짐
+    std::vector<fault::Engine::Send> sends;
+    CHECK(!e.run_held("nope", 0, &sends) && !e.run_held("cam:cam1", 2, &sends) && sends.empty());
+    CHECK(e.has_held("cam:cam1", 1) && !e.has_held("cam:cam1", 2));
+    CHECK(e.run_held("cam:cam1", 1, &sends));
+    CHECK(sends.size() == 1 && sends[0].action.cmd == "payload.power" && sends[0].index == 2 && sends[0].fault == "cam:cam1");
+    CHECK(!e.run_held("cam:cam1", 1, &sends) && e.held_count() == 1);
+    auto snap = e.snapshot(21 * S);
+    CHECK(!snap["active"]["cam:cam1"]["actions"][2].contains("held") && snap["active"]["cam:cam1"]["actions"][2]["manual"] == true);
+    CHECK(snap["active"]["cam:cam1"]["actions"][0]["held"] == true);
+    e.action_result("cam:cam1", 2, true, Json());
+    CHECK(e.snapshot(21 * S)["active"]["cam:cam1"]["actions"][2]["ok"] == true);
+    // 내리면 잡아 둔 것도 지움
+    e.set_system(sys("ok", "ok"), 22 * S);
+    e.tick(22 * S, false);
+    CHECK(e.active() == 0 && e.held_count() == 0 && e.held(22 * S).empty());
+    // 운용: 바로 보내고 잡아 두지 않음
+    e.set_system(sys("degraded", "fault"), 30 * S);
+    o = e.tick(30 * S, true);
+    CHECK(o.sends.size() == 2 && e.held_count() == 0 && o.events.size() == 1);
 }
 
 static void test_metric_event_system() {
@@ -190,7 +240,7 @@ static void test_stages() {
     e.tick(40 * S, false);
     o = e.tick(46 * S, false);
     CHECK(o.sends.empty() && e.snapshot(46 * S)["active"]["cam:cam1"]["stage"] == 1);
-    CHECK(e.snapshot(46 * S)["active"]["cam:cam1"]["actions"][1]["skipped"] == "development mode");
+    CHECK(e.snapshot(46 * S)["active"]["cam:cam1"]["actions"][1]["held"] == true);
 }
 
 static void test_rules_v2() {
@@ -220,6 +270,7 @@ int main() {
     test_rules_v2();
     test_health_rule();
     test_dev_mode_and_many();
+    test_held();
     test_metric_event_system();
     test_status_lost();
     test_rules();

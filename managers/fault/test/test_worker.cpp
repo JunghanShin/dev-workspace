@@ -1,8 +1,9 @@
 // fault-manager 통합 시험: 실제 실행 파일을 가짜 status 주제(system)와 가짜 mission 명령 소켓에 붙인다.
 //   1) cam1 건강 fault가 for_s(1 s) 넘게 이어짐 → 이상 올림, mission.send 한 번(대응), fault.list에 보임
 //   2) fault.ack → acked
-//   3) 건강이 ok로 → 이상 내림
-//   4) 잘못된 규칙 → exit 1
+//   3) 건강이 ok로 → 이상 내림. 운용에서 fault.run_action → forbidden
+//   4) 개발 모드(가짜 process-manager): 대응 잡아 둠(held_actions·fault_action_held), fault.run_action으로 보냄, 내리면 지움
+//   5) 잘못된 규칙 → exit 1
 //
 //   test_worker [에뮬레이터...] <fault-manager 경로>
 #include <poll.h>
@@ -201,6 +202,10 @@ static void test_fault() {
     CHECK(r.value("ok", false));
     r = cmd(sock, {{"cmd", "fault.ack"}, {"args", {{"id", "nope"}}}});
     CHECK(r.contains("error") && r["error"]["code"] == "bad_request");
+    // 운용: 대응은 저절로 나감, 잡아 둔 것 없음, run_action은 forbidden
+    CHECK(stj.value("ok", false) && stj["data"]["fault"]["held_actions"].empty());
+    r = cmd(sock, {{"cmd", "fault.run_action"}, {"args", {{"id", "cam_lost:cam1"}}}});
+    CHECK(r.contains("error") && r["error"]["code"] == "forbidden");
     // 풀림 → 내림
     cam_fault = 0;
     bool cleared = false;
@@ -219,6 +224,153 @@ static void test_fault() {
     close(mfd);
 }
 
+// 개발 모드(docs/modes.md 3장): 가짜 process-manager가 access_mode development를 알림
+//   이상·단계는 올라가되 mission.send는 없음, held_actions·fault_action_held → fault.run_action으로 하나씩 보냄
+static void test_dev() {
+    const std::string data = g_dir + "/dev", st = g_dir + "/dst.sock", ms = g_dir + "/dms.sock", pm = g_dir + "/dpm.sock",
+                      inputs = g_dir + "/din.json";
+    (void)!std::system(("mkdir -p " + data + "/run/cmd " + data + "/run/stream").c_str());
+    std::atomic<bool> stop{false};
+    std::atomic<int> cam_fault{1};
+    const int sfd = listen_unix(st);
+    std::thread status([&] {
+        while (!stop) {
+            pollfd p{sfd, POLLIN, 0};
+            if (poll(&p, 1, 50) <= 0) continue;
+            const int c = accept4(sfd, nullptr, nullptr, SOCK_CLOEXEC);
+            while (!stop) {
+                const std::string h = cam_fault ? "fault" : "ok";
+                send_line(c, Json{{"seq", 1}, {"kf", true}, {"t", 1},
+                                  {"topics", {{"system", {{"health", "degraded"}, {"workers", {{"cam1", {{"health", h}}}}}}}}}}.dump());
+                std::this_thread::sleep_for(200ms);
+            }
+            close(c);
+        }
+    });
+    // 가짜 process-manager: subscribe에 ok, 그 뒤 0.2 s마다 system(access_mode development)
+    const int pfd = listen_unix(pm);
+    std::thread manager([&] {
+        while (!stop) {
+            pollfd p{pfd, POLLIN, 0};
+            if (poll(&p, 1, 50) <= 0) continue;
+            const int c = accept4(pfd, nullptr, nullptr, SOCK_CLOEXEC);
+            (void)read_line(c, 3000);
+            send_line(c, R"({"ok":true})");
+            while (!stop) {
+                send_line(c, R"({"event":"system","data":{"access_mode":"development"}})");
+                std::this_thread::sleep_for(200ms);
+            }
+            close(c);
+        }
+    });
+    std::mutex mu;
+    std::vector<Json> got;
+    const int mfd = listen_unix(ms);
+    std::thread mission([&] {
+        while (!stop) {
+            pollfd p{mfd, POLLIN, 0};
+            if (poll(&p, 1, 50) <= 0) continue;
+            const int c = accept4(mfd, nullptr, nullptr, SOCK_CLOEXEC);
+            const Json req = Json::parse(read_line(c, 3000), nullptr, false);
+            {
+                std::lock_guard<std::mutex> lock(mu);
+                got.push_back(req);
+            }
+            send_line(c, R"({"ok":true,"data":{"done":true}})");
+            close(c);
+        }
+    });
+    std::ofstream(inputs) << Json{{"inputs", {{"system", {{"stream", st}}}, {"mission", {{"command", ms}}}}}}.dump();
+    const std::string rules = R"([{"id":"cam_lost","when":{"health":{"worker":"cam*","is":["fault"]}},"for_s":0.5,"severity":"error",
+                                   "do":[{"target":"payload-manager","cmd":"payload.power","args":{"module":"cam1","on":true}}],
+                                   "stages":[{"after_s":1,"severity":"critical","do":[{"target":"payload-manager","cmd":"payload.stop","args":{"module":"cam1"}}]}]}])";
+    const pid_t pid = spawn(R"({"id":"fault-manager","config_version":1,"config":{"fault":{"rules":)" + rules + "}}}",
+                            {{"WORKSPACE_DATA", data}, {"WORKSPACE_MANAGER_SOCKET", pm}, {"WORKSPACE_INPUTS_FILE", inputs}});
+    const std::string sock = data + "/run/cmd/fault-manager.sock";
+    // 이상이 올라가고 단계 1(critical)까지 감, 잡아 둔 대응 둘(단계 0·1)
+    Json stj;
+    for (int i = 0; i < 150; ++i) {
+        stj = cmd(sock, {{"cmd", "get_status"}, {"args", Json::object()}});
+        if (stj.value("ok", false) && stj["data"]["fault"]["held_actions"].size() == 2) break;
+        std::this_thread::sleep_for(100ms);
+    }
+    CHECK(stj.value("ok", false) && stj["data"]["fault"]["access_mode"] == "development");
+    CHECK(stj.value("ok", false) && stj["data"]["fault"]["held_actions"].size() == 2);
+    if (stj.value("ok", false) && stj["data"]["fault"]["held_actions"].size() == 2) {
+        const Json& h = stj["data"]["fault"]["held_actions"];
+        CHECK(h[0]["id"] == "cam_lost:cam1" && h[0]["stage"] == 0 && h[0]["actions"][0]["cmd"] == "payload.power");
+        CHECK(h[1]["stage"] == 1 && h[1]["actions"][0]["cmd"] == "payload.stop" && h[1].contains("age_ms"));
+    }
+    Json list = cmd(sock, {{"cmd", "fault.list"}, {"args", Json::object()}});
+    CHECK(list.value("ok", false) && list["data"]["worst"] == "critical" && list["data"]["held_actions"].size() == 2);
+    CHECK(list.value("ok", false) && list["data"]["active"]["cam_lost:cam1"]["actions"][0]["held"] == true);
+    // 이벤트 fault_action_held: 스트림에서 단계마다 한 번
+    {
+        const int fd = connect_unix(data + "/run/stream/fault-manager.sock");
+        int held = 0;
+        const auto until = std::chrono::steady_clock::now() + 3s;
+        while (fd >= 0 && std::chrono::steady_clock::now() < until && held < 2) {
+            const Json line = Json::parse(read_line(fd, 1500), nullptr, false);
+            if (!line.is_object() || !line.contains("events")) continue;
+            for (const auto& e : line["events"])
+                if (e.value("code", "") == "fault_action_held") {
+                    ++held;
+                    CHECK(e["severity"] == "notice" && e["detail"]["actions"].size() == 1);
+                }
+        }
+        if (fd >= 0) close(fd);
+        CHECK(held == 2);
+    }
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        CHECK(got.empty());  // 개발: 저절로 보내지 않음
+    }
+    // run_action: 없는 것 bad_request, 잘못된 stage bad_request, 있는 것은 보내고 목록에서 뺌
+    Json r = cmd(sock, {{"cmd", "fault.run_action"}, {"args", {{"id", "nope"}}}});
+    CHECK(r.contains("error") && r["error"]["code"] == "bad_request");
+    r = cmd(sock, {{"cmd", "fault.run_action"}, {"args", {{"id", "cam_lost:cam1"}, {"stage", 5}}}});
+    CHECK(r.contains("error") && r["error"]["code"] == "bad_request");
+    r = cmd(sock, {{"cmd", "fault.run_action"}, {"args", {{"id", "cam_lost:cam1"}, {"stage", "x"}}}});
+    CHECK(r.contains("error") && r["error"]["code"] == "bad_request");
+    r = cmd(sock, {{"cmd", "fault.run_action"}, {"args", {{"id", "cam_lost:cam1"}, {"stage", 1}}}});
+    CHECK(r.value("ok", false) && r["data"]["stage"] == 1 && r["data"]["sent"].size() == 1 && r["data"]["sent"][0]["cmd"] == "payload.stop");
+    r = cmd(sock, {{"cmd", "fault.run_action"}, {"args", {{"id", "cam_lost:cam1"}, {"stage", 1}}}});
+    CHECK(r.contains("error") && r["error"]["code"] == "bad_request");  // 한 번 보내면 빠짐
+    std::this_thread::sleep_for(500ms);
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        CHECK(got.size() == 1 && got[0]["cmd"] == "mission.send" && got[0]["args"]["cmd"] == "payload.stop" &&
+              got[0]["args"]["args"]["module"] == "cam1");
+    }
+    list = cmd(sock, {{"cmd", "fault.list"}, {"args", Json::object()}});
+    CHECK(list.value("ok", false) && list["data"]["held_actions"].size() == 1 && list["data"]["held_actions"][0]["stage"] == 0);
+    CHECK(list.value("ok", false) && list["data"]["active"]["cam_lost:cam1"]["actions"][1]["ok"] == true);
+    // 풀림 → 이상과 남은 잡아 둔 대응(단계 0)을 지움
+    cam_fault = 0;
+    bool cleared = false;
+    for (int i = 0; i < 50 && !cleared; ++i) {
+        stj = cmd(sock, {{"cmd", "get_status"}, {"args", Json::object()}});
+        cleared = stj.value("ok", false) && stj["data"]["fault"]["active"] == 0 && stj["data"]["fault"]["held_actions"].empty();
+        std::this_thread::sleep_for(100ms);
+    }
+    CHECK(cleared);
+    r = cmd(sock, {{"cmd", "fault.run_action"}, {"args", {{"id", "cam_lost:cam1"}}}});
+    CHECK(r.contains("error") && r["error"]["code"] == "bad_request");
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        CHECK(got.size() == 1);
+    }
+    kill(pid, SIGTERM);
+    CHECK(wait_exit(pid, 15000) == 0);
+    stop = true;
+    status.join();
+    manager.join();
+    mission.join();
+    close(sfd);
+    close(pfd);
+    close(mfd);
+}
+
 static void test_bad_config() {
     CHECK(wait_exit(spawn(R"({"id":"fault-manager","config":{"fault":{"nope":1}}})", {}), 15000) == 1);
     CHECK(wait_exit(spawn(R"({"id":"fault-manager","config":{"fault":{"rules":[{"id":"a","when":{}}]}}})", {}), 15000) == 1);
@@ -234,6 +386,7 @@ int main(int argc, char** argv) {
     g_dir = mkdtemp(tmpl);
     signal(SIGPIPE, SIG_IGN);
     test_fault();
+    test_dev();
     test_bad_config();
     (void)!std::system(("rm -rf " + g_dir).c_str());
     if (failures) {

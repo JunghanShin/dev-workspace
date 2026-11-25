@@ -137,7 +137,7 @@ read_kv() {
 
 # 실행 설정. 경로 관련 키는 받지 않는다(이 스크립트가 데이터 폴더 기준으로 정한다)
 read_kv "$DATA/config/workspace.env" WORKSPACE_REST_BIND WORKSPACE_REST_PORT WORKSPACE_REST_COMMAND_TIMEOUT WORKSPACE_UI_MEDIA_URL WORKSPACE_UI_TITLE WORKSPACE_LOG_LEVEL \
-  WORKSPACE_REST_TOKEN WORKSPACE_UI WORKSPACE_AUTH WORKSPACE_GATEWAY_CACHE
+  WORKSPACE_REST_TOKEN WORKSPACE_UI WORKSPACE_AUTH WORKSPACE_GATEWAY_CACHE WORKSPACE_ACCESS_MODE
 
 # ---- 2. 보드 상태 수집, 네트워크, 워커 준비 (root) -----------------------------------
 # tegrastats는 root로 돌려야 EMC·NVENC·VIC·DLA 항목이 나온다. 최신 한 줄을 sysmon이 읽는다.

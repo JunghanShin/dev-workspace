@@ -1,7 +1,8 @@
 // 이상 판단 엔진(managers/fault/design.md 2·3장). 시스템 호출·시계를 모른다(시각은 인자로).
 //
 //   규칙: 조건 하나(health | metric | event | system) → 심각도 → 대응(do: mission.send로 보낼 명령들)
-//   올림: 조건이 for_s 넘게 이어짐(event는 받는 즉시, hold_s 지나면 내림). 올릴 때 대응 한 번(운용 모드에서만)
+//   올림: 조건이 for_s 넘게 이어짐(event는 받는 즉시, hold_s 지나면 내림). 올릴 때 대응 한 번
+//   개발 모드(docs/modes.md 3장): 판정·단계는 같고 대응은 보내지 않고 잡아 둠(이상·단계마다 하나, run_held로 보냄, 내리면 지움)
 //   워커 글롭에 여럿이 맞으면 워커마다 따로(이상 이름 "<규칙>:<워커>")
 //   status가 3 s 넘게 끊기면 이상 status_lost(warning)를 스스로 올림
 //   조합·단계(managers/fault/escalate.md): when {"all"|"any": [조건...]}(중첩, 시스템 전체로 한 번 판정, 이름 = 규칙 id),
@@ -72,11 +73,16 @@ public:
         Action action;
     };
     struct Out {
-        std::vector<Json> events;  // fault_raised·fault_cleared(공통 이벤트 형식의 code·severity·text·detail)
+        std::vector<Json> events;  // fault_raised·fault_escalated·fault_cleared·fault_action_held(공통 이벤트 형식의 code·severity·text·detail)
         std::vector<Send> sends;   // 지금 보낼 대응
     };
-    // 판정. operation: 운용 모드면 대응을 보냄, 아니면 skipped로 남김
+    // 판정. operation: 운용 모드면 대응을 보냄, 아니면 잡아 둠(held, 이벤트 fault_action_held)
     Out tick(int64_t now_ns, bool operation);
+    // 잡아 둔 대응(이상 fault, 단계 stage: 0 = 처음 do, n = stages[n-1].do)을 꺼내 sends에 붙임. 없으면 false
+    bool run_held(const std::string& fault, size_t stage, std::vector<Send>* sends);
+    bool has_held(const std::string& fault, size_t stage) const;
+    Json held(int64_t now_ns) const;  // [{"id", "stage", "actions": [{"target", "cmd", "args"}], "held_ns", "age_ms"}]
+    size_t held_count() const;
     void action_result(const std::string& fault, size_t index, bool ok, const Json& error);
     bool ack(const std::string& fault);
 
@@ -91,11 +97,17 @@ private:
         bool acked = false;
         size_t stage = 0;  // 0 = 처음, n = stages[n-1]까지 감
         Json actions = Json::array();
+        struct Hold {
+            int64_t at = 0;
+            std::vector<std::pair<size_t, Action>> actions;  // (actions 칸 번호, 대응)
+        };
+        std::map<size_t, Hold> held;  // 단계 → 잡아 둔 대응(개발 모드)
     };
     enum class Tri { False, True, Unknown };
     void raise(const std::string& key, const Rule& r, const std::string& worker, int64_t now, bool operation, Out& out);
     void clear(const std::string& key, Out& out);
-    void add_actions(Active& a, const std::string& key, const std::vector<Action>& acts, size_t stage, bool operation, Out& out);
+    void add_actions(Active& a, const std::string& key, const std::vector<Action>& acts, size_t stage, bool operation, int64_t now,
+                     Out& out);
     void escalate(int64_t now, bool operation, Out& out);
     Tri eval(const Rule& r, const Condition& c, int64_t now) const;
     void note_event(const Rule& r, const Condition& c, const std::string& src, const std::string& code, int64_t now);

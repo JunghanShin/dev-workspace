@@ -10,7 +10,7 @@ target_link_libraries(fault_module PUBLIC fault_core worker)
 target_compile_options(fault_module PRIVATE -Wall -Wextra -Wpedantic)
 
 if(BUILD_TESTING)
-    # 유닛 시험: 조건별 올림·내림, for_s·hold_s, 워커마다, 대응 한 번, 개발 모드 건너뜀, status_lost, 규칙 검사
+    # 유닛 시험: 조건별 올림·내림, for_s·hold_s, 워커마다, 대응 한 번, 개발 모드 잡아 두기, status_lost, 규칙 검사
     add_executable(test_fault_core test/test_core.cpp)
     target_link_libraries(test_fault_core PRIVATE fault_core)
     target_compile_options(test_fault_core PRIVATE -Wall -Wextra)

@@ -91,7 +91,7 @@ core는 워커의 모듈 코어처럼 시스템 호출을 모른다(시계·spaw
 | 명령하는 곳 | `connections.json`의 `commanders`(0.55, `docs/command-path.md` 4.1): 역할마다 명령해도 되는 곳 목록(화면은 늘 허용, 한 역할에 여럿 가능, 조정은 매니저). 검사·op `get_connections`·`set_connections` |
 | 소켓 접근 허용 목록 | `<데이터>/run/peers.json`(`docs/command-path.md` 4.2): 명령하는 곳 → 프로세스(워커·매니저는 pgid, 게이트웨이는 `manager-rest.sock`에 붙을 때 커널이 알려 준 pid), 워커마다 읽기 명령과 곳별 허용 명령(운용 모드면 역할 명령, 개발 모드면 전부, 게이트웨이는 늘 전부). 워커가 뜨고 끝날 때·게이트웨이가 다시 붙을 때·연결 선언·모드가 바뀔 때 다시 쓴다. 띄울 때 환경 변수 `WORKSPACE_PEERS_FILE`로 위치를 넘기고(예전 libworker가 모르는 설정 키에 멈추지 않게), libworker 0.10은 그것이 있을 때만 본다(없으면 단독 실행, 막지 않음) |
 | 막기 단계 | Manager 설정 `command_guard`: `off` · `warn`(어긋난 명령을 기록만, 0.55~0.70 기본) · `enforce`(거절, 0.71부터 기본: 보드 기록에 어긋난 접속이 없음을 확인). 읽기 명령(`get_status`, 정의에 `"read": true`인 명령)은 늘 허용. Manager API 워커의 관리 조작은 운용 모드에서 늘 `forbidden`(이 단계와 별개) |
-| 운용·개발 모드 | 게이트웨이가 바꾸고(원칙 17) op `set_access_mode {"mode": "operation"\|"development"}`(쓰기, `manager-rest.sock`만, 0.52, 0.55에 이름 바꿈)로 알린다. process-manager는 메모리에만 두고 `system` 답·구독에 `access_mode`로 보이며 바꿀 때 기록(로그 한 줄 + `commands` 주제). 재시작하면 운용. `peers.json`에 반영 |
+| 운용·개발 모드 | 게이트웨이가 시작할 때 정해(원칙 17, 0.79 `docs/modes.md`: 워크스페이스 개발, 제품 운용) op `set_access_mode {"mode": "operation"\|"development"}`(쓰기, `manager-rest.sock`만, 0.52, 0.55에 이름 바꿈)로 알린다. process-manager는 메모리에만 두고 `system` 답·구독에 `access_mode`로 보이며 바꿀 때 기록(로그 한 줄 + `commands` 주제). process-manager가 다시 뜨면 운용으로 시작하고 게이트웨이가 다시 알린다. `peers.json`에 반영 |
 
 ## 4. 끊겼을 때
 

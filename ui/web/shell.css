@@ -74,7 +74,7 @@ pre.log { background: #0b0d10; border: 1px solid var(--line); border-radius: 8px
 .err { color: var(--bad); } .warn { color: var(--warn); } .ok { color: var(--ok); }
 #toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
 .toast { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 14px; max-width: 420px; }
-.toast.bad { border-color: #874040; } .toast.ok { border-color: #2a6b52; }
+.toast.bad { border-color: #874040; } .toast.ok { border-color: #2a6b52; } .toast.warn { border-color: #8a6d2a; }
 
 /* 정리된 구성 요소 */
 .head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }

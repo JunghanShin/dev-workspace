@@ -122,6 +122,13 @@ int main(int argc, char** argv) {
     cfg.token = env_or("WORKSPACE_REST_TOKEN", "");
     cfg.ui_enabled = env_or("WORKSPACE_UI", "1") != "0";
     cfg.product = env_or("WORKSPACE_PRODUCT", "0") == "1";
+    // 모드(docs/modes.md): 워크스페이스는 development, 제품은 늘 operation. operation은 제품 동작을 미리 볼 때(시험)
+    cfg.access_mode = env_or("WORKSPACE_ACCESS_MODE", "development");
+    if (cfg.access_mode != "development" && cfg.access_mode != "operation") {
+        GW_ERROR("WORKSPACE_ACCESS_MODE=%s: must be development or operation", cfg.access_mode.c_str());
+        return 2;
+    }
+    if (cfg.product && cfg.access_mode != "operation") cfg.access_mode = "operation";
     cfg.unix_socket = env_or("WORKSPACE_GATEWAY_SOCKET", "");
     cfg.tcp = env_or("WORKSPACE_GATEWAY_TCP", "1") != "0";  // 0: nginx가 앞에 있어 TCP를 열지 않음
     const long long threads = to_int("WORKSPACE_GATEWAY_THREADS", env_or("WORKSPACE_GATEWAY_THREADS", "48"));

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="500" viewBox="0 0 960 500" role="img" font-family="'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif">
 <title>fault-manager 구조</title>
-<desc>fault-manager는 프로세스 하나다. status-manager 주제 system(건강), 워커·매니저 스트림의 이벤트(many), process-manager의 워커 지표를 받는다. 코어가 규칙(조건, 지속 시간, 심각도, 대응)으로 이상을 올리고 내린다. 대응은 mission-manager에 mission.send로 요청한다(운용 모드에서만, 개발 모드에서는 기록만). 이상 목록은 주제 fault, 올림·내림은 이벤트로 낸다</desc>
+<desc>fault-manager는 프로세스 하나다. status-manager 주제 system(건강), 워커·매니저 스트림의 이벤트(many), process-manager의 워커 지표를 받는다. 코어가 규칙(조건, 지속 시간, 심각도, 대응)으로 이상을 올리고 내린다. 대응은 mission-manager에 mission.send로 요청한다(운용 모드. 개발 모드에서는 잡아 두고 fault.run_action으로). 이상 목록은 주제 fault, 올림·내림은 이벤트로 낸다</desc>
 <defs>
 <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
 </defs>
@@ -63,7 +63,7 @@
 <text x="510" y="208">이상 올림(심각도)</text>
 <text x="510" y="234">조건이 풀리면 내림</text>
 <text x="510" y="260">올릴 때 대응 한 번</text>
-<text x="510" y="276">(운용 모드에서만)</text>
+<text x="510" y="276">(운용: 바로 · 개발: 잡아 둠)</text>
 <text x="510" y="302">이상 목록 · 확인(ack)</text>
 <text x="510" y="336">규칙 = 매니저 설정(데이터)</text>
 <text x="510" y="352">기본 규칙 없음</text>

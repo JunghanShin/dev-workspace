@@ -130,6 +130,47 @@ struct FakeWorker {
     }
 };
 
+// 가짜 process-manager: subscribe에 ok, 그 뒤 system 이벤트(access_mode)를 0.2 s마다. 다른 op는 오류
+struct FakePm {
+    int lfd = -1;
+    std::atomic<bool> stop{false};
+    std::thread th;
+    std::vector<std::thread> conns;
+    std::string mode;
+    void start(const std::string& path, const std::string& m) {
+        mode = m;
+        lfd = listen_unix(path);
+        th = std::thread([this] {
+            while (!stop) {
+                pollfd p{lfd, POLLIN, 0};
+                if (poll(&p, 1, 50) <= 0) continue;
+                const int c = accept4(lfd, nullptr, nullptr, SOCK_CLOEXEC);
+                if (c < 0) continue;
+                conns.emplace_back([this, c] {
+                    const Json req = Json::parse(read_line(c, 3000), nullptr, false);
+                    if (!req.is_object() || req.value("op", "") != "subscribe") {
+                        send_line(c, R"({"ok":false,"error":{"code":"not_found","message":"fake"}})");
+                        close(c);
+                        return;
+                    }
+                    send_line(c, R"({"ok":true,"data":{}})");
+                    while (!stop) {
+                        send_line(c, Json{{"event", "system"}, {"data", {{"access_mode", mode}}}}.dump());
+                        std::this_thread::sleep_for(200ms);
+                    }
+                    close(c);
+                });
+            }
+        });
+    }
+    void finish() {
+        stop = true;
+        if (th.joinable()) th.join();
+        for (auto& c : conns) c.join();
+        close(lfd);
+    }
+};
+
 static pid_t spawn(const std::string& config, const std::vector<std::pair<std::string, std::string>>& env) {
     const std::string path = g_dir + "/config.json";
     std::ofstream(path) << config;
@@ -317,6 +358,38 @@ static void test_rules() {
     CHECK(wait_exit(bad, 10000) != 0);
 }
 
+// 모드(docs/modes.md 3장): 개발이면 조건이 안 맞아도 보내고 advisory, 운용이면 forbidden
+static void test_rules_modes() {
+    for (const std::string mode : {"development", "operation"}) {
+        const std::string data = g_dir + "/data-" + mode;
+        (void)!std::system(("mkdir -p " + data + "/run/cmd " + data + "/run/stream").c_str());
+        FakeWorker w;
+        w.start(data + "/run/cmd/w1.sock");
+        FakePm pm;
+        pm.start(data + "/pm.sock", mode);
+        const pid_t pid = spawn(R"({"id":"mission-manager","config_version":1,"config":{"mission":{
+            "conditions": [{"name": "armed", "target": "w1", "cmd": "act.go", "require": [{"worker": "w1", "metric": "armed", "op": "==", "value": 1}]}]}}})",
+                                {{"WORKSPACE_DATA", data}, {"WORKSPACE_MANAGER_SOCKET", data + "/pm.sock"}});
+        const std::string sock = data + "/run/cmd/mission-manager.sock";
+        for (int i = 0; i < 150 && connect_unix(sock) < 0; ++i) std::this_thread::sleep_for(100ms);
+        std::this_thread::sleep_for(700ms);  // system 이벤트를 받을 때까지
+        const int fd = connect_unix(sock);
+        send_line(fd, Json{{"cmd", "mission.send"}, {"args", {{"target", "w1"}, {"cmd", "act.go"}, {"args", Json::object()}}}, {"from", "screen"}}.dump());
+        const Json r = Json::parse(read_line(fd, 8000), nullptr, false);
+        close(fd);
+        if (mode == "development") {
+            CHECK(r.value("ok", false) && r["data"]["cmd"] == "act.go");
+            CHECK(r.contains("advisory") && r["advisory"]["code"] == "forbidden" && r["advisory"]["condition"] == "armed");
+        } else {
+            CHECK(!r.value("ok", true) && r["error"]["code"] == "forbidden" && !r.contains("advisory"));
+        }
+        kill(pid, SIGTERM);
+        CHECK(wait_exit(pid, 15000) == 0);
+        pm.finish();
+        w.finish();
+    }
+}
+
 static void test_bad_config() {
     CHECK(wait_exit(spawn(R"({"id":"mission-manager","config":{"mission":{"nope":1}}})", {}), 15000) == 1);
     CHECK(wait_exit(spawn(R"({"id":"mission-manager","config":{"mission":{"command_timeout_ms":3000,"total_timeout_ms":1000}}})", {}), 15000) == 1);
@@ -334,6 +407,7 @@ int main(int argc, char** argv) {
     test_mission();
     test_external();
     test_rules();
+    test_rules_modes();
     test_bad_config();
     (void)!std::system(("rm -rf " + g_dir).c_str());
     if (failures) {
