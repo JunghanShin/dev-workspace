@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.80 |
+| 문서 버전 | 0.81 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1583,6 +1583,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.78 | **설계만(구현 전)**: `docs/modes.md`(모드를 배포 형태로: 워크스페이스는 늘 개발, 제품 묶음은 늘 운용, 토글 없앰. 명령 조건·fault 대응은 두 곳에서 같게 검사하고 워크스페이스는 알리기만(`advisory`, 잡아 둔 대응) — 구현하면 원칙 17 고침), `ui/workspace-screen.md`(왼쪽 목록 넷: 시스템 모니터·워크스페이스·페이로드·개발 도구, 워크스페이스 탭 여섯: 개요·로그·명령 이력·워커 연결·설정·관리, 설정을 화면에서 바꿈) |
 | 0.79 | **모드를 배포 형태로**(`docs/modes.md` 구현): 워크스페이스는 늘 개발, 제품 묶음은 늘 운용, 실행 중 바꾸지 않음(게이트웨이 `PUT /mode` 405, `GET /mode` `fixed`, 화면 토글·모드 카드 없앰, 머리 "개발"·"제품" 표시). 제품 동작 미리 보기는 시작할 때 `WORKSPACE_ACCESS_MODE=operation`. 개발 모드에서 mission 명령 조건은 막지 않고 응답에 `advisory`(게이트웨이 머리 `X-Workspace-Advisory`, 화면 노란 알림, 지표 `would_block`, 이벤트 `command_would_block`, 역할 정의 `mission` 1.3), fault 대응은 잡아 둠(`held_actions`, 이벤트 `fault_action_held`, 지표 `fault_held_actions`, 명령 `fault.run_action`, 역할 정의 `fault` 1.2, 화면 이상 칸에 실행 버튼). 원칙 17 고침 |
 | 0.80 | **화면 개편**(`ui/workspace-screen.md` 구현): 왼쪽 목록 = 맨 위 "시스템 모니터"·"워크스페이스", 묶음 "페이로드"·"개발 도구"(공용 패널은 group 없음). 워크스페이스 패널에 탭 여섯(`#/workspace/<탭>`): 개요(옛 패널 "시스템", 문제 있는 카드가 위로, 정상 워커·모듈은 개수만), 로그, 명령 이력, 워커 연결(옛 "연결", 설명 한 줄), **설정**(기능별 폼, 게이트웨이 `GET`·`PUT /workspace/settings`, 칸 정의 `install/config/workspace-settings.json`, 화면 제목·영상 주소·명령 응답 대기는 바로 적용, 나머지는 다시 시작하면 적용), 관리(제품 빌드·보드 정보·바꾸지 않는 값·파일 출처). 위 띠 "정상"·"주의"·"이상"(누르면 개요). 옛 패널 폴더 system·logs·commands·connections 없앰. 시작 셸이 workspace.env의 HTTPS 키를 읽지 않던 것 고침 |
+| 0.81 | **명령 이력 고침**(보드 확인에서 0건): 화면 명령 이력이 예전 logger 자리(`records/*.jsonl`의 process-manager 관리 조작 줄, 최근 파일 3개를 5 s마다 통째로 읽음)를 보던 것을 게이트웨이 명령 기록(`records/gateway`) 끝에서 읽게(`/records/commands`). 게이트웨이는 읽기 명령(`get_status`, 계약의 `read`)을 기록하지 않음(보드 기록 237,563줄 중 237,556줄이 `get_status`였음), `advisory`를 기록 줄에. 탭: 사람·보낸 곳·대상·명령·결과·걸린 시간·운용이었으면 막힘 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

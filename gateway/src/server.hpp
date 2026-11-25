@@ -135,6 +135,7 @@ private:
         Role role = Role::None;
         bool user_set = false;
         std::string from;  // 워커 명령의 보낸 곳: screen 또는 remote:<토큰 이름>(docs/command-path.md 2장)
+        bool read = false;  // 읽기 명령(get_status·계약의 read): 기록하지 않음(화면이 주기로 읽어 기록이 묻힘)
     };
     // 워커 명령 종류(계약에서, 10 s 동안 기억). 계약을 못 읽으면 get_status만 읽기
     CommandKinds kinds_of(const std::string& id);

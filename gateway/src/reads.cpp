@@ -65,6 +65,41 @@ std::vector<std::string> jsonl_files(const std::string& dir) {
     return out;
 }
 
+// 파일 끝의 줄 n개(빈 줄·CR 뺌). 끝에서 조금씩 거슬러 읽는다(큰 기록 파일을 다 읽지 않음)
+std::vector<std::string> tail_lines(const std::string& path, size_t n) {
+    std::vector<std::string> out;
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0 || n == 0) {
+        if (fd >= 0) ::close(fd);
+        return out;
+    }
+    struct stat st {};
+    ::fstat(fd, &st);
+    off_t end = st.st_size;
+    std::string buf;
+    size_t want = n * 400 + 4096;
+    while (true) {
+        const off_t start = end > static_cast<off_t>(want) ? end - static_cast<off_t>(want) : 0;
+        buf.assign(static_cast<size_t>(end - start), '\0');
+        const ssize_t got = ::pread(fd, &buf[0], buf.size(), start);
+        if (got < 0) break;
+        buf.resize(static_cast<size_t>(got));
+        size_t from = 0;
+        if (start > 0) {  // 첫 줄은 잘렸을 수 있음
+            const size_t nl = buf.find('\n');
+            from = nl == std::string::npos ? buf.size() : nl + 1;
+        }
+        out.clear();
+        for (auto& l : splitlines(buf.substr(from)))
+            if (!l.empty()) out.push_back(utf8_replace(l));
+        if (out.size() >= n || start == 0 || want >= (64u << 20)) break;
+        want *= 4;
+    }
+    ::close(fd);
+    if (out.size() > n) out.erase(out.begin(), out.end() - static_cast<long>(n));
+    return out;
+}
+
 // encoding="ascii", errors="replace": ASCII 밖 바이트마다 U+FFFD
 std::string ascii_replace(const std::string& s) {
     std::string out;
@@ -118,19 +153,20 @@ ReadResult Reads::handle(const std::string& name, const std::string& id, bool ha
         return r;
     }
     if (name == "commands") {
-        // 최근 기록 파일 3개에서 명령 기록만
+        // 명령 이력: 게이트웨이 명령 기록(<데이터>/records/gateway/gateway-*.jsonl, docs/gateway.md)의 끝에서 n줄.
+        // 새 파일(수정 시각 순)부터 거슬러 읽고, 파일마다 끝부분만 읽는다(파일 전체를 훑지 않음)
         const long long n = int_param(params, "lines", 200, 1, 5000);
+        auto files = jsonl_files(path_join(path_join(data_, "records"), "gateway"));
+        std::vector<std::pair<long long, std::string>> by_time;
+        for (const auto& f : files) {
+            struct stat st {};
+            if (::stat(f.c_str(), &st) == 0) by_time.push_back({static_cast<long long>(st.st_mtime) * 1000000000LL + st.st_mtim.tv_nsec, f});
+        }
+        std::sort(by_time.begin(), by_time.end());
         std::deque<std::string> out;
-        auto files = jsonl_files(path_join(data_, "records"));
-        const size_t from = files.size() > 3 ? files.size() - 3 : 0;
-        for (size_t i = from; i < files.size(); ++i) {
-            for_each_line(files[i], [&](const std::string& line) {
-                if (line.find("\"type\":\"command\"") != std::string::npos) {
-                    out.push_back(line);
-                    if (static_cast<long long>(out.size()) > n) out.pop_front();
-                }
-                return true;
-            });
+        for (auto it = by_time.rbegin(); it != by_time.rend() && static_cast<long long>(out.size()) < n; ++it) {
+            const auto got = tail_lines(it->second, static_cast<size_t>(n - static_cast<long long>(out.size())));
+            out.insert(out.begin(), got.begin(), got.end());
         }
         r.body = Json{{"lines", Json(std::vector<std::string>(out.begin(), out.end()))}};
         return r;

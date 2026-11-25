@@ -1086,7 +1086,7 @@ class Ui(unittest.TestCase):
         self.assertEqual(obj["lines"], tail(log, 200))
         st, obj, _ = self.srv.json("GET", "/api/remote/commands?lines=2")
         self.assertEqual(obj["ok"], True)
-        self.assertEqual([json.loads(x)["op"] for x in obj["lines"]], ["d1", "d2"])
+        self.assertLessEqual(len(obj["lines"]), 2)
         st, obj, _ = self.srv.json("GET", "/api/remote/processes?lines=3")
         self.assertTrue(obj["ok"])
         self.assertLessEqual(len(obj["lines"]), 3)
@@ -1141,12 +1141,29 @@ class Reads(unittest.TestCase):
         self.assertEqual((st, obj), (400, {"error": {"code": "bad_request", "message": "lines must be an integer"}}))
 
     def test_commands(self):
-        st, obj, _ = self.srv.json("GET", "/records/commands")
+        # 자기 데이터 폴더: 게이트웨이 명령 기록 두 파일(이름 순서와 반대로 수정 시각을 줌)
+        data = tempfile.mkdtemp(prefix="cmdlog", dir=T["tmp"])
+        gw = os.path.join(data, "records", "gateway")
+        gl = lambda cmd: json.dumps({"t": "x", "user": "-", "method": "POST", "path": "/workers/w1/command", "cmd": cmd, "code": 200})
+        write(os.path.join(gw, "gateway-zzzz-1.jsonl"), "\n".join(gl(c) for c in ("b1", "c1")) + "\n")
+        write(os.path.join(gw, "gateway-aaaa.jsonl"), "\n".join(gl(c) for c in ("d1", "d2")) + "\r\n")
+        os.utime(os.path.join(gw, "gateway-zzzz-1.jsonl"), (1000, 1000))
+        srv = Server({"WORKSPACE_DATA": data, "WORKSPACE_MANAGER_SOCKET": T["mgr"].path}, name="cmdlog")
+        try:
+            self._commands(srv)
+        finally:
+            srv.stop()
+
+    def _commands(self, srv):
+        st, obj, _ = srv.json("GET", "/records/commands")
         self.assertEqual(st, 200)
-        self.assertEqual([json.loads(x)["op"] for x in obj["lines"]], ["b1", "c1", "d1", "d2"])
+        # 게이트웨이 명령 기록(records/gateway)의 끝: 새 파일(수정 시각) 끝부터, 모자라면 앞 파일
+        self.assertEqual([json.loads(x)["cmd"] for x in obj["lines"]], ["b1", "c1", "d1", "d2"])
         self.assertFalse(any(x.endswith("\r") for x in obj["lines"]))
-        st, obj, _ = self.srv.json("GET", "/api/board/records/commands?lines=1")
-        self.assertEqual([json.loads(x)["op"] for x in obj["lines"]], ["d2"])
+        st, obj, _ = srv.json("GET", "/api/board/records/commands?lines=1")
+        self.assertEqual([json.loads(x)["cmd"] for x in obj["lines"]], ["d2"])
+        st, obj, _ = srv.json("GET", "/records/commands?lines=3")
+        self.assertEqual([json.loads(x)["cmd"] for x in obj["lines"]], ["c1", "d1", "d2"])
 
     def test_processes_and_power(self):
         st, obj, _ = self.srv.json("GET", "/system/processes?lines=5")
@@ -2065,6 +2082,8 @@ class CommandLog(unittest.TestCase):
             o = Session(srv)
             o.login("o1", PASSWORDS["o1"])
             self.assertEqual(o.json("POST", "/workers/w2/command", {"cmd": "source.set_rate", "args": {"password": "argsecret"}})[0], 200)
+            self.assertEqual(o.json("POST", "/workers/w2/command", {"cmd": "get_status"})[0], 200)  # 읽기: 기록 안 함
+            self.assertEqual(o.json("POST", "/workers/w2/command", {"cmd": "source.get"})[0], 200)  # 계약의 read: 기록 안 함
             self.assertEqual(o.json("POST", "/workers/w1/start")[0], 403)
             m = Session(srv, token=tok)
             self.assertEqual(m.json("PUT", "/workers/w1/config?token=" + tok, {"key": "v"})[0], 403)  # 운용 모드

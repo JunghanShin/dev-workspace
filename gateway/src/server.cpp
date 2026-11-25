@@ -470,8 +470,8 @@ Reply Gateway::handle(const RequestView& rq, const std::function<Body()>& body, 
         GW_ERROR("%s %s failed: %s", rq.method.c_str(), rq.path.c_str(), e.what());
         r = json_error(500, "internal", e.what());
     }
-    // 쓰기 요청(GET이 아닌 것)마다 기록 한 줄. 본문·쿼리·헤더는 넣지 않는다(비밀번호·토큰)
-    if (rq.method != "GET") {
+    // 쓰기 요청(GET이 아닌 것, 읽기 명령 빼고)마다 기록 한 줄. 본문·쿼리·헤더는 넣지 않는다(비밀번호·토큰)
+    if (rq.method != "GET" && !ctx.read) {
         RecordFields f;
         f.t = iso_now();
         f.user = ctx.user_set ? ctx.user : who.user;
@@ -484,6 +484,8 @@ Reply Gateway::handle(const RequestView& rq, const std::function<Body()>& body, 
         if (!ctx.cmd.empty() && is_worker_command(rq.path)) f.from = ctx.from;
         f.code = r.status;
         f.ms = (mono_now() - t0) * 1000;
+        for (const auto& [k, v] : r.headers)
+            if (k == "X-Workspace-Advisory") f.advisory = v;
         recorder_->record(std::move(f));
     }
     if (log_enabled(Level::Info)) {
@@ -902,6 +904,7 @@ Reply Gateway::command(const std::string& id, const std::function<Body()>& body,
     if (!b.value.is_object() || !b.value.contains("cmd") || !b.value["cmd"].is_string())
         return json_error(400, "bad_request", "body must be {\"cmd\": \"...\", \"args\": {...}}");
     ctx.cmd = b.value["cmd"].get<std::string>();  // 기록에는 명령 이름만(인자는 넣지 않음)
+    ctx.read = kinds_of(id).of(ctx.cmd) == CmdKind::Read;
     // 운용 모드: 읽기·역할 명령만(워커 전용·계약에 없는 명령은 개발 모드에서, docs/command-path.md 3장)
     if (mode().mode != "development" && kinds_of(id).of(ctx.cmd) == CmdKind::Other) return development_required();
     const Json& args = get_or(b.value, "args", Json(nullptr));

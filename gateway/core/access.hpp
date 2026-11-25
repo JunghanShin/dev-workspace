@@ -142,6 +142,7 @@ private:
 // ---- 명령 기록 한 줄(gw.log). 본문·쿼리·헤더는 넣지 않는다(비밀번호·토큰이 섞이지 않게) ----
 struct RecordFields {
     std::string t, user, role, mode, remote, method, path, cmd, from;
+    std::string advisory;  // mission의 "운용이었으면 막힘"(JSON 글, docs/modes.md). 있을 때만 칸이 생김
     int code = 0;
     double ms = 0;
 };

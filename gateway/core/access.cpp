@@ -392,6 +392,10 @@ std::string record_line(const RecordFields& f) {
     o["from"] = f.from.empty() ? Json(nullptr) : Json(cut(f.from, 80));  // 워커 명령의 보낸 곳(docs/command-path.md)
     o["code"] = f.code;
     o["ms"] = std::round(f.ms * 10) / 10;
+    if (!f.advisory.empty()) {
+        Json a = Json::parse(f.advisory, nullptr, false);
+        o["advisory"] = a.is_discarded() ? Json(cut(f.advisory, 512)) : a;
+    }
     return compact(o) + "\n";
 }
 
