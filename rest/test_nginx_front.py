@@ -88,6 +88,7 @@ class NginxFront(unittest.TestCase):
         st, h, data = self.req("GET", "/kit.js")
         self.assertEqual((st, data), (200, b"export const x = 1;\n"))
         self.assertIn("javascript", h["content-type"])
+        self.assertEqual(h.get("cache-control"), "no-cache")  # 업데이트 뒤 옛 화면 파일 방지(ETag로 확인)
         self.assertEqual(self.req("GET", "/panels/board/panel.js")[0], 200)  # 공용 패널(ui/web 안)
 
     def test_api_and_worker_panel_via_gateway(self):
@@ -294,6 +295,7 @@ class Render(unittest.TestCase):
             self.assertFalse([l for l in body if "@PREFIX@" in l or "@LIMIT" in l or "@UI_LOCATION@" in l])
             self.assertIn("server unix:/x/gw.sock;", text)
             self.assertIn("root /ws/ui/web;", text)
+            self.assertIn('add_header Cache-Control "no-cache" always;', text)  # 업데이트 뒤 옛 화면 파일 방지
 
 
 if __name__ == "__main__":

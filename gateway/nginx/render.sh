@@ -35,6 +35,7 @@ else
             root $root/ui/web;
             index shell.html;
             try_files \$uri \$uri/ @gateway;
+            add_header Cache-Control \"no-cache\" always;   # 업데이트 뒤 옛 화면 파일을 쓰지 않게(ETag로 확인, 같으면 304)
         }"
 fi
 tls=''
