@@ -10,7 +10,7 @@
 //   gw.mgr      Manager 구독 하나로 워커·시스템 상태 캐시(mgr_cache.hpp)
 //   gw.log      명령 기록 파일 쓰기(recorder.hpp)
 // 신분 확인: WORKSPACE_AUTH=off면 AuthOff(지금 REST 토큰 검사), on·제품 모드면 AuthOn(auth.hpp).
-// 게이트웨이가 직접 답하는 경로: /api/auth/login·logout·me, /api/mode(운용/정비 모드).
+// 게이트웨이가 직접 답하는 경로: /api/auth/login·logout·me, /api/mode(운용/정비 모드), /workspace/settings(설정 탭).
 // 연결 하나에 요청 하나(keep-alive 없음, Python REST의 HTTP/1.0과 같음). 읽기·쓰기 상한 5 s.
 #pragma once
 
@@ -18,6 +18,7 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -63,6 +64,8 @@ struct GatewayConfig {
     double ping_s = 15.0;
     StreamTiming stream;
     std::string python = "python3";
+    // 시작할 때의 환경 변수(WORKSPACE_*). 설정 탭의 "다시 시작하면 적용"을 가리는 기준(main이 채움)
+    std::map<std::string, std::string> start_env;
 };
 
 // 응답 하나
@@ -154,6 +157,10 @@ private:
     Reply product_build(const std::string& method, const std::string& path, const std::string& sub,
                         const std::string& query, const std::function<Body()>& body);
     Reply read(const Route& r, const std::string& query);
+    // 워크스페이스 설정(ui/workspace-screen.md 2장): GET 정의+값, PUT 검사 → workspace.env 그 줄만 → live 칸 바로 적용
+    Reply settings(const std::string& method, const std::function<Body()>& body, Ctx& ctx);
+    std::string settings_env_path() const;
+    std::string settings_def_path() const;
     int open_stream(const std::string& worker_id, std::string& why);
     void setup(httplib::Server& svr, int watch_slot, bool via_unix);
 
@@ -174,6 +181,8 @@ private:
     std::pair<double, std::string> mission_ = {-1e9, ""};  // kinds_mu_로 보호
     Mode mode_;
     double last_mode_push_ = -1e9;  // gw.mgr만
+    std::atomic<double> command_timeout_;  // 워커 명령 응답 대기(설정 탭에서 바로 바뀜)
+    std::mutex settings_mu_;  // workspace.env 읽고-고치고-쓰기를 하나씩(파일 I/O를 잠금 안에서: 이 잠금은 PUT만 기다림)
 
     worker::ThreadWatch watch_;
     Pool pool_;

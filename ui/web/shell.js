@@ -301,7 +301,7 @@ function renderTop() {
     .map((n) => String(n).padStart(2, "0")).join(":");
 }
 
-// 건강 띠(ui/system-panel.md 4장): status-manager의 system 주제 health + fault 주제의 이상 수. 누르면 패널 "시스템".
+// 건강 띠(ui/system-panel.md 4장): status-manager의 system 주제 health + fault 주제의 이상 수. 누르면 워크스페이스 › 개요.
 // status-manager가 없으면 띠 없음
 let healthEls = null;
 function renderHealth() {
@@ -310,19 +310,19 @@ function renderHealth() {
   const s = sys.get("system");
   if (!s) { if (healthEls) { box.replaceChildren(); healthEls = null; } return; }
   if (!healthEls) {
-    healthEls = { main: ui.pill("info", "시스템 상태 모름", "idle"), faults: ui.pill("alert", "", "warn") };
-    const a = h("a", { href: "#/system", class: "health-band", title: "" }, healthEls.main, healthEls.faults);
+    healthEls = { main: ui.pill("info", "상태 모름", "idle"), faults: ui.pill("alert", "", "warn") };
+    const a = h("a", { href: panels.some((p) => p.id === "workspace") ? "#/workspace/overview" : null, class: "health-band", title: "" }, healthEls.main, healthEls.faults);
     healthEls.link = a;
     box.replaceChildren(a);
   }
   const t = state.connected && s.state === "running" && s.up ? s.topic : null;
   if (!t) {
-    healthEls.main.set("info", "시스템 상태 모름", "idle");
+    healthEls.main.set("info", "상태 모름", "idle");
     healthEls.link.title = s.state !== "running" ? `${s.worker} ${s.state || "꺼짐"}` : "스트림 기다리는 중";
   } else {
     const [icon, text, kind] = sys.HEALTH[t.health] || ["info", t.health, "idle"];
     const n = (t.reasons || []).length;
-    healthEls.main.set(icon, `시스템 ${text}` + (t.health !== "ok" && n ? ` · ${n}` : ""), kind);
+    healthEls.main.set(icon, text + (t.health !== "ok" && n ? ` · ${n}` : ""), kind);
     healthEls.link.title = (t.reasons || []).join("\n") || "모든 워커 정상";
   }
   const f = sys.get("fault");
@@ -343,14 +343,14 @@ function renderHealth() {
 // 공용 목록에는 안 나오고, 여기서 그런 워커마다 항목을 만든다. 기본 탑재 워커(시스템 모니터 등)는 뺀다
 const AUTO_PANEL = { id: "auto", title: "상태(자동)", group: "페이로드", icon: "list" };
 
-// 왼쪽 목록 묶음은 플랫폼이 정한 셋뿐(ui/README.md). 시스템 = 공용 패널(전체 관리), 페이로드 = 워커 패널(들어간
-// 모듈), 개발 도구 = 개발할 때만 쓰는 워커 패널. panel.json group이 이 밖이면 워커 패널은 페이로드, 공용은 시스템
-const GROUPS = ["시스템", "페이로드", "개발 도구"];
+// 왼쪽 목록(ui/workspace-screen.md): 맨 위(묶음 제목 없음) = 공용 패널(시스템 모니터, 워크스페이스), 묶음 "페이로드" =
+// 워커 패널(들어간 모듈)과 자동 화면, "개발 도구" = 개발할 때만 쓰는 워커 패널. 묶음은 이 셋뿐(panel.json group)
+const GROUPS = ["", "페이로드", "개발 도구"];
 function groupOf(p) {
-  if (GROUPS.includes(p.group)) return p.group;
-  const g = p.worker_types || p.id === "auto" ? "페이로드" : "시스템";
-  if (p.group) console.warn(`panel ${p.id}: group "${p.group}" is not one of ${GROUPS.join(", ")}, using ${g}`);
-  return g;
+  if (p.id === "auto") return "페이로드";
+  if (GROUPS.includes(p.group || "")) return p.group || "";
+  console.warn(`panel ${p.id}: group "${p.group}" is not one of 페이로드, 개발 도구; using 페이로드`);
+  return "페이로드";
 }
 
 function navItems() {
@@ -388,7 +388,7 @@ function renderNav() {
   let group = null;
   for (const it of items) {
     const g = it.group;
-    if (g !== group) { nav.appendChild(h("div", { class: "group" }, g)); group = g; }
+    if (g !== group) { if (g) nav.appendChild(h("div", { class: "group" }, g)); group = g; }
     // 항목: 아이콘(panel.json icon) + 이름(워커면 id, 아래에 패널 이름) + 워커 상태 점
     nav.appendChild(h("a", { href: "#/" + it.key, class: current && current.key === it.key ? "active" : "" },
       h("span", { class: "nav-i" }, ui.icon(it.icon || "info")),
@@ -411,7 +411,9 @@ async function route() {
   // "#/<패널>/<워커>?view=..." — 물음표 뒤는 패널이 읽는 값(예: 시스템 모니터 보기), 경로가 아님
   const key = decodeURIComponent(location.hash.replace(/^#\//, "").split("?")[0]);
   const items = navItems();
-  const it = items.find((i) => i.key === key) || (key ? null : items[0]);
+  // "#/<패널>/<탭>"(예 #/workspace/logs): 워커 패널이 아니면 뒤는 패널이 읽는 탭(ctx.sub)
+  const head = key.split("/")[0], sub = key.includes("/") ? key.slice(head.length + 1) : "";
+  const it = items.find((i) => i.key === key) || items.find((i) => i.key === head && !i.workerId) || (key ? null : items[0]);
   if (current && current.mod.unmount) { try { current.mod.unmount(current.ctx); } catch {} }
   current = null;
   if (!it) {
@@ -429,7 +431,7 @@ async function route() {
   if (seq !== routeSeq) return;
   const el = h("div");
   main.replaceChildren(el);
-  const ctx = { workerId: it.workerId, panel: it.panel, api, remote, mergeConfig, act, toast, h, fmt,
+  const ctx = { workerId: it.workerId, panel: it.panel, sub: it.key === key ? "" : sub, api, remote, mergeConfig, act, toast, h, fmt,
                 stateBadge, spark, ui, history: (id) => history[id] || [], state: () => state };
   current = { key: it.key, panel: it.panel, workerId: it.workerId, mod, ctx };
   navSig = "";

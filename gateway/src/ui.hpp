@@ -7,6 +7,7 @@
 #pragma once
 
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -29,18 +30,25 @@ struct StaticFile {
 
 class Ui {
 public:
-    explicit Ui(UiConfig cfg) : cfg_(std::move(cfg)) {}
+    explicit Ui(UiConfig cfg) : cfg_(std::move(cfg)), title_(cfg_.title), media_url_(cfg_.media_url) {}
     bool available() const;  // shell.html이 있는가
     std::optional<StaticFile> static_file(const std::string& path) const;
     Json panels() const;
     Json ui_info(const std::string& host_header, const std::string& data_dir, bool product) const;
     // (상태 코드, 응답)
     std::pair<int, Json> remote(const std::string& name, const Params& params, Reads& reads) const;
-    const UiConfig& config() const { return cfg_; }
+    const UiConfig& config() const { return cfg_; }  // web·workers·refresh_ms(바뀌지 않음)
+    // 설정 탭의 바로 적용 칸(WORKSPACE_UI_TITLE·WORKSPACE_UI_MEDIA_URL). 아무 gw.http 스레드에서
+    void set_title(const std::string& v);
+    void set_media_url(const std::string& v);
+    std::string title() const;
+    std::string media_url() const;
 
 private:
     std::map<std::string, std::string> worker_panel_dirs() const;  // 패널 id → 폴더(이름 순, 같은 id면 뒤의 것)
     UiConfig cfg_;
+    mutable std::mutex live_mu_;  // title_, media_url_ (I/O 없음)
+    std::string title_, media_url_;
 };
 
 }  // namespace gw

@@ -73,6 +73,8 @@
 | `Authorization: Bearer <토큰>` | 프로그램(외부 운용·원격 화면)용. GET이면 `?token=`도(EventSource). 틀린 토큰이면 쿠키가 맞아도 익명 |
 | `GET /api/mode` · `PUT /api/mode {"mode": "operation"\|"development"}` | `{mode, since, by}`(+ PUT 답에 `manager`: 알림 결과). 바꾸기는 `maintainer`만. 저장하지 않음(시작하면 운용). 바꾸면 기록하고 process-manager에 `set_access_mode` op(design.md 6.2). 알림이 실패하거나 process-manager만 다시 시작되면 `gw.mgr`가 Manager의 `access_mode`를 보고 다시 알린다(모드 주인은 게이트웨이) |
 | `GET /health?detail=1` | 기본 답에 `gateway`: 신분 확인·사용자·세션 수, 모드, 명령 기록(`written`·`dropped`·`errors`), 캐시(`fresh`·`age_s`·`direct_lists`) |
+| `GET /workspace/settings` | 설정 탭(`ui/workspace-screen.md` 2장). `{groups: [{title, fields: [{<정의 칸>…, value, effective, pending}]}], pending: [키…], file, product}`. 아래 "설정" |
+| `PUT /workspace/settings` `{"<키>": 값, ...}` | 검사 후 `<데이터>/config/workspace.env`의 그 줄만 바꿈. `200 {saved, live, restart}`. `maintainer`, 운용 모드면 `development_required`, 제품이면 `403 forbidden "settings are locked in product"` |
 
 | 역할 | 할 수 있는 것(신분 확인 켜짐일 때) |
 |---|---|
@@ -91,6 +93,11 @@
 - **신분 확인 켜고 끄기:** `WORKSPACE_AUTH=on|off`. 개발 보드 기본 `off`(지금처럼, `WORKSPACE_REST_TOKEN` 토큰 검사도 그대로, 화면 위에 "인증 꺼짐" 표시). 제품 모드(`WORKSPACE_PRODUCT=1`)는 늘 `on`(기록에 남김). 제품 모드인데 사용자 파일이 없거나 비면 `/health` 말고 모두 `503`과 오류 한 줄(조용히 열어 두지 않음). `on`이면 `WORKSPACE_REST_TOKEN`은 쓰지 않는다(사용자별 토큰으로)
 - **보낸 쪽 주소:** TCP면 접속 주소, Unix 소켓(nginx 뒤)이면 nginx가 넣는 `X-Forwarded-For`(`$remote_addr`로 덮어씀). 로그인 실패 제한과 명령 기록에 쓴다
 - **명령 기록:** GET이 아닌 요청마다(로그인 성공·실패, 로그아웃, 모드 바꿈 포함) 한 줄 `{"t", "user", "role", "mode", "remote", "method", "path", "cmd", "code", "ms"}`. `cmd`는 워커 명령 이름, Manager op, `login`·`logout`·`mode:<값>`. `mode`는 요청을 받을 때의 모드. 본문·쿼리·헤더는 넣지 않는다(비밀번호·토큰). 로그인 실패에서 없는 이름은 `?`로(이름 칸에 비밀번호를 넣었을 수 있음). 파일 `<데이터>/records/gateway/gateway-<부팅 id 8자>.jsonl`(0600): logger 기록(`records/*.jsonl`)과 폴더를 나눴다. 같이 두면 logger의 전체 용량 정리가 이 파일도 지우고, `/records/commands`(마지막 파일 3개)가 한 칸을 이 파일에 뺏긴다. 파일 하나 64 MiB를 넘으면 `gateway-<부팅>-<ms>.jsonl`로 바꾸고 새로, 전체 512 MiB를 넘으면 오래된 것부터 지움. record-manager가 생기면 그쪽으로
+- **설정(`ui/workspace-screen.md` 2장):** 칸 정의는 `<워크스페이스>/install/config/workspace-settings.json`(요청마다 다시 읽음) `{"version", "groups": [{"title", "fields": [{key, label, type: string|number|integer|enum, min, max, unit, enum, apply: live|restart, default, description}]}]}`. 받는 주소·포트·토큰·화면 켬(`WORKSPACE_REST_BIND`·`_PORT`·`_TOKEN`·`WORKSPACE_UI`)은 화면을 끊을 수 있어 정의에 넣지 않는다
+  - `GET`: 칸마다 `value`(파일 값, 형식대로. 없거나 비면 `null`), `effective`(live 칸은 지금 게이트웨이가 쓰는 값, restart 칸은 게이트웨이가 시작할 때의 환경 값, 없으면 기본), `pending`(restart 칸의 파일 값(없으면 기본)이 시작할 때 값과 다름). 맨 위 `pending`은 그 키 목록
+  - `PUT`: 키마다 정의대로 검사(정의 밖 키, 형식, 범위, enum). 하나라도 틀리면 아무것도 쓰지 않고 `400 {"error": {"code": "bad_request", "message", "fields": {"<키>": "<이유>"}}}`. 숫자 칸은 숫자 글(`"443"`)도 받는다. 글 칸은 앞뒤 공백을 떼고 `#`·제어 문자·앞뒤 `"`는 막는다(`read_kv`가 `#` 뒤를 버리고 `"`를 떼므로). `null`·`""`은 지움(기본값으로)
+  - 파일 고치기(`core/settings.cpp` `env_edit`): 주석·순서·다른 키 그대로. 있는 줄은 그 자리에서 바꿈, `#KEY=` 주석 줄만 있으면 그 줄을 풂, 없으면 끝에 더함. 지우면 `#KEY=옛값`으로(주석 줄이 따로 있으면 그 줄만 남김). 임시 파일 → fsync → rename, 권한 그대로. 명령 기록 `cmd: "settings"`
+  - live 칸은 바로 적용: `WORKSPACE_UI_TITLE`·`WORKSPACE_UI_MEDIA_URL`(`/api/ui`), `WORKSPACE_REST_COMMAND_TIMEOUT`(워커 명령 대기). restart 칸은 `./workspace-start.sh`로 다시 시작해야 적용(시작 셸 `read_kv`가 정의의 키를 모두 넘김)
 - **Manager 캐시:** `gw.mgr`가 Manager 구독 하나(`workers`·`system`, 1 s 주기)로 최신 값을 들고, `GET /workers`·`/workers/{id}`·`/system`을 3 s 안에 갱신된 캐시로 답한다(Manager `list`·`get`·`system`과 같은 답). 목록 순서는 Manager `list` 순서(처음과 워커 구성이 바뀔 때 `list`를 한 번 불러 배움). 오래됐거나 없는 워커면 지금처럼 직접. 쓰기는 늘 직접. 끄기 `WORKSPACE_GATEWAY_CACHE=0`. 캐시 값은 최대 약 1 s 늦다(`last_heartbeat_ms_ago` 등)
 
 ## 4. 끊겼을 때

@@ -11,6 +11,7 @@
 
 #include "httplib/httplib.h"  // CPPHTTPLIB_USE_POLL은 CMake가 정한다(select의 FD_SETSIZE 한계를 피함)
 #include "log.hpp"
+#include "settings.hpp"
 #include "ui_rules.hpp"
 
 namespace gw {
@@ -169,6 +170,7 @@ Gateway::Gateway(GatewayConfig cfg)
       cache_(cfg_.manager_socket, cfg_.connect_timeout, cfg_.response_timeout),
       watch_(std::chrono::milliseconds(static_cast<long>(kStallS * 1000))),
       pool_(cfg_.threads + kPoolSpare, kPoolQueue) {
+    command_timeout_.store(cfg_.command_timeout);
     mode_.mode = cfg_.product ? "operation" : cfg_.access_mode;  // docs/modes.md: 제품은 늘 운용
     mode_.since = iso_now();
     mode_.by = cfg_.product ? "product" : "workspace";
@@ -666,6 +668,8 @@ Reply Gateway::forward(const RequestView& rq, const std::function<Body()>& body,
             ctx.cmd = "product_build";
             if (m != "GET" && mode().mode != "development") return development_required();  // 관리 조작(command-path 3장)
             return product_build(m, rstrip_char(path, '/'), rt.sub, rq.query, body);
+        case RouteKind::Settings:
+            return settings(m, body, ctx);
         case RouteKind::Read:
             return read(rt, rq.query);
         case RouteKind::Stream:
@@ -756,6 +760,129 @@ Reply Gateway::read(const Route& r, const std::string& query) {
     }
 }
 
+// ---- 워크스페이스 설정(ui/workspace-screen.md 2장, docs/gateway.md 3장) ----
+
+std::string Gateway::settings_env_path() const { return path_join(path_join(cfg_.data_dir, "config"), "workspace.env"); }
+
+std::string Gateway::settings_def_path() const {
+    return path_join(path_join(path_join(cfg_.workspace, "install"), "config"), "workspace-settings.json");
+}
+
+Reply Gateway::settings(const std::string& method, const std::function<Body()>& body, Ctx& ctx) {
+    if (method == "PUT") ctx.cmd = "settings";
+    // 정의는 요청마다 다시 읽는다(작은 파일, 고치면 바로)
+    const std::string def_path = settings_def_path();
+    Json def;
+    std::string err;
+    int e = 0;
+    const auto def_text = read_file(def_path, 1 << 20, &e);
+    if (!def_text) return json_error(500, "internal", "settings definition " + def_path + ": " + errno_text(e));
+    if (!settings_parse_def(*def_text, def, err)) return json_error(500, "internal", "settings definition " + def_path + ": " + err);
+    const std::string env_path = settings_env_path();
+
+    // 지금 게이트웨이에서 쓰는 값(live 칸) / 시작할 때의 값(restart 칸), 파일 글 모양
+    auto start_text = [this](const Json& f) {
+        auto it = cfg_.start_env.find(f["key"].get<std::string>());
+        return it == cfg_.start_env.end() || it->second.empty() ? settings_default_text(f) : it->second;
+    };
+    auto effective = [&](const Json& f) -> Json {
+        const std::string key = f["key"].get<std::string>();
+        if (f["apply"] == "live") {
+            if (key == "WORKSPACE_UI_TITLE") return ui_.title();
+            if (key == "WORKSPACE_UI_MEDIA_URL") return ui_.media_url();
+            if (key == "WORKSPACE_REST_COMMAND_TIMEOUT") return command_timeout_.load();
+        }
+        return settings_typed(f, start_text(f));
+    };
+
+    if (method == "GET") {
+        e = 0;
+        const auto text = read_file(env_path, 1 << 20, &e);
+        if (!text && e != ENOENT) return json_error(500, "internal", env_path + ": " + errno_text(e));
+        const auto active = env_active(text.value_or(""));
+        Json groups = Json::array(), pending = Json::array();
+        for (const auto& g : def["groups"]) {
+            Json og = Json::object();
+            og["title"] = g.value("title", "");
+            Json fields = Json::array();
+            for (const auto& f : g["fields"]) {
+                const std::string key = f["key"].get<std::string>();
+                Json o = f;
+                auto it = active.find(key);
+                const bool set = it != active.end() && !it->second.empty();
+                o["value"] = set ? settings_typed(f, it->second) : Json(nullptr);
+                o["effective"] = effective(f);
+                // 다시 시작을 기다림: restart 칸의 파일 값(없으면 기본)이 시작할 때의 값과 다름
+                const bool wait = f["apply"] == "restart" &&
+                                  settings_typed(f, set ? it->second : settings_default_text(f)) != settings_typed(f, start_text(f));
+                o["pending"] = wait;
+                if (wait) pending.push_back(key);
+                fields.push_back(o);
+            }
+            og["fields"] = fields;
+            groups.push_back(og);
+        }
+        Json out = Json::object();
+        out["groups"] = groups;
+        out["pending"] = pending;
+        out["file"] = env_path;
+        out["product"] = cfg_.product;
+        return json_reply(200, out);
+    }
+
+    // PUT: 제품은 잠금(design.md 11.4), 운용 모드면 관리 쓰기와 같이 막음(docs/modes.md)
+    if (cfg_.product) return json_error(403, "forbidden", "settings are locked in product");
+    if (mode().mode != "development") return development_required();
+    if (cfg_.data_dir.empty()) return json_error(500, "internal", "no data folder (WORKSPACE_DATA)");
+    Body b = body();
+    if (!b.ok) return json_error(400, "bad_request", "invalid JSON body: " + b.error);
+    EnvChanges changes;
+    Json fields;
+    if (!settings_check(def, b.value, changes, fields, err)) {
+        Json eo = Json{{"code", "bad_request"}, {"message", err}};
+        if (!fields.empty()) eo["fields"] = fields;
+        return json_reply(400, Json{{"error", eo}});
+    }
+    Json saved = Json::array(), live = Json::array(), restart = Json::array();
+    std::lock_guard<std::mutex> lock(settings_mu_);
+    e = 0;
+    const auto text = read_file(env_path, 1 << 20, &e);
+    if (!text && e != ENOENT) return json_error(500, "internal", env_path + ": " + errno_text(e));
+    const std::string before = text.value_or("");
+    const std::string after = env_edit(before, changes);
+    if (after != before) {
+        int fmode = 0644;  // 있던 파일의 권한 그대로
+        struct stat st{};
+        if (::stat(env_path.c_str(), &st) == 0) fmode = static_cast<int>(st.st_mode & 07777);
+        ::mkdir(path_join(cfg_.data_dir, "config").c_str(), 0755);
+        if (!write_file_atomic(env_path, after, fmode, err)) return json_error(500, "internal", "write " + err);
+    }
+    for (const auto& ch : changes) {
+        const Json& f = *settings_field(def, ch.first);
+        saved.push_back(ch.first);
+        if (f["apply"] != "live") {
+            restart.push_back(ch.first);
+            continue;
+        }
+        live.push_back(ch.first);
+        const std::string v = ch.second ? *ch.second : settings_default_text(f);
+        if (ch.first == "WORKSPACE_UI_TITLE") {
+            ui_.set_title(v.empty() ? "Workspace" : v);
+        } else if (ch.first == "WORKSPACE_UI_MEDIA_URL") {
+            ui_.set_media_url(v.empty() ? "http://{host}:8889/{path}" : v);
+        } else if (ch.first == "WORKSPACE_REST_COMMAND_TIMEOUT") {
+            double s = 0;
+            if (py_float(v, s) && s > 0) command_timeout_.store(s);
+        }
+    }
+    GW_INFO("settings saved: %s", py_dumps(saved).c_str());
+    Json out = Json::object();
+    out["saved"] = saved;
+    out["live"] = live;
+    out["restart"] = restart;
+    return json_reply(200, out);
+}
+
 namespace {
 // 워커 설정의 소켓 위치(없으면 기본 위치 <데이터>/run/<kind>/<id>.sock)
 std::string socket_path(const Json& resp, const char* key, const std::string& data_dir, const char* kind,
@@ -793,7 +920,7 @@ Reply Gateway::command(const std::string& id, const std::function<Body()>& body,
             mreq["args"] = Json{{"target", id}, {"cmd", b.value["cmd"]}, {"args", py_truthy(args) ? args : Json::object()}};
             mreq["from"] = ctx.from;
             const std::string mpath = socket_path(mresp, "command_socket", cfg_.data_dir, "cmd", entry);
-            const CommandResult mr = worker_command(mpath, mreq, 1.0, cfg_.command_timeout);
+            const CommandResult mr = worker_command(mpath, mreq, 1.0, command_timeout_.load());
             if (mr.kind == CommandResult::NoSocket)
                 return json_error(503, "unavailable", entry + " is not running (commands go through it)");
             return finish_command(entry, mr);
@@ -812,7 +939,7 @@ Reply Gateway::command(const std::string& id, const std::function<Body()>& body,
     request["cmd"] = b.value["cmd"];
     request["args"] = py_truthy(args) ? args : Json::object();
     request["from"] = ctx.from;  // 워커는 게이트웨이(믿는 곳)가 붙인 것만 쓴다(docs/command-path.md 5장)
-    const CommandResult r = worker_command(path, request, 1.0, cfg_.command_timeout);
+    const CommandResult r = worker_command(path, request, 1.0, command_timeout_.load());
     return finish_command(id, r);
 }
 

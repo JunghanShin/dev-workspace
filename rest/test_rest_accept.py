@@ -2168,5 +2168,169 @@ class ManagerCache(unittest.TestCase):
             fake.close()
 
 
+SETTINGS_ENV = (
+    "# 머리 주석\n"
+    "## 화면\n"
+    "# 화면 제목\n"
+    "#WORKSPACE_UI_TITLE=Workspace\n"
+    "WORKSPACE_REST_PORT=8080\n"
+    "\n"
+    "## 로그\n"
+    "# 로그 수준\n"
+    "WORKSPACE_LOG_LEVEL=WARNING\n"
+    "OTHER=1\n"
+)
+
+
+class Settings(unittest.TestCase):
+    """워크스페이스 설정 GET·PUT /workspace/settings(ui/workspace-screen.md 2장, docs/gateway.md 3장)"""
+
+    @classmethod
+    def setUpClass(cls):
+        # 정의는 실제 파일(install/config/workspace-settings.json)을 쓴다. 워크스페이스 뿌리는 따로(다른 읽기 시험과 섞이지 않게)
+        cls.root = tempfile.mkdtemp(prefix="setroot", dir=T["tmp"])
+        dst = os.path.join(cls.root, "install", "config")
+        os.makedirs(dst)
+        shutil.copy(os.path.join(REPO, "install", "config", "workspace-settings.json"), dst)
+        with open(os.path.join(dst, "workspace-settings.json"), encoding="utf-8") as f:
+            cls.defn = json.load(f)
+
+    def start(self, env=None, data=None, **kw):
+        self.data = data or tempfile.mkdtemp(prefix="set", dir=T["tmp"])
+        self.env_path = os.path.join(self.data, "config", "workspace.env")
+        write(self.env_path, SETTINGS_ENV)
+        os.chmod(self.env_path, 0o640)
+        e = {"WORKSPACE_DATA": self.data, "WORKSPACE_ROOT": self.root, "WORKSPACE_MANAGER_SOCKET": T["mgr"].path}
+        e.update(env or {})
+        srv = Server(e, name="settings", **kw)
+        self.addCleanup(srv.stop)
+        return srv
+
+    def fields(self, obj):
+        return {f["key"]: f for g in obj["groups"] for f in g["fields"]}
+
+    def test_get_shape(self):
+        srv = self.start()
+        st, obj, _ = srv.json("GET", "/workspace/settings")
+        self.assertEqual(st, 200)
+        self.assertEqual(list(obj), ["groups", "pending", "file", "product"])
+        self.assertEqual([g["title"] for g in obj["groups"]], ["화면", "명령", "로그", "보안"])
+        self.assertEqual((obj["pending"], obj["file"], obj["product"]), ([], self.env_path, False))
+        # 칸마다 정의 그대로 + value·effective·pending
+        for g, dg in zip(obj["groups"], self.defn["groups"]):
+            for f, df in zip(g["fields"], dg["fields"]):
+                self.assertEqual({k: v for k, v in f.items() if k not in ("value", "effective", "pending")}, df)
+                self.assertEqual(list(f)[-3:], ["value", "effective", "pending"])
+        fs = self.fields(obj)
+        self.assertNotIn("WORKSPACE_REST_PORT", fs)  # 화면이 끊길 수 있는 값은 없음
+        self.assertEqual((fs["WORKSPACE_UI_TITLE"]["value"], fs["WORKSPACE_UI_TITLE"]["effective"]), (None, "Test WS"))
+        self.assertEqual((fs["WORKSPACE_REST_COMMAND_TIMEOUT"]["value"], fs["WORKSPACE_REST_COMMAND_TIMEOUT"]["effective"]),
+                         (None, COMMAND_TIMEOUT))
+        self.assertEqual(fs["WORKSPACE_UI_MEDIA_URL"]["effective"], "http://{host}:8889/{path}")
+        lv = fs["WORKSPACE_LOG_LEVEL"]
+        self.assertEqual((lv["value"], lv["effective"], lv["pending"]), ("WARNING", "WARNING", False))
+        hp = fs["WORKSPACE_HTTPS_PORT"]
+        self.assertEqual((hp["value"], hp["effective"], hp["pending"]), (None, 8443, False))
+        self.assertEqual(srv.json("GET", "/api/board/workspace/settings/")[1], obj)
+        self.assertEqual(srv.json("POST", "/workspace/settings")[0], 405)
+
+    def test_put_live(self):
+        srv = self.start()
+        st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_UI_TITLE": "새 제목", "WORKSPACE_REST_COMMAND_TIMEOUT": 2})
+        self.assertEqual((st, obj), (200, {"saved": ["WORKSPACE_UI_TITLE", "WORKSPACE_REST_COMMAND_TIMEOUT"],
+                                           "live": ["WORKSPACE_UI_TITLE", "WORKSPACE_REST_COMMAND_TIMEOUT"], "restart": []}))
+        self.assertEqual(srv.json("GET", "/api/ui")[1]["title"], "새 제목")  # 바로
+        # 주석 줄을 풀어 그 자리에서 바꾸고, 없던 키는 끝에. 나머지·주석·순서·권한 그대로
+        self.assertEqual(slurp(self.env_path), SETTINGS_ENV.replace("#WORKSPACE_UI_TITLE=Workspace", "WORKSPACE_UI_TITLE=새 제목")
+                         + "WORKSPACE_REST_COMMAND_TIMEOUT=2\n")
+        self.assertEqual(os.stat(self.env_path).st_mode & 0o777, 0o640)
+        fs = self.fields(srv.json("GET", "/workspace/settings")[1])
+        self.assertEqual((fs["WORKSPACE_UI_TITLE"]["value"], fs["WORKSPACE_UI_TITLE"]["effective"]), ("새 제목", "새 제목"))
+        self.assertEqual(fs["WORKSPACE_REST_COMMAND_TIMEOUT"]["effective"], 2)
+        # 영상 주소 틀도 바로
+        self.assertEqual(srv.json("PUT", "/api/board/workspace/settings", {"WORKSPACE_UI_MEDIA_URL": "http://m:1/{path}"})[0], 200)
+        self.assertEqual(srv.json("GET", "/api/ui")[1]["media"], {"url": "http://m:1/{path}"})
+        # null·"" = 지움(기본값으로): 줄은 주석으로
+        st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_UI_TITLE": None, "WORKSPACE_UI_MEDIA_URL": ""})
+        self.assertEqual(obj["saved"], ["WORKSPACE_UI_TITLE", "WORKSPACE_UI_MEDIA_URL"])
+        self.assertEqual(srv.json("GET", "/api/ui")[1]["title"], "Workspace")
+        text = slurp(self.env_path)
+        self.assertIn("\n#WORKSPACE_UI_TITLE=새 제목\n", text)
+        self.assertIn("\n#WORKSPACE_UI_MEDIA_URL=http://m:1/{path}\n", text)
+        self.assertTrue(text.startswith("# 머리 주석\n## 화면\n# 화면 제목\n"))
+        self.assertIsNone(self.fields(srv.json("GET", "/workspace/settings")[1])["WORKSPACE_UI_TITLE"]["value"])
+        # 명령 기록에 남김
+        self.assertTrue(wait_for(lambda: len([l for l in log_lines(self.data) if l.get("cmd") == "settings"]) == 3))
+        line = [l for l in log_lines(self.data) if l.get("cmd") == "settings"][0]
+        self.assertEqual((line["method"], line["code"]), ("PUT", 200))
+
+    def test_put_restart_pending(self):
+        srv = self.start()
+        st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_LOG_LEVEL": "DEBUG", "WORKSPACE_HTTPS_PORT": "443"})
+        self.assertEqual((st, obj), (200, {"saved": ["WORKSPACE_LOG_LEVEL", "WORKSPACE_HTTPS_PORT"], "live": [],
+                                           "restart": ["WORKSPACE_LOG_LEVEL", "WORKSPACE_HTTPS_PORT"]}))
+        obj = srv.json("GET", "/workspace/settings")[1]
+        self.assertEqual(obj["pending"], ["WORKSPACE_LOG_LEVEL", "WORKSPACE_HTTPS_PORT"])
+        fs = self.fields(obj)
+        self.assertEqual([fs["WORKSPACE_LOG_LEVEL"][k] for k in ("value", "effective", "pending")], ["DEBUG", "WARNING", True])
+        self.assertEqual([fs["WORKSPACE_HTTPS_PORT"][k] for k in ("value", "effective", "pending")], [443, 8443, True])
+        self.assertIs(fs["WORKSPACE_AUTH"]["pending"], False)
+        self.assertIn("\nWORKSPACE_LOG_LEVEL=DEBUG\nOTHER=1\nWORKSPACE_HTTPS_PORT=443\n", slurp(self.env_path))
+        # 시작할 때의 값으로 되돌리면 기다림 없음(지워서 기본값이 시작 값과 같아도)
+        srv.json("PUT", "/workspace/settings", {"WORKSPACE_LOG_LEVEL": "WARNING", "WORKSPACE_HTTPS_PORT": None})
+        self.assertEqual(srv.json("GET", "/workspace/settings")[1]["pending"], [])
+
+    def test_bad_values(self):
+        srv = self.start()
+        before = slurp(self.env_path)
+        st, obj, _ = srv.json("PUT", "/workspace/settings", {
+            "WORKSPACE_UI_TITLE": 5, "WORKSPACE_REST_COMMAND_TIMEOUT": 100, "WORKSPACE_LOG_LEVEL": "LOUD",
+            "WORKSPACE_HTTPS_PORT": 1.5, "WORKSPACE_REST_PORT": 1, "WORKSPACE_AUTH": "on"})
+        self.assertEqual(st, 400)
+        self.assertEqual(obj["error"]["code"], "bad_request")
+        self.assertEqual(obj["error"]["fields"], {
+            "WORKSPACE_UI_TITLE": "must be a string", "WORKSPACE_REST_COMMAND_TIMEOUT": "out of range (min 0.5, max 60)",
+            "WORKSPACE_LOG_LEVEL": "must be one of DEBUG, INFO, WARNING, ERROR", "WORKSPACE_HTTPS_PORT": "must be an integer",
+            "WORKSPACE_REST_PORT": "unknown setting"})
+        for body in ([1], "x", {"WORKSPACE_UI_TITLE": "a#b"}, {"WORKSPACE_REST_COMMAND_TIMEOUT": True},
+                     {"WORKSPACE_REST_TOKEN": "t"}, {"WORKSPACE_HTTPS_PORT": 70000}):
+            with self.subTest(body=body):
+                st, obj, _ = srv.json("PUT", "/workspace/settings", body)
+                self.assertEqual((st, obj["error"]["code"]), (400, "bad_request"))
+                self.assertEqual("fields" in obj["error"], isinstance(body, dict))
+        self.assertEqual(srv.request("PUT", "/workspace/settings", raw_body=b"{bad")[0], 400)
+        self.assertEqual(slurp(self.env_path), before)  # 하나도 쓰지 않음
+        self.assertEqual(srv.json("GET", "/api/ui")[1]["title"], "Test WS")
+
+    def test_operation_mode(self):
+        srv = self.start(dev=False)
+        st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_UI_TITLE": "x"})
+        self.assertEqual((st, obj), (403, {"error": {"code": "forbidden", "message": "development mode required"}, "need": "development"}))
+        self.assertEqual(srv.json("GET", "/workspace/settings")[0], 200)
+        self.assertEqual(slurp(self.env_path), SETTINGS_ENV)
+
+    def test_product(self):
+        data = auth_data_dir()  # 제품은 신분 확인이 늘 켜짐: 관리자 토큰으로
+        hdrs = {"Authorization": "Bearer " + AUTH_USERS_TOKEN[data]}
+        srv = self.start(auth_env(data, WORKSPACE_PRODUCT="1"), data=data)
+        st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_UI_TITLE": "x"}, headers=hdrs)
+        self.assertEqual((st, obj), (403, {"error": {"code": "forbidden", "message": "settings are locked in product"}}))
+        st, obj, _ = srv.json("GET", "/workspace/settings", headers=hdrs)
+        self.assertEqual((st, obj["product"]), (200, True))
+        self.assertEqual(slurp(self.env_path), SETTINGS_ENV)
+
+    def test_roles(self):
+        data = auth_data_dir()
+        srv = self.start(auth_env(data), data=data)
+        viewer = Session(srv)
+        viewer.login("v1", PASSWORDS["v1"])
+        self.assertEqual(viewer.json("GET", "/api/board/workspace/settings")[0], 200)
+        self.assertEqual(viewer.json("PUT", "/api/board/workspace/settings", {"WORKSPACE_UI_TITLE": "x"})[0], 403)
+        self.assertEqual(srv.json("GET", "/workspace/settings")[0], 401)
+        maint = Session(srv)
+        maint.login("m1", PASSWORDS["m1"])
+        self.assertEqual(maint.json("PUT", "/api/board/workspace/settings", {"WORKSPACE_UI_TITLE": "x"})[0], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

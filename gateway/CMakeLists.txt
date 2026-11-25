@@ -46,6 +46,7 @@ add_library(gw_core STATIC
     core/pipeline.cpp
     core/crypto.cpp
     core/access.cpp
+    core/settings.cpp
 )
 target_include_directories(gw_core PUBLIC core lib/third_party)
 target_compile_options(gw_core PRIVATE -Wall -Wextra -Wpedantic)

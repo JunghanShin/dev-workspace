@@ -200,7 +200,7 @@ bool open_path(const std::string& path, bool ui_enabled) {
     if (!ui_enabled) return false;
     if (path == "/" || path == "/index.html") return true;
     // 화면 파일 자체에는 데이터가 없다. 데이터는 /api·REST 경로에서 본다
-    for (const char* p : {"/api/", "/workers", "/system", "/logs", "/records", "/history"})
+    for (const char* p : {"/api/", "/workers", "/system", "/logs", "/records", "/history", "/workspace"})
         if (starts_with(path, p)) return false;
     for (const char* e : {".html", ".js", ".css", ".svg", ".png", ".ico", ".woff2", ".json"})
         if (ends_with(path, e)) return true;

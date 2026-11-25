@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 상태 | 확정·구현(2026-11-24, 0.74 예정). 9장은 초안대로 정함(사용자: "나머지도 다 하고 한 번에 검증") |
-| 대상 | 워크스페이스 기본 화면(`ui/web`)에서 매니저 6개의 상태를 한눈에: 상단 건강 띠(늘 보임) + 왼쪽 목록 "시스템 › 시스템" 패널 |
+| 대상 | 워크스페이스 기본 화면(`ui/web`)에서 매니저 6개의 상태를 한눈에: 상단 건강 띠(늘 보임) + 워크스페이스 › 개요 탭(0.80, `ui/workspace-screen.md`) |
 | 바탕 | `ui/README.md`(패널 추가·디자인 규칙), `docs/managers.md`, 매니저 주제 정의 `managers/*/io/*.json`, `docs/command-lease.md`(임대 `leases`) |
 | 남은 일 목록 | `docs/managers-next.md` 7번 |
 
@@ -20,8 +20,8 @@
 | ① 찾기 | `GET /workers`에서 `kind: "manager"`인 워커마다 계약 `GET /workers/{id}/io`를 한 번 읽어, 내보내는 역할(`system`·`fault`·`mission`·`payload`·`config`)을 내보내는 매니저를 안다(이름을 박아 두지 않음). record는 역할이 없어 type `record-manager`로 | `web/system.js` |
 | ② 받기 | 그 매니저가 떠 있으면 스트림 `GET /workers/{id}/stream?hz=2`(SSE, 9.7)를 하나 열어 주제를 합친다(첫 메시지 기준 상태, 이후 바뀐 주제만). 이벤트는 매니저마다 최근 20개. 꺼지면 닫고 "끊김" | `web/system.js` |
 | ③ 건강 띠 | 셸 머리에 `system` 주제의 `health`(정상·주의·고장)와 fault 주제의 이상 수. 누르면 `#/system` | `web/shell.js` |
-| ④ 패널 | 카드 6개(아래 3장). 셸 갱신 주기마다 다시 그림 | `web/panels/system/` |
-| ⑤ 임대 | 패널이 열려 있을 때만 5 s마다 떠 있는 워커에 `get_status`(읽기 명령, 게이트웨이가 워커로 바로)를 보내 `leases`를 모음 | `web/panels/system/` |
+| ④ 패널 | 카드 6개(아래 3장). 셸 갱신 주기마다 다시 그림 | `web/panels/workspace/tabs/overview.js` |
+| ⑤ 임대 | 패널이 열려 있을 때만 5 s마다 떠 있는 워커에 `get_status`(읽기 명령, 게이트웨이가 워커로 바로)를 보내 `leases`를 모음 | `web/panels/workspace/tabs/overview.js` |
 
 - 화면 하나가 매니저 스트림을 매니저마다 하나만 연다(띠와 패널이 같은 `system.js`를 씀, ES 모듈 하나)
 - 브라우저는 출처마다 HTTP/1.1 연결이 6개라, 늘 여는 스트림은 띠에 쓰는 system·fault 둘뿐. mission·payload·config는 패널 "시스템"이 열려 있는 동안만(다른 패널의 자기 스트림이 막히지 않게)

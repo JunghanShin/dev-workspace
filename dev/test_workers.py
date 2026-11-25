@@ -419,12 +419,12 @@ class Panels(unittest.TestCase):
 
 
     def test_panel_groups_fixed(self):
-        """왼쪽 목록 묶음은 플랫폼이 정한 것만(ui/README.md): 공용 패널은 시스템, 워커 패널은 페이로드·개발 도구"""
+        """왼쪽 목록 묶음은 플랫폼이 정한 것만(ui/workspace-screen.md): 공용 패널은 맨 위(group 없음), 워커 패널은 페이로드·개발 도구"""
         for d in sorted(glob.glob(os.path.join(ROOT, "ui", "web", "panels", "*", "panel.json"))):
             with open(d, encoding="utf-8") as f:
                 g = json.load(f).get("group")
             with self.subTest(panel=os.path.relpath(d, ROOT)):
-                self.assertEqual(g, "시스템")
+                self.assertIn(g, (None, ""), "공용 패널은 맨 위(group 없음, ui/workspace-screen.md)")
         for w in workers():
             manifest = os.path.join(w, "workspace", "panel", "panel.json")
             if not os.path.isfile(manifest):

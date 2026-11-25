@@ -1,4 +1,4 @@
-// 패널 "시스템"(ui/system-panel.md 3장): 매니저 6개의 상태를 한눈에. 주제는 /system.js가 받은 매니저 스트림에서,
+// 워크스페이스 › 개요(ui/workspace-screen.md, ui/system-panel.md 3장): 매니저 6개의 상태를 한눈에, 문제 있는 것부터. 주제는 /system.js가 받은 매니저 스트림에서,
 // record는 /workers 지표, 명령 임대는 패널이 열려 있을 때만 5 s마다 워커 get_status(읽기 명령)의 leases.
 // 공통 부품(ctx.ui)으로만 그린다
 import * as sys from "/system.js";
@@ -80,10 +80,14 @@ function render(state, ctx) {
   els.status.show(sys.feedState(S, "status-manager"), st ? [
     ui.kvList([["전체", healthPill(ui, st.health)], ["이유", (st.reasons || []).join(" · ") || "없음"],
                ["process-manager", st.pm_link ? "연결" : "끊김"]]),
+    // 문제 있는 워커만 줄로(정상·설정상 꺼짐은 개수만)
     table(h, ["워커", "건강", "상태 · 이유"],
-      Object.entries(st.workers || {}).sort(([a], [b]) => a.localeCompare(b)).map(([id, w]) => [
+      Object.entries(st.workers || {}).filter(([, w]) => w.health !== "ok" && w.health !== "off")
+        .sort(([a], [b]) => a.localeCompare(b)).map(([id, w]) => [
         h("span", { class: "mono" }, id), healthPill(ui, w.health),
-        h("span", {}, w.state || "—", w.why ? h("span", { class: "muted" }, " · " + w.why) : null)]), "워커 없음"),
+        h("span", {}, w.state || "—", w.why ? h("span", { class: "muted" }, " · " + w.why) : null)]),
+      (() => { const ws = Object.values(st.workers || {}); const n = (k) => ws.filter((w) => w.health === k).length;
+               return ws.length ? `문제 있는 워커 없음 (정상 ${n("ok")} · 꺼짐 ${n("off")})` : "워커 없음"; })()),
   ] : []);
 
   // 이상
@@ -111,7 +115,8 @@ function render(state, ctx) {
   const mEvents = M ? M.events.filter((e) => /^command_(busy|forbidden|timeout)$/.test(e.code)).slice(-5).reverse() : [];
   els.mission.show(sys.feedState(M, "mission-manager"), mt ? [
     ui.kvList([["보냄", String(mt.sent ?? 0)], ["busy · timeout", `${mt.busy ?? 0} · ${mt.timeouts ?? 0}`],
-               ["forbidden · unavailable", `${mt.forbidden ?? 0} · ${mt.unavailable ?? 0}`]]),
+               ["forbidden · unavailable", `${mt.forbidden ?? 0} · ${mt.unavailable ?? 0}`],
+               ["운용이었으면 막힘", String(mt.would_block ?? 0)]]),
     table(h, ["대상.역할", "대기", "보내는 중"],
       Object.entries(mt.queues || {}).map(([k, q]) => [h("span", { class: "mono" }, k), String(q.waiting ?? 0),
         q.inflight ? h("span", {}, h("span", { class: "mono" }, q.inflight.cmd),
@@ -132,14 +137,32 @@ function render(state, ctx) {
   // 모듈
   const pt = P && P.up ? P.topic : null;
   els.payload.show(sys.feedState(P, "payload-manager"), pt ? [
-    table(h, ["모듈", "역할", "상태", "자동 시작", "건강"],
-      Object.entries(pt.modules || {}).sort(([a], [b]) => a.localeCompare(b)).map(([id, m]) => [
-        h("span", { class: "mono" }, id), (m.roles || []).join(", ") || "—", ui.workerPill(m.state),
-        m.autostart ? "켬" : "끔", m.health ? healthPill(ui, m.health) : "—"]), "모듈 없음"),
+    // 모듈 하나하나는 왼쪽 "페이로드"에. 여기는 개수와 문제 있는 모듈만
+    ui.kvList([["모듈", (() => { const ms = Object.values(pt.modules || {});
+      return `${ms.length}개 · 실행 ${ms.filter((m) => m.state === "running").length} · 꺼짐 ${ms.filter((m) => m.state !== "running").length}`; })()]]),
+    table(h, ["모듈", "상태", "자동 시작", "건강"],
+      Object.entries(pt.modules || {}).filter(([, m]) => (m.health && m.health !== "ok" && m.health !== "off") || (m.autostart && m.state !== "running"))
+        .sort(([a], [b]) => a.localeCompare(b)).map(([id, m]) => [
+        h("span", { class: "mono" }, id), ui.workerPill(m.state), m.autostart ? "켬" : "끔", m.health ? healthPill(ui, m.health) : "—"]),
+      "문제 있는 모듈 없음"),
   ] : []);
 
-  // 설정
   const ct = C && C.up ? C.topic : null;
+  if (els.grid) {
+    const problem = new Map([
+      [els.status, st && st.health !== "ok"],
+      [els.fault, !!(nFault || (ft && (ft.held_actions || []).length))],
+      [els.mission, !!(mt && Object.values(mt.queues || {}).some((q) => q.waiting))],
+      [els.lease, false],
+      [els.payload, !!(pt && Object.values(pt.modules || {}).some((m) => (m.health && m.health !== "ok" && m.health !== "off") || (m.autostart && m.state !== "running")))],
+      [els.record, !!(rec && (rec.actual_state !== "running" || (rm.write_errors || 0) > 0))],
+      [els.config, !!(ct && ((ct.mismatch || []).length || ct.drift))],
+    ]);
+    const order = [...problem.keys()].sort((a, b) => Number(problem.get(b)) - Number(problem.get(a)));
+    if (order.some((c, i) => els.grid.children[i] !== c)) els.grid.append(...order);
+  }
+
+  // 설정
   els.config.show(sys.feedState(C, "config-manager"), ct ? [
     ui.kvList([["버전 어긋남", (ct.mismatch || []).length ? (ct.mismatch || []).map((x) => typeof x === "string" ? x : JSON.stringify(x)).join(" · ") : "없음"],
                ["스냅숏", `${(ct.snapshots || []).length}개`], ["마지막 스냅숏 뒤 바뀜", ct.drift ? "있음" : "없음"],
@@ -159,7 +182,7 @@ export default {
   mount(el, ctx) {
     const { h, ui } = ctx;
     els.root = el;
-    els.tHealth = ui.tile("시스템");
+    els.tHealth = ui.tile("건강");
     els.tFault = ui.tile("이상");
     els.tRefused = ui.tile("명령 거절");
     els.tRecord = ui.tile("기록");
@@ -171,9 +194,9 @@ export default {
     els.config = makeCard(ui, h, "설정 (config)");
     els.lease = makeCard(ui, h, "명령 임대");
     el.append(
-      ui.panelHead({ title: "시스템", actions: [ui.iconButton({ icon: "refresh", title: "임대 다시 읽기", onClick: () => loadLeases(ctx) })] }),
+      ui.panelHead({ title: "개요", actions: [ui.iconButton({ icon: "refresh", title: "임대 다시 읽기", onClick: () => loadLeases(ctx) })] }),
       ui.tiles(els.tHealth, els.tFault, els.tRefused, els.tRecord),
-      h("div", { class: "cols2" }, els.status, els.fault, els.mission, els.lease, els.payload, els.record, els.config));
+      els.grid = h("div", { class: "cols2" }, els.status, els.fault, els.mission, els.lease, els.payload, els.record, els.config));
     unwant = sys.want(["mission", "payload", "config"]);
     loadLeases(ctx);
     leaseTimer = setInterval(() => loadLeases(ctx), LEASE_MS);

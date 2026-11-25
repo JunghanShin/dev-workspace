@@ -2,7 +2,7 @@
 //
 // 요청 하나의 길(server.cpp가 이 순서로 부른다):
 //   화면 경로(ui_route: /api/board 접두어 떼기, /api/remote, /api/panels, /api/ui, 화면 파일)
-//   → route(): /health → 제품 빌드 → 읽기(GET) → 스트림 → 명령 → Manager op 표 → 405/404
+//   → route(): /health → 제품 빌드 → 설정(/workspace/settings) → 읽기(GET) → 스트림 → 명령 → Manager op 표 → 405/404
 #pragma once
 
 #include <map>
@@ -16,7 +16,7 @@ using Params = std::map<std::string, std::string>;
 Params parse_qs(const std::string& query);
 std::string unquote_plus(const std::string& s);
 
-enum class RouteKind { None, Health, ProductBuild, ProductOff, Read, Stream, Command, Manager, MethodNotAllowed };
+enum class RouteKind { None, Health, ProductBuild, ProductOff, Read, Stream, Command, Manager, Settings, MethodNotAllowed };
 
 struct Route {
     RouteKind kind = RouteKind::None;

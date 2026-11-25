@@ -29,6 +29,8 @@
 #include "ui_rules.hpp"
 #include "users_cli.hpp"
 
+extern char** environ;
+
 namespace {
 
 const char* const kUsage =
@@ -156,6 +158,12 @@ int main(int argc, char** argv) {
     cfg.ui.media_url = env_nonempty("WORKSPACE_UI_MEDIA_URL", "http://{host}:8889/{path}");
     cfg.ui.refresh_ms = to_int("WORKSPACE_UI_REFRESH_MS", env_nonempty("WORKSPACE_UI_REFRESH_MS", "1000"));
     cfg.ui.title = env_nonempty("WORKSPACE_UI_TITLE", "Workspace");
+    // 시작할 때의 WORKSPACE_* (설정 탭 "다시 시작하면 적용"의 기준. 시작 셸이 workspace.env 키를 넘긴다)
+    for (char** e = environ; e && *e; ++e) {
+        const std::string kv = *e;
+        const size_t eq = kv.find('=');
+        if (eq != std::string::npos && kv.rfind("WORKSPACE_", 0) == 0) cfg.start_env[kv.substr(0, eq)] = kv.substr(eq + 1);
+    }
 
     // malloc 아레나를 2개로: 스레드(gw.http ×20)마다 아레나가 생기면 쉬는 동안에도 메모리가 늘어난다(목표 5 MB 이하)
     mallopt(M_ARENA_MAX, 2);

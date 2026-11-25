@@ -55,11 +55,13 @@ DNS=                              # 비우면 설정 안 함
 | `WORKSPACE_REST_COMMAND_TIMEOUT` | `3` | 워커 명령 응답을 기다리는 초. 장치 응답을 기다리는 명령보다 길게 |
 | `WORKSPACE_UI_MEDIA_URL` | `http://{host}:8889/{path}` | 화면의 영상 주소 틀. `{host}` = 브라우저가 접속한 보드 주소, `{path}` = 송출 경로. 원격 미디어 서버를 보려면 그 주소로 |
 | `WORKSPACE_UI_TITLE` | `Workspace` | 화면 왼쪽 위·브라우저 탭 제목 |
-| `WORKSPACE_LOG_LEVEL` | `INFO` | Manager·REST 로그 수준(`DEBUG`, `INFO`, `WARNING`) |
+| `WORKSPACE_LOG_LEVEL` | `INFO` | Manager·REST 로그 수준(`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `WORKSPACE_REST_TOKEN` | 없음 | REST 접근 토큰. 있으면 `/health`·화면 파일 말고 모두 토큰 필요(`Authorization: Bearer`, 쿠키 `workspace_token`, `?token=`). 제품 설치가 장비별로 만든다 |
 | `WORKSPACE_UI` | `1` | `0`이면 보드가 화면을 내주지 않음(별도 제어 UI가 REST만 씀) |
 
 - `KEY=값` 한 줄씩. 셸로 실행하지 않고 읽기만 한다. 경로(소켓, 데이터 폴더)는 넣지 않는다
+- HTTPS(`WORKSPACE_HTTPS`·`_PORT`·`_CERT`·`_KEY`, `WORKSPACE_HTTP_REDIRECT`)와 로그인(`WORKSPACE_AUTH`)도 여기(`docs/https.md`, `docs/gateway.md` 3장)
+- 화면 **워크스페이스 › 설정** 탭에서 고칠 수 있는 키는 `install/config/workspace-settings.json`에 정의한 것만(제목·영상 주소 틀·명령 응답 대기는 바로, 나머지는 다시 시작하면 적용). 게이트웨이가 그 줄만 바꾼다(주석·순서 그대로). 받는 주소·포트·토큰·화면 켬은 파일에서만
 
 ### `manager.json` — Manager 동작
 

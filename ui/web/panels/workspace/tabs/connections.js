@@ -175,7 +175,9 @@ export default {
     els.commanders = ui.kvList([]);
     els.guard = h("div", { class: "muted", style: "margin-top:6px" });
     el.appendChild(h("div", { class: "stack" },
-      ui.panelHead({ title: "연결", actions: [ui.iconButton({ icon: "refresh", title: "새로 읽기", onClick: () => load(ctx) })] }),
+      ui.panelHead({ title: "워커 연결", actions: [ui.iconButton({ icon: "refresh", title: "새로 읽기", onClick: () => load(ctx) })] }),
+      h("div", { class: "hint", style: "font-size:12px;color:var(--muted)" },
+        "어느 워커가 어느 워커의 출력을 받는지(입력 연결)와, 워커에 명령할 수 있는 곳(commanders)입니다. 입력 상대를 바꾸면 그 워커만 다시 시작합니다"),
       els.note,
       ui.card("연결 그림", els.graph,
         h("div", { class: "hint", style: "margin-top:6px" }, "실선 = 이어짐 · 빨간 점선 = 문제(버전·없는 항목 등) · 회색 점선 = 프리셋 설정 · 점선 상자 = 꺼진 워커")),

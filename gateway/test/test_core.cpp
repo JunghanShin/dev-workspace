@@ -15,6 +15,7 @@
 #include "pipeline.hpp"
 #include "profile_rules.hpp"
 #include "routes.hpp"
+#include "settings.hpp"
 #include "stream_state.hpp"
 #include "text.hpp"
 #include "ui_rules.hpp"
@@ -94,6 +95,12 @@ void test_routes() {
     CHECK(route("PUT", "/workers/w1/stream", false).kind == RouteKind::MethodNotAllowed);
     CHECK(route("POST", "/workers/w1/command/", false).kind == RouteKind::Command);
     CHECK(route("GET", "/health///", false).kind == RouteKind::Health);
+    CHECK(route("GET", "/workspace/settings/", false).kind == RouteKind::Settings);
+    CHECK(route("PUT", "/workspace/settings", true).kind == RouteKind::Settings);
+    CHECK(route("POST", "/workspace/settings", false).kind == RouteKind::MethodNotAllowed);
+    CHECK(reads_body("PUT", route("PUT", "/workspace/settings", false)));
+    CHECK(classify("PUT", "/api/board/workspace/settings", true) == Need::Maintain);
+    CHECK(classify("GET", "/workspace/settings", true) == Need::Read);
     CHECK(route("POST", "/health", false).kind == RouteKind::None);
     r = route("GET", "/system/product-build/check/", false);
     CHECK(r.kind == RouteKind::ProductBuild && r.sub == "/check");
@@ -613,6 +620,92 @@ void test_record_line() {
     CHECK_EQ(bearer_token("Basic abc"), std::string(""));
 }
 
+// 워크스페이스 설정: 정의 검사, 값 검사, workspace.env 줄 고치기(주석·순서 그대로)
+void test_settings() {
+    const std::string def_text = R"({"version": 1, "groups": [
+      {"title": "화면", "fields": [{"key": "T", "type": "string", "apply": "live", "default": "Workspace"}]},
+      {"title": "명령", "fields": [{"key": "N", "type": "number", "min": 0.5, "max": 60, "apply": "live", "default": 3},
+                                  {"key": "P", "type": "integer", "min": 1, "max": 65535, "apply": "restart", "default": 8443},
+                                  {"key": "E", "type": "enum", "enum": ["off", "on"], "apply": "restart", "default": "off"}]}]})";
+    Json def;
+    std::string err;
+    CHECK(settings_parse_def(def_text, def, err));
+    Json bad;
+    CHECK(!settings_parse_def(R"({"groups": [{"fields": [{"key": "a", "type": "string", "apply": "live"}]}]})", bad, err));
+    CHECK(!settings_parse_def(R"({"groups": [{"fields": [{"key": "A", "type": "x", "apply": "live"}]}]})", bad, err));
+    CHECK(!settings_parse_def(R"({"groups": [{"fields": [{"key": "A", "type": "enum", "apply": "live"}]}]})", bad, err));
+    CHECK(!settings_parse_def(R"({"groups": [{"fields": [{"key": "A", "type": "string", "apply": "x"}]}]})", bad, err));
+    CHECK(settings_field(def, "P") && !settings_field(def, "Q"));
+    CHECK_EQ(settings_default_text(*settings_field(def, "N")), std::string("3"));
+    CHECK(settings_typed(*settings_field(def, "N"), "2.5") == Json(2.5));
+    CHECK(settings_typed(*settings_field(def, "P"), "80") == Json(80));
+    CHECK(settings_typed(*settings_field(def, "P"), "x") == Json("x"));
+
+    // 값 검사
+    EnvChanges ch;
+    Json fields;
+    CHECK(settings_check(def, Json::parse(R"({"T": " 새 제목 ", "N": 0.5, "P": "443", "E": "on"})"), ch, fields, err));
+    CHECK_EQ(ch.size(), 4u);
+    CHECK_EQ(*ch[0].second, std::string("새 제목"));
+    CHECK_EQ(*ch[1].second, std::string("0.5"));
+    CHECK_EQ(*ch[2].second, std::string("443"));
+    CHECK(settings_check(def, Json::parse(R"({"T": null, "N": "", "P": 8443.0})"), ch, fields, err));
+    CHECK(!ch[0].second && !ch[1].second && *ch[2].second == "8443");
+    CHECK(!settings_check(def, Json::parse(R"({"T": 1, "N": 61, "P": 1.5, "E": "maybe", "X": 1, "Q": true})"), ch, fields, err));
+    CHECK(ch.empty());
+    CHECK_EQ(fields.size(), 6u);
+    CHECK_EQ(fields["T"].get<std::string>(), std::string("must be a string"));
+    CHECK_EQ(fields["N"].get<std::string>(), std::string("out of range (min 0.5, max 60)"));
+    CHECK_EQ(fields["P"].get<std::string>(), std::string("must be an integer"));
+    CHECK_EQ(fields["E"].get<std::string>(), std::string("must be one of off, on"));
+    CHECK_EQ(fields["X"].get<std::string>(), std::string("unknown setting"));
+    CHECK(!settings_check(def, Json::parse(R"({"T": "a#b"})"), ch, fields, err) && fields.contains("T"));
+    CHECK(!settings_check(def, Json::parse(R"({"T": "\"a\""})"), ch, fields, err));
+    CHECK(!settings_check(def, Json::parse(R"({"N": true})"), ch, fields, err));
+    CHECK(!settings_check(def, Json::parse("[1]"), ch, fields, err) && fields.empty());
+
+    // 줄 고치기
+    const std::string text =
+        "# 머리 주석\n"
+        "## 묶음\n"
+        "# 설명 A\n"
+        "A=1\n"
+        "# 설명 B\n"
+        "#B=old\n"
+        "#  C=x\n"
+        "D=keep  # 뒤 주석\n"
+        "\n"
+        "Z=9\n";
+    using C = EnvChanges::value_type;
+    // 있는 줄 바꿈 · 주석 줄 풂 · 없는 키 끝에 더함 · 다른 줄 그대로
+    CHECK_EQ(env_edit(text, {C{"A", std::string("2")}, C{"B", std::string("new")}, C{"NEW", std::string("v")}}),
+             std::string("# 머리 주석\n## 묶음\n# 설명 A\nA=2\n# 설명 B\nB=new\n#  C=x\nD=keep  # 뒤 주석\n\nZ=9\nNEW=v\n"));
+    CHECK_EQ(env_edit(text, {C{"C", std::string("y")}, C{"D", std::string("k2")}}),
+             std::string("# 머리 주석\n## 묶음\n# 설명 A\nA=1\n# 설명 B\n#B=old\nC=y\nD=k2  # 뒤 주석\n\nZ=9\n"));
+    // 지움: 주석 줄이 없으면 "#KEY=옛값"으로, 있으면 그 줄은 빼고 주석 줄을 남김
+    CHECK_EQ(env_edit(text, {C{"A", std::nullopt}, C{"Z", std::nullopt}}),
+             std::string("# 머리 주석\n## 묶음\n# 설명 A\n#A=1\n# 설명 B\n#B=old\n#  C=x\nD=keep  # 뒤 주석\n\n#Z=9\n"));
+    CHECK_EQ(env_edit("#K=a\nK=b\n", {C{"K", std::nullopt}}), std::string("#K=a\n"));
+    CHECK_EQ(env_edit(text, {C{"NOPE", std::nullopt}}), text);  // 없는 키를 지움: 그대로
+    // 같은 키가 둘이면 앞의 것을 바꾸고 뒤의 것은 뺌(read_kv는 뒤의 것을 씀)
+    CHECK_EQ(env_edit("K=1\nX=0\nK=2\n", {C{"K", std::string("3")}}), std::string("K=3\nX=0\n"));
+    // 끝 줄바꿈 없음 · 빈 파일 · CRLF
+    CHECK_EQ(env_edit("A=1", {C{"B", std::string("2")}}), std::string("A=1\nB=2\n"));
+    CHECK_EQ(env_edit("", {C{"B", std::string("2")}}), std::string("B=2\n"));
+    CHECK_EQ(env_edit("A=1\r\n#B=\r\n", {C{"A", std::string("5")}, C{"B", std::string("6")}}), std::string("A=5\r\nB=6\r\n"));
+    // 비슷한 이름은 건드리지 않음
+    CHECK_EQ(env_edit("AB=1\n#ABC=2\n", {C{"A", std::string("x")}}), std::string("AB=1\n#ABC=2\nA=x\n"));
+
+    // 지금 값(read_kv와 같게: # 뒤 버림, 끝 공백·앞뒤 " 뗌, 뒤의 것이 이김)
+    const auto act = env_active("A=1\n#B=2\nC=\"q\"  \nD=v # c\nA=3\n  E=sp\n");
+    CHECK_EQ(act.size(), 4u);
+    CHECK_EQ(act.at("A"), std::string("3"));
+    CHECK_EQ(act.at("C"), std::string("q"));
+    CHECK_EQ(act.at("D"), std::string("v"));
+    CHECK_EQ(act.at("E"), std::string("sp"));
+    CHECK(!act.count("B"));
+}
+
 }  // namespace
 
 int main() {
@@ -631,6 +724,7 @@ int main() {
     test_sessions();
     test_limiter();
     test_record_line();
+    test_settings();
     std::cout << (g_fail ? "FAILED " : "OK ") << g_checks - g_fail << "/" << g_checks << " checks\n";
     return g_fail ? 1 : 0;
 }

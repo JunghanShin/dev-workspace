@@ -125,13 +125,33 @@ Json Ui::panels() const {
     return out;
 }
 
+void Ui::set_title(const std::string& v) {
+    std::lock_guard<std::mutex> lock(live_mu_);
+    title_ = v;
+}
+
+void Ui::set_media_url(const std::string& v) {
+    std::lock_guard<std::mutex> lock(live_mu_);
+    media_url_ = v;
+}
+
+std::string Ui::title() const {
+    std::lock_guard<std::mutex> lock(live_mu_);
+    return title_;
+}
+
+std::string Ui::media_url() const {
+    std::lock_guard<std::mutex> lock(live_mu_);
+    return media_url_;
+}
+
 Json Ui::ui_info(const std::string& host_header, const std::string& data_dir, bool product) const {
-    std::string url = cfg_.media_url;
+    std::string url = media_url();
     const std::string host = request_host(host_header);
     for (size_t pos = 0; (pos = url.find("{host}", pos)) != std::string::npos; pos += host.size())
         url.replace(pos, 6, host);
     Json o = Json::object();
-    o["title"] = cfg_.title;
+    o["title"] = title();
     o["product"] = product;  // 화면이 설정·워커 시작/정지 부품을 그리지 않는다(kit.js setProduct)
     o["refresh_ms"] = cfg_.refresh_ms;
     o["media"] = Json{{"url", url}};

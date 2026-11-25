@@ -183,6 +183,10 @@ Route route(const std::string& method, const std::string& path, bool product) {
         r.sub = trimmed.substr(std::string("/system/product-build").size());
         return r;
     }
+    if (trimmed == "/workspace/settings") {  // 워크스페이스 설정(ui/workspace-screen.md 2장): GET·PUT
+        r.kind = method == "GET" || method == "PUT" ? RouteKind::Settings : RouteKind::MethodNotAllowed;
+        return r;
+    }
     if (method == "GET" && match_read(path, r)) return r;
 
     std::vector<std::string> segs;
@@ -216,6 +220,7 @@ Route route(const std::string& method, const std::string& path, bool product) {
 bool reads_body(const std::string& method, const Route& r) {
     if (r.kind == RouteKind::Manager) return !r.body_key.empty();
     if (r.kind == RouteKind::Command) return true;
+    if (r.kind == RouteKind::Settings) return method == "PUT";
     if (r.kind == RouteKind::ProductBuild) return r.sub.empty() && method == "POST";
     return false;
 }

@@ -128,7 +128,7 @@ Json env_values(const std::string& text) {
 
 bool profile_file_name(const std::string& name) {
     return !starts_with(name, ".") && !starts_with(name, "README") && !ends_with(name, ".md") &&
-           name != "worker-types.json" && name != "product.json";
+           name != "worker-types.json" && name != "product.json" && name != "workspace-settings.json";
 }
 
 std::string file_origin(const std::optional<std::string>& board, const std::optional<std::string>& prof,
