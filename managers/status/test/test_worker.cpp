@@ -163,7 +163,11 @@ static void test_system() {
     CHECK(sc >= 0);
     std::string sbuf;
     std::vector<std::string> events;
-    Json s = wait_system(sc, sbuf, [](const Json& j) { return j.value("health", "") == "ok"; }, events, 10000);
+    // 워커 a 줄이 반영될 때까지(워커가 없을 때도 ok라, 빠른 기계에서는 a 전에 ok 줄이 먼저 온다)
+    Json s = wait_system(
+        sc, sbuf,
+        [](const Json& j) { return j.value("health", "") == "ok" && j.contains("workers") && j["workers"].contains("a"); },
+        events, 10000);
     CHECK(s.value("health", "") == "ok");
     CHECK(s.value("pm_link", false) == true);
     // 구독자가 붙기 전에 난 이벤트(시작 → 건강 정해짐)도 처음 붙은 구독자가 받는다
