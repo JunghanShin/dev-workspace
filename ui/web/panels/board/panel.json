@@ -1,1 +1,1 @@
-{"title": "시스템 모니터", "group": "모니터링", "order": 20, "worker_types": ["sysmon"], "icon": "cpu"}
+{"title": "시스템 모니터", "group": "시스템", "order": 20, "worker_types": ["sysmon"], "icon": "cpu"}

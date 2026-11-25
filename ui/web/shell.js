@@ -333,7 +333,17 @@ function renderHealth() {
 
 // 자동 상태 화면(panels/auto): 자기 화면이 없는 워커를 워커 계약(io/self.json)대로 그린다. panel.json이 없어
 // 공용 목록에는 안 나오고, 여기서 그런 워커마다 항목을 만든다. 기본 탑재 워커(시스템 모니터 등)는 뺀다
-const AUTO_PANEL = { id: "auto", title: "상태(자동)", group: "워커(자동 화면)", icon: "list" };
+const AUTO_PANEL = { id: "auto", title: "상태(자동)", group: "페이로드", icon: "list" };
+
+// 왼쪽 목록 묶음은 플랫폼이 정한 셋뿐(ui/README.md). 시스템 = 공용 패널(전체 관리), 페이로드 = 워커 패널(들어간
+// 모듈), 개발 도구 = 개발할 때만 쓰는 워커 패널. panel.json group이 이 밖이면 워커 패널은 페이로드, 공용은 시스템
+const GROUPS = ["시스템", "페이로드", "개발 도구"];
+function groupOf(p) {
+  if (GROUPS.includes(p.group)) return p.group;
+  const g = p.worker_types || p.id === "auto" ? "페이로드" : "시스템";
+  if (p.group) console.warn(`panel ${p.id}: group "${p.group}" is not one of ${GROUPS.join(", ")}, using ${g}`);
+  return g;
+}
 
 function navItems() {
   const items = [];
@@ -354,6 +364,9 @@ function navItems() {
     items.push({ key: `auto/${w.id}`, panel: AUTO_PANEL, workerId: w.id, label: w.id, sub: AUTO_PANEL.title,
                  dot: w.actual_state, icon: AUTO_PANEL.icon });
   }
+  // 묶음 순서대로(같은 묶음 안은 panel.json order 순서 그대로, sort는 안정 정렬)
+  for (const it of items) it.group = groupOf(it.panel);
+  items.sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group));
   return items;
 }
 
@@ -366,7 +379,7 @@ function renderNav() {
   nav.textContent = "";
   let group = null;
   for (const it of items) {
-    const g = it.panel.group || "기타";
+    const g = it.group;
     if (g !== group) { nav.appendChild(h("div", { class: "group" }, g)); group = g; }
     // 항목: 아이콘(panel.json icon) + 이름(워커면 id, 아래에 패널 이름) + 워커 상태 점
     nav.appendChild(h("a", { href: "#/" + it.key, class: current && current.key === it.key ? "active" : "" },
