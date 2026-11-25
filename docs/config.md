@@ -53,7 +53,7 @@ DNS=                              # 비우면 설정 안 함
 | `WORKSPACE_REST_BIND` | `0.0.0.0` | REST·화면을 여는 주소. `127.0.0.1`이면 보드 안에서만(SSH 터널로만 접속) |
 | `WORKSPACE_REST_PORT` | `8080` | REST·화면 포트. 바꾸면 화면 주소도 바뀐다 |
 | `WORKSPACE_REST_COMMAND_TIMEOUT` | `3` | 워커 명령 응답을 기다리는 초. 장치 응답을 기다리는 명령보다 길게 |
-| `WORKSPACE_UI_MEDIA_URL` | `http://{host}:8889/{path}` | 화면의 영상 주소 틀. `{host}` = 브라우저가 접속한 보드 주소, `{path}` = 송출 경로. 원격 미디어 서버를 보려면 그 주소로 |
+| `WORKSPACE_UI_MEDIA_URL` | (비움 = 자동: nginx 뒤 `/media/{path}/`, 아니면 `http://{host}:8889/{path}`, `docs/media-proxy.md`) | 화면의 영상 주소 틀. `{host}` = 브라우저가 접속한 보드 주소, `{path}` = 송출 경로. 원격 미디어 서버를 보려면 그 주소로 |
 | `WORKSPACE_UI_TITLE` | `Workspace` | 화면 왼쪽 위·브라우저 탭 제목 |
 | `WORKSPACE_LOG_LEVEL` | `INFO` | Manager·REST 로그 수준(`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `WORKSPACE_REST_TOKEN` | 없음 | REST 접근 토큰. 있으면 `/health`·화면 파일 말고 모두 토큰 필요(`Authorization: Bearer`, 쿠키 `workspace_token`, `?token=`). 제품 설치가 장비별로 만든다 |

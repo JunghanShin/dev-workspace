@@ -25,11 +25,49 @@ MAKE_CERT = os.path.join(HERE, "..", "gateway", "nginx", "make-cert.sh")
 NGINX = shutil.which("nginx") or ("/usr/sbin/nginx" if os.path.exists("/usr/sbin/nginx") else None)
 
 
+class FakeMedia:
+    """가짜 MediaMTX WebRTC(docs/media-proxy.md): 받은 (메서드, 경로, 본문)을 남기고 그대로 돌려준다"""
+
+    def __init__(self):
+        import http.server
+        import threading
+        self.got = []
+        me = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def _reply(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(n) if n else b""
+                me.got.append((self.command, self.path, body))
+                out = json.dumps({"method": self.command, "path": self.path, "body": body.decode()}).encode()
+                self.send_response(201 if self.command == "POST" else 200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+            do_GET = do_POST = do_PATCH = _reply
+
+            def log_message(self, *a):
+                pass
+
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
 @unittest.skipUnless(t.REST_BIN and NGINX, "C++ 게이트웨이(REST_BIN)와 nginx가 있어야 함")
 class NginxFront(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         t.setUpModule()  # 가짜 Manager·워커, 시험용 워크스페이스(ui/web, 워커 패널)
+        defs = os.path.join(t.T["root"], "install", "config")  # 설정 탭 칸 정의(영상 주소 틀 바꾸기 시험)
+        os.makedirs(defs, exist_ok=True)
+        shutil.copy(os.path.join(HERE, "..", "install", "config", "workspace-settings.json"), defs)
         cls.stream = t.FakeStreamWorker(os.path.join(t.T["data"], "run", "stream", "s1.sock"))
         cls.sock = os.path.join(t.T["tmp"], "gw-front.sock")
         cls.gw = t.Server({"WORKSPACE_GATEWAY_SOCKET": cls.sock, "WORKSPACE_GATEWAY_TCP": "0"}, name="gw-front",
@@ -38,7 +76,9 @@ class NginxFront(unittest.TestCase):
         prefix = os.path.join(t.T["tmp"], "nginx")
         conf = os.path.join(prefix, "nginx.conf")
         os.makedirs(prefix, exist_ok=True)
-        subprocess.check_call(["bash", RENDER, conf, prefix, cls.sock, "127.0.0.1:%d" % cls.port, t.T["root"], "1"])
+        cls.media = FakeMedia()
+        subprocess.check_call(["bash", RENDER, conf, prefix, cls.sock, "127.0.0.1:%d" % cls.port, t.T["root"], "1"],
+                              env=dict(os.environ, RENDER_MEDIA="127.0.0.1:%d" % cls.media.port))
         subprocess.check_call([NGINX, "-t", "-q", "-p", prefix, "-c", conf, "-g", "daemon off;"])
         cls.ng_log = open(os.path.join(prefix, "nginx.log"), "wb")
         cls.ng = subprocess.Popen([NGINX, "-p", prefix, "-c", conf, "-g", "daemon off;"], stdout=cls.ng_log, stderr=cls.ng_log)
@@ -63,7 +103,17 @@ class NginxFront(unittest.TestCase):
         cls.ng_log.close()
         cls.gw.stop()
         cls.stream.close()
+        cls.media.close()
         t.tearDownModule()
+
+    def test_media_proxy(self):
+        """영상 넘기기(docs/media-proxy.md): /media/<경로>/ → MediaMTX /<경로>/, 신호(WHEP POST)도. 기본 영상 주소는 같은 주소"""
+        st, h, data = self.req("GET", "/media/siyi/")
+        self.assertEqual((st, json.loads(data)["path"]), (200, "/siyi/"))
+        st, h, data = self.req("POST", "/media/siyi/whep", raw=b"v=0 offer", headers={"Content-Type": "application/sdp"})
+        self.assertEqual((st, json.loads(data)["path"], json.loads(data)["body"]), (201, "/siyi/whep", "v=0 offer"))
+        st, h, data = self.req("GET", "/api/ui")
+        self.assertEqual(json.loads(data)["media"]["url"], "/media/{path}/")  # nginx 뒤(게이트웨이 TCP 안 엶)
 
     def req(self, method, path, body=None, headers=None, raw=None):
         import http.client
@@ -106,9 +156,17 @@ class NginxFront(unittest.TestCase):
         self.assertEqual(last()[-1]["remote"], "127.0.0.1")
 
     def test_host_passed(self):
-        st, _, data = self.req("GET", "/api/ui", headers={"Host": "board.test:8080"})
-        self.assertEqual(st, 200)
-        self.assertIn("board.test", json.loads(data)["media"]["url"])  # 영상 주소에 브라우저가 접속한 주소
+        # 기본 영상 주소는 상대 경로(/media/)라 {host}가 없다: 틀을 잠깐 {host}로 바꿔(설정 탭, 바로 적용) Host 전달을 본다
+        put = lambda v: self.req("PUT", "/api/board/workspace/settings", body={"WORKSPACE_UI_MEDIA_URL": v},
+                                 headers={"Content-Type": "application/json"})
+        self.assertEqual(put("http://{host}:8889/{path}")[0], 200)
+        try:
+            st, _, data = self.req("GET", "/api/ui", headers={"Host": "board.test:8080"})
+            self.assertEqual(st, 200)
+            self.assertIn("board.test", json.loads(data)["media"]["url"])  # 영상 주소에 브라우저가 접속한 주소
+        finally:
+            self.assertEqual(put(None)[0], 200)
+        self.assertEqual(json.loads(self.req("GET", "/api/ui")[2])["media"]["url"], "/media/{path}/")  # 비우면 자동
 
     def test_body_limit(self):
         st, _, _ = self.req("POST", "/workers/w1/command", raw=b"x" * (70 * 1024),
@@ -290,6 +348,7 @@ class Render(unittest.TestCase):
             self.assertFalse([l for l in body if "@PREFIX@" in l or "@LIMIT" in l or "@UI_LOCATION@" in l])
             self.assertIn("server unix:/x/gw.sock;", text)
             self.assertIn("root /ws/ui/web;", text)
+            self.assertIn("location ^~ /media/", text)  # 영상 넘기기 기본 켬(docs/media-proxy.md)
             self.assertIn('add_header Cache-Control "no-cache" always;', text)  # 업데이트 뒤 옛 화면 파일 방지
 
 

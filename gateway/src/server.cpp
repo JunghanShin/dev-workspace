@@ -871,7 +871,7 @@ Reply Gateway::settings(const std::string& method, const std::function<Body()>& 
         if (ch.first == "WORKSPACE_UI_TITLE") {
             ui_.set_title(v.empty() ? "Workspace" : v);
         } else if (ch.first == "WORKSPACE_UI_MEDIA_URL") {
-            ui_.set_media_url(v.empty() ? "http://{host}:8889/{path}" : v);
+            ui_.set_media_url(v.empty() ? ui_.media_default() : v);  // 비우면 자동(docs/media-proxy.md)
         } else if (ch.first == "WORKSPACE_REST_COMMAND_TIMEOUT") {
             double s = 0;
             if (py_float(v, s) && s > 0) command_timeout_.store(s);

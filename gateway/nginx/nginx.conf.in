@@ -4,6 +4,7 @@
 #   @MIME@ mime.types 경로   @UI_LOCATION@ 화면 파일을 직접 줄지(화면 끔이면 전부 게이트웨이로)
 #   @LIMIT_ZONE@ @LIMIT_CONN@ 주소당 연결 제한(nginx에 limit_conn 모듈이 있을 때만, render.sh가 정함)
 #   @TLS@ HTTPS 받기·평문 → HTTPS 넘김(켰을 때만, docs/https.md)
+#   @MEDIA_LOCATION@ /media/ → MediaMTX WebRTC(docs/media-proxy.md, RENDER_MEDIA=off면 없음)
 worker_processes 1;
 pid @PREFIX@/nginx.pid;
 error_log stderr warn;          # 시작 셸 로그(journal)로
@@ -53,6 +54,8 @@ http {
 
         # 화면 파일은 nginx가 바로 준다. 없는 경로(API, 워커 패널 파일)는 게이트웨이로
 @UI_LOCATION@
+
+@MEDIA_LOCATION@
 
         # 스트림(SSE): 버퍼링하면 화면에 늦게 도착하므로 끈다. 오래 열려 있다
         location ~ /stream/?$ {

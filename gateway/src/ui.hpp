@@ -20,6 +20,7 @@ struct UiConfig {
     std::string web;          // ui/web(절대 경로)
     std::string workers;      // workers 폴더
     std::string media_url;    // {host}는 접속한 주소로
+    std::string media_default = "http://{host}:8889/{path}";  // 비웠을 때(nginx 뒤면 /media/{path}/, docs/media-proxy.md)
     long long refresh_ms = 1000;
     std::string title = "Workspace";
 };
@@ -43,6 +44,7 @@ public:
     void set_media_url(const std::string& v);
     std::string title() const;
     std::string media_url() const;
+    const std::string& media_default() const { return cfg_.media_default; }
 
 private:
     std::map<std::string, std::string> worker_panel_dirs() const;  // 패널 id → 폴더(이름 순, 같은 id면 뒤의 것)

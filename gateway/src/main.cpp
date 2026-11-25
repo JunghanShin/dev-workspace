@@ -155,7 +155,9 @@ int main(int argc, char** argv) {
     };
     cfg.ui.web = gw::abspath(env_nonempty("WORKSPACE_UI_DIR", gw::path_join(gw::path_join(cfg.workspace, "ui"), "web")));
     cfg.ui.workers = gw::path_join(cfg.workspace, "workers");
-    cfg.ui.media_url = env_nonempty("WORKSPACE_UI_MEDIA_URL", "http://{host}:8889/{path}");
+    // 영상 주소 틀(docs/media-proxy.md): 비우면 nginx 뒤(TCP 안 엶)는 같은 주소 /media/{path}/, 아니면 MediaMTX 포트 바로
+    cfg.ui.media_default = cfg.tcp ? "http://{host}:8889/{path}" : "/media/{path}/";
+    cfg.ui.media_url = env_nonempty("WORKSPACE_UI_MEDIA_URL", cfg.ui.media_default);
     cfg.ui.refresh_ms = to_int("WORKSPACE_UI_REFRESH_MS", env_nonempty("WORKSPACE_UI_REFRESH_MS", "1000"));
     cfg.ui.title = env_nonempty("WORKSPACE_UI_TITLE", "Workspace");
     // 시작할 때의 WORKSPACE_* (설정 탭 "다시 시작하면 적용"의 기준. 시작 셸이 workspace.env 키를 넘긴다)

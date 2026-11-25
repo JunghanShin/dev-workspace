@@ -2,8 +2,8 @@
   {"title": "화면", "fields": [
     {"key": "WORKSPACE_UI_TITLE", "label": "화면 제목", "type": "string", "apply": "live", "default": "Workspace",
      "description": "화면 제목(왼쪽 위, 브라우저 탭). 프로젝트 이름은 프로필에 둔다"},
-    {"key": "WORKSPACE_UI_MEDIA_URL", "label": "영상 주소 틀", "type": "string", "apply": "live", "default": "http://{host}:8889/{path}",
-     "description": "화면의 영상 주소 틀. 기본은 이 보드의 MediaMTX WebRTC. {host} = 브라우저가 접속한 이 보드 주소, {path} = 워커 송출 경로. 원격 미디어 서버를 보려면 예: http://<원격 미디어 서버>:8889/{path}"}]},
+    {"key": "WORKSPACE_UI_MEDIA_URL", "label": "영상 주소 틀", "type": "string", "apply": "live", "default": "",
+     "description": "화면의 영상 주소 틀. 비우면 자동: nginx 뒤면 화면과 같은 주소 /media/{path}/(HTTPS·SSH 터널 그대로, docs/media-proxy.md), 아니면 http://{host}:8889/{path}. {host} = 브라우저가 접속한 이 보드 주소, {path} = 워커 송출 경로. 원격 미디어 서버를 보려면 예: http://<원격 미디어 서버>:8889/{path}"}]},
   {"title": "명령", "fields": [
     {"key": "WORKSPACE_REST_COMMAND_TIMEOUT", "label": "명령 응답 대기", "type": "number", "min": 0.5, "max": 60, "unit": "s", "apply": "live", "default": 3,
      "description": "워커 명령 응답을 기다리는 시간(초). 장치 응답을 기다리는 명령(장치 ACK 등)보다 길게"}]},

@@ -40,7 +40,7 @@
 
 ## 영상과 지연 측정
 
-- 영상은 보드 MediaMTX의 WebRTC(:8889). 주소 틀은 `WORKSPACE_UI_MEDIA_URL`(기본 `http://{host}:8889/{path}`)
+- 영상은 보드 MediaMTX의 WebRTC. 주소 틀은 `WORKSPACE_UI_MEDIA_URL`, 비우면 자동: nginx 뒤면 화면과 같은 주소 `/media/{path}/`(HTTPS·SSH 터널 그대로, `docs/media-proxy.md`), 아니면 `http://{host}:8889/{path}`
 - 주소를 바꾸려면 "영상 주소"를 펼쳐 고치고 적용(이 PC 브라우저에 저장). "기본값"은 `WORKSPACE_UI_MEDIA_URL`로 다시 만듭니다
 - "영상" 스위치를 끄거나 다른 패널로 가면 영상 받기를 멈춥니다
 - 지연 측정: "시각 표시"를 켜면 영상 왼쪽 아래에 보드 시각이 찍힙니다. 시청 PC 시계와 빼면 송출 지연. 보드·PC 시계는 NTP로 맞춥니다

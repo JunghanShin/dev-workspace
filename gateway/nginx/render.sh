@@ -10,6 +10,7 @@
 # HTTPS(docs/https.md): 환경 변수로 켠다(없으면 지금과 같음)
 #   RENDER_TLS_LISTEN=<주소:포트>  RENDER_TLS_CERT=<인증서>  RENDER_TLS_KEY=<키>
 #   RENDER_REDIRECT=on|off(기본 on): 평문 포트로 온 요청을 HTTPS로 넘김(308). 보드 안(127.0.0.1)에서 온 것은 그대로(SSH 터널)
+# 영상 넘기기(docs/media-proxy.md): RENDER_MEDIA=<주소:포트>(기본 127.0.0.1:8889, MediaMTX WebRTC), off면 /media/ 없음
 # nginx에 ssl 모듈이 없으면 HTTPS를 빼고(경고), rewrite 모듈이 없으면 넘김만 뺀다.
 set -euo pipefail
 out="$1" prefix="$2" sock="$3" listen="$4" root="$5" ui="${6:-1}"
@@ -68,10 +69,23 @@ if [[ -n "${RENDER_TLS_LISTEN:-}" ]]; then
     fi
   fi
 fi
-awk -v prefix="$prefix" -v sock="$sock" -v listen="$listen" -v mime="$mime" -v uiloc="$uiloc" -v zone="$zone" -v conn="$conn" -v tls="$tls" '
+media="${RENDER_MEDIA:-127.0.0.1:8889}"
+mediloc=''
+if [[ "$media" != off ]]; then
+  mediloc="        # 영상(docs/media-proxy.md): 화면과 같은 주소·인증서로 MediaMTX WebRTC 보기 화면과 신호(WHEP)를 넘긴다.
+        # 앞의 /media를 떼고 넘김. 영상 데이터는 WebRTC UDP로 바로(여기 안 거침)
+        location ^~ /media/ {
+            proxy_pass http://$media/;
+            proxy_buffering off;
+            proxy_set_header Host \$http_host;
+            proxy_read_timeout 60s;
+        }"
+fi
+awk -v prefix="$prefix" -v sock="$sock" -v listen="$listen" -v mime="$mime" -v uiloc="$uiloc" -v zone="$zone" -v conn="$conn" -v tls="$tls" -v mediloc="$mediloc" '
   { gsub(/@PREFIX@/, prefix); gsub(/@SOCK@/, sock); gsub(/@LISTEN@/, listen); gsub(/@MIME@/, mime)
     if ($0 == "@UI_LOCATION@") print uiloc
     else if ($0 == "@LIMIT_ZONE@") print zone
     else if ($0 == "@LIMIT_CONN@") print conn
     else if ($0 == "@TLS@") { if (tls != "") print tls }
+    else if ($0 == "@MEDIA_LOCATION@") { if (mediloc != "") print mediloc }
     else print }' "$here/nginx.conf.in" > "$out"

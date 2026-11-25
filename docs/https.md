@@ -76,5 +76,5 @@
 
 ## 7. 남은 문제
 
-- **영상(WebRTC):** 화면이 HTTPS면 `http://<보드>:8889`(MediaMTX) 영상 틀이 섞인 콘텐츠로 막힌다. MediaMTX에 같은 인증서로 TLS(`webrtcEncryption`, `webrtcServerKey`·`Cert`)를 켜고 `WORKSPACE_UI_MEDIA_URL=https://{host}:8889/{path}`로 하거나, nginx가 `/media/`를 MediaMTX로 넘기는 안 중 정해야 함(이번 판에 안 함)
+- **영상(WebRTC):** 0.85부터 nginx가 `/media/`를 MediaMTX로 넘기고 기본 영상 주소가 같은 주소 `/media/{path}/`라 HTTPS에서도 그대로 나온다(`docs/media-proxy.md`). `WORKSPACE_UI_MEDIA_URL`을 `http://`로 적어 두었으면 HTTPS 화면에서는 막히니 비우거나 `https://`로
 - 사용자 인증서 만료는 시작할 때 로그로만 알림(화면 표시는 7번 화면 일과 함께)

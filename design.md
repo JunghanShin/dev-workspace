@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.84 |
+| 문서 버전 | 0.85 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1587,6 +1587,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.82 | libvideo 0.3.1: 송출 `fps`를 ffmpeg `frame=` 변화로 센 최근 3 s 값으로(보드에서 실제 30 fps인데 16~17로 보였음: ffmpeg `fps=`는 시작부터의 평균이라 다시 시작할 때 기다린 몇 초가 섞임). 프레임이 2 s 넘게 안 늘면 0 |
 | 0.83 | **워커 패널 정리**(`ui/worker-panels.md`): 워커 패널 = 머리 + 탭 셋 **운용**(주 화면·운용 조작) · **상태**(상세 값·셈·이벤트) · **도구**(정비·시험·직접 보내기, 제품 화면에 없음). 공용 부품 `panelTabs`(주소 `?tab=`, 다시 띄우지 않음). 틀·replay 패널 나눔, 장치 패널(siyi·flight-control·ximea)은 DURU에서 같은 기준. 영상은 운용 탭에서만 받음 |
 | 0.84 | **기록 보존**(`managers/record/retention.md`): 보드 실측 하루 약 1.5 GB·상한 2 GB라 약 32시간치만 남던 것을 고침. 워커 상태 줄 실행 중 5 s·실행 중이 아니면 60 s(상태가 바뀌면 바로, 전에는 모두 1 s), 규칙이 없을 때 관리 요약 주제(status·payload) 5 s. 지우기: 전체 8 GB·14일·디스크 빈 곳 4 GB 아래 중 하나라도 걸리면 오래된 것부터(새 파일 + 10분마다), 지표 `removed_size`·`removed_age`·`removed_free` |
+| 0.85 | **영상 넘기기**(`docs/media-proxy.md`): nginx `location ^~ /media/` → MediaMTX WebRTC(127.0.0.1:8889, 앞의 `/media`를 뗌, render.sh `RENDER_MEDIA`). 게이트웨이가 nginx 뒤면 기본 영상 주소가 같은 주소 `/media/{path}/`라 HTTPS 화면에서도 영상이 막히지 않고 SSH 터널로도 신호가 같은 길로. `WORKSPACE_UI_MEDIA_URL`을 적으면 그 값, 설정 탭에서 비우면 자동 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |
