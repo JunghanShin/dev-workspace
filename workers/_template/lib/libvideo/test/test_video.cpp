@@ -55,7 +55,7 @@ std::string fake_ffmpeg(const std::string& dir) {
                         "while :; do\n"
                         "  [ -e " << dir << "/exit ] && exit 1\n"
                         "  n=$((n+6))\n"
-                        "  printf 'frame=%d\\nfps=30.0\\nprogress=continue\\n' $n >&3\n"
+                        "  printf 'frame=%d\\nfps=10.0\\nprogress=continue\\n' $n >&3\n"
                         "  sleep 0.2\n"
                         "done\n";
     chmod(p.c_str(), 0755);
@@ -160,6 +160,8 @@ int main() {
         CHECK(has(slurp(dir + "/b/gst.args"), "clockoverlay"));
         CHECK(st("spare").value("link", "") == "down" && !st("spare").value("enabled", true));
         CHECK(has(s.metrics(), "stream_main_link=1"));
+        // fps는 frame= 변화로(가짜 ffmpeg: 0.2 s마다 6프레임 = 30 fps, fps=10.0은 무시)
+        CHECK(run_until(s, 4, [&] { const double f = st("main").value("fps", 0.0); return f > 22 && f < 38; }));
         CHECK(!has(s.metrics(), "stream_spare_link") && has(s.metrics(), "stream_spare_fps="));  // 꺼 둔 송출: 연결 지표 없음
         // 한쪽(main ffmpeg)이 끝나도 다른 쪽은 그대로, main은 다시 시작
         std::ofstream(dir + "/a/exit") << "";

@@ -87,6 +87,7 @@ void Stream::start(Clock::time_point now) {
     buf_.clear();
     frame_ = out_time_ = -1;
     fps_ = 0;
+    samples_.clear();
     last_progress_ = now;
     if (last_error_.empty()) {
         if (c_.encode()) {
@@ -118,10 +119,9 @@ void Stream::on_readable(Clock::time_point now) {
     while ((pos = buf_.find('\n')) != std::string::npos) {
         const std::string line = buf_.substr(0, pos);
         buf_.erase(0, pos + 1);
-        if (starts_with(line, "fps=")) {
-            fps_ = std::atof(line.c_str() + 4);
-            continue;
-        }
+        // fps=는 ffmpeg가 시작한 뒤부터의 평균(시작할 때 기다린 몇 초가 섞여 다시 시작한 뒤 한참 낮게 나옴).
+        // 대신 frame= 변화로 최근 몇 초의 실제 값을 센다(아래 note_frame)
+        if (starts_with(line, "fps=")) continue;
         long long* last = nullptr;
         size_t skip = 0;
         if (starts_with(line, "frame=")) {
@@ -133,6 +133,7 @@ void Stream::on_readable(Clock::time_point now) {
         }
         if (!last || line.size() <= skip || line[skip] < '0' || line[skip] > '9') continue;  // N/A
         const long long value = std::atoll(line.c_str() + skip);
+        if (last == &frame_) note_frame(now, value);
         if (value > *last) {
             *last = value;
             last_progress_ = now;
@@ -144,6 +145,15 @@ void Stream::on_readable(Clock::time_point now) {
         }
     }
     if (buf_.size() > 65536) buf_.clear();
+}
+
+// 송출 fps = 최근 창(kFpsWindow) 안의 프레임 수 변화 / 걸린 시간. 0.5 s보다 짧으면 아직 모름(0)
+void Stream::note_frame(Clock::time_point now, long long frame) {
+    if (!samples_.empty() && frame < samples_.back().second) samples_.clear();  // ffmpeg를 다시 띄움
+    samples_.emplace_back(now, frame);
+    while (samples_.size() > 2 && now - samples_[1].first >= kFpsWindow) samples_.pop_front();
+    const double dt = std::chrono::duration<double>(samples_.back().first - samples_.front().first).count();
+    fps_ = dt >= 0.5 ? static_cast<double>(samples_.back().second - samples_.front().second) / dt : 0;
 }
 
 // 묶음 중 하나라도 끝나면 다른 쪽도 정리하고 다시 시작한다
@@ -170,6 +180,7 @@ void Stream::reap(Clock::time_point now) {
 void Stream::failed(Clock::time_point now, const std::string& why) {
     linked_ = false;
     fps_ = 0;
+    samples_.clear();
     retry_at_ = now + ms(c_.retry_sec);
     ++restarts_;
     // 같은 이유가 반복되면(카메라를 뺀 채로 둠) 로그는 한 번만
@@ -186,6 +197,7 @@ void Stream::on_timer(Clock::time_point now) {
         // 첫 프레임 전에는 입력을 분석한다(ffmpeg 기본 최대 5초). 그동안은 3배까지 기다린다
         const auto stall = ms(c_.stall_sec);
         const auto limit = (frame_ < 0 && out_time_ < 0) ? stall * 3 : stall;
+        if (now - last_progress_ >= std::chrono::seconds(2)) fps_ = 0;  // 프레임이 안 늘면 0(멈춤 판정 전에도)
         if (pid_ > 0 && !killed_ && now - last_progress_ >= limit) {
             // 멈춤(카메라가 영상을 안 보내는데 연결은 살아 있음, 망이 막힘 등). 기다리지 않고 끝낸다
             kill(pid_, SIGKILL);

@@ -15,6 +15,7 @@
 #include <sys/types.h>
 
 #include <chrono>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -82,6 +83,7 @@ public:
     bool enabled() const { return enabled_; }
     bool linked() const { return linked_; }
     double fps() const { return fps_; }
+    static constexpr std::chrono::seconds kFpsWindow{3};
     unsigned long restarts() const { return restarts_; }
     nlohmann::json status() const;
 
@@ -92,6 +94,7 @@ private:
     void close_pipe();
 
     StreamConfig c_;
+    void note_frame(Clock::time_point now, long long frame);
     bool enabled_;
     pid_t pid_ = -1;      // ffmpeg
     pid_t gst_pid_ = -1;  // gst-launch(encode)
@@ -100,7 +103,8 @@ private:
     std::string buf_;
     long long frame_ = -1;
     long long out_time_ = -1;
-    double fps_ = 0;
+    double fps_ = 0;  // 최근 kFpsWindow 동안 보낸 프레임 수로(ffmpeg의 fps=는 시작부터 평균이라 쓰지 않음)
+    std::deque<std::pair<Clock::time_point, long long>> samples_;  // (받은 시각, frame)
     bool linked_ = false;
     bool killed_ = false;
     Clock::time_point last_progress_{};
