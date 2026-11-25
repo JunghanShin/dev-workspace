@@ -76,8 +76,8 @@ if [[ "$media" != off ]]; then
         # 앞의 /media를 떼고 넘김. 영상 데이터는 WebRTC UDP로 바로(여기 안 거침)
         location ^~ /media/ {
             proxy_pass http://$media/;
-            proxy_redirect / /media/;
-            absolute_redirect off;  # 상대 그대로(SSH 터널처럼 포트가 달라도 맞게)  # WHEP 세션 주소(Location: /<경로>/whep/<id>)도 /media/ 아래로(PATCH·DELETE가 같은 길로)
+            proxy_redirect / /media/;  # WHEP 세션 주소(Location: /<경로>/whep/<id>)도 /media/ 아래로(PATCH·DELETE가 같은 길로)
+            absolute_redirect off;     # 상대 그대로(SSH 터널처럼 포트가 달라도 맞게)
             proxy_buffering off;
             proxy_set_header Host \$http_host;
             proxy_read_timeout 60s;
