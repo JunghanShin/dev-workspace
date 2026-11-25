@@ -32,7 +32,7 @@
 
 | 종류(`type`) | 출처 | 언제 | 지금 logger |
 |---|---|---|---|
-| `worker` | process-manager `workers` | 상태가 바뀌면 바로, 아니면 워커마다 1 s | 같음 |
+| `worker` | process-manager `workers` | 상태가 바뀌면 바로, 아니면 실행 중 5 s·실행 중이 아니면 60 s(`retention.md`, 0.84 전에는 1 s) | 간격만 다름 |
 | `removed` | process-manager | 워커가 빠질 때 | 같음 |
 | `command` | process-manager `commands` | 올 때마다 | 같음 |
 | `system` | process-manager `system` | 올 때마다 | 같음 |
@@ -49,18 +49,24 @@
     {"match": "*.camera", "interval_ms": 200}
   ],
   "exclude": [],
+  "interval_s": 5,
+  "stopped_interval_s": 60,
   "max_file_mb": 64,
-  "max_total_mb": 2048,
+  "max_total_mb": 8192,
+  "keep_days": 14,
+  "min_free_mb": 4096,
   "fsync_s": 5
 }
 ```
 
 | 키 | 뜻 | 기본 |
 |---|---|---|
-| `topics[].match` | `<보낸 곳>.<주제>` 글롭(`*`). 위에서부터 처음 맞는 것 하나 | `*`(모두) |
+| `topics[].match` | `<보낸 곳>.<주제>` 글롭(`*`). 위에서부터 처음 맞는 것 하나 | 없으면 `status-manager.*`·`payload-manager.*` 5 s, `*` 1 s(`retention.md`) |
 | `topics[].interval_ms` | (보낸 곳, 주제)마다 이 간격에 하나. `0`이면 오는 대로 모두 | 1000 |
 | `exclude` | 기록하지 않을 `<보낸 곳>.<주제>` 글롭 | 없음 |
-| `max_file_mb`, `max_total_mb` | 파일 하나·전체 상한, 넘으면 새 파일·오래된 것부터 지움 | 64, 2048(지금과 같음) |
+| `interval_s`, `stopped_interval_s` | 워커 상태 줄 간격: 실행 중 · 실행 중이 아님(상태가 바뀌면 바로) | 5, 60 |
+| `max_file_mb`, `max_total_mb` | 파일 하나·전체 상한, 넘으면 새 파일·오래된 것부터 지움 | 64, 8192 |
+| `keep_days`, `min_free_mb` | 이보다 오래된 파일 지움 · 디스크 빈 곳이 이 아래면 오래된 것부터 지움(0 = 안 봄). 새 파일을 열 때와 10분마다 | 14, 4096 |
 | `fsync_s` | 디스크에 확실히 쓰는 간격 | 5 |
 
 - 예전 환경 변수(`WORKSPACE_LOGGER_*`)는 4단계에서 지움(0.65). 값은 이 설정 칸으로만 받는다(프로필 `managers/record` 프리셋)

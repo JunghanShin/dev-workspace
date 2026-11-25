@@ -38,10 +38,14 @@ Settings read_settings(const worker::Json& config) {
     const std::string data = env_or("WORKSPACE_DATA", "");
     s.dir = data.empty() ? "records" : data + "/records";
     s.manager_socket = env_or("WORKSPACE_MANAGER_SOCKET", data.empty() ? "manager-logger.sock" : data + "/run/manager-logger.sock");
-    worker::check_keys(config, {"dir", "manager_socket", "interval_s", "max_file_mb", "max_total_mb", "fsync_s", "topics", "exclude"});
+    worker::check_keys(config, {"dir", "manager_socket", "interval_s", "stopped_interval_s", "max_file_mb", "max_total_mb",
+                                "keep_days", "min_free_mb", "fsync_s", "topics", "exclude"});
     worker::read(config, "dir", s.dir);
     worker::read(config, "manager_socket", s.manager_socket);
     worker::read(config, "interval_s", s.interval_s);
+    worker::read(config, "stopped_interval_s", s.stopped_interval_s);
+    worker::read(config, "keep_days", s.keep_days);
+    worker::read(config, "min_free_mb", s.min_free_mb);
     worker::read(config, "max_file_mb", s.max_file_mb);
     worker::read(config, "max_total_mb", s.max_total_mb);
     worker::read(config, "fsync_s", s.fsync_s);
@@ -55,6 +59,8 @@ Settings read_settings(const worker::Json& config) {
     }
     worker::require(!s.dir.empty(), "record.dir must not be empty");
     worker::require(s.interval_s > 0, "record.interval_s must be > 0");
+    worker::require(s.stopped_interval_s > 0, "record.stopped_interval_s must be > 0");
+    worker::require(s.keep_days >= 0 && s.min_free_mb >= 0, "record.keep_days and record.min_free_mb must be >= 0");
     worker::require(s.max_file_mb > 0 && s.max_total_mb >= s.max_file_mb, "record.max_total_mb must be >= max_file_mb > 0");
     worker::require(s.fsync_s >= 0, "record.fsync_s must be >= 0");
     return s;
@@ -72,9 +78,10 @@ void Module::start(worker::Host& host) {
     host_ = &host;
     boot_ = boot_id();
     many_ = std::make_unique<worker::ManyInputs>("", host.id());
-    platform_ = std::make_unique<PlatformRecorder>(s_.interval_s);
+    platform_ = std::make_unique<PlatformRecorder>(s_.interval_s, s_.stopped_interval_s);
     file_ = std::make_unique<RecordFile>(s_.dir, static_cast<uint64_t>(s_.max_file_mb * 1048576),
                                          static_cast<uint64_t>(s_.max_total_mb * 1048576), s_.fsync_s, boot_);
+    file_->set_retention(s_.keep_days * 86400, static_cast<uint64_t>(s_.min_free_mb * 1048576));  // 쓰는 스레드가 뜨기 전
     {
         std::lock_guard<std::mutex> lock(info_mu_);
         path_ = file_->path();
@@ -252,6 +259,9 @@ void Module::metrics(worker::Metrics& m) const {
     m.set("bytes", bytes_.load());
     m.set("drops", drops_.load());
     m.set("files", file_ ? file_->files_opened() : uint64_t{0});
+    m.set("removed_size", file_ ? file_->removed_size() : uint64_t{0});  // 지운 파일(까닭별, retention.md)
+    m.set("removed_age", file_ ? file_->removed_age() : uint64_t{0});
+    m.set("removed_free", file_ ? file_->removed_free() : uint64_t{0});
     m.set("write_errors", write_errors_.load());
     m.set("pm_link", pm_link_.load());
     m.set("disk_free_mb", disk_free_mb_.load());

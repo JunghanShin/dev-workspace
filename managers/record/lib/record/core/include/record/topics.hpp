@@ -40,11 +40,12 @@ public:
     // 스트림 한 줄(topics 객체, events 배열, kf) → 기록들
     std::vector<Stamped> records(const std::string& src, const Json& topics, const Json& events, bool kf, int64_t now_ns);
 
-private:
     struct Rule {
         std::string match;
         int64_t interval_ns;
     };
+
+private:
     std::vector<Rule> rules_;
     std::vector<std::string> exclude_;
     std::map<std::pair<std::string, std::string>, int64_t> last_;  // (보낸 곳, 주제) → 마지막으로 남긴 시각

@@ -20,7 +20,12 @@ int64_t stamp_of(const Json& v, int64_t fallback) {
 
 }  // namespace
 
-TopicRules::TopicRules() { rules_.push_back({"*", 1000LL * 1000000}); }
+// 규칙이 없을 때(retention.md): 워커 상태를 다시 요약하는 관리 주제는 5 s, 그 밖 1 s
+static std::vector<TopicRules::Rule> default_rules() {
+    return {{"status-manager.*", 5000LL * 1000000}, {"payload-manager.*", 5000LL * 1000000}, {"*", 1000LL * 1000000}};
+}
+
+TopicRules::TopicRules() { rules_ = default_rules(); }
 
 void TopicRules::configure(const Json& topics, const Json& exclude) {
     std::vector<Rule> rules;
@@ -41,7 +46,7 @@ void TopicRules::configure(const Json& topics, const Json& exclude) {
             rules.push_back({t["match"].get<std::string>(), static_cast<int64_t>(ms * 1e6)});
         }
     } else {
-        rules.push_back({"*", 1000LL * 1000000});
+        rules = default_rules();
     }
     std::vector<std::string> ex;
     if (!exclude.is_null()) {

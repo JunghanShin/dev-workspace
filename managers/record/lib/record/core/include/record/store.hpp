@@ -10,7 +10,9 @@
 #pragma once
 
 #include <cstdint>
+#include <atomic>
 #include <cstdio>
+#include <functional>
 #include <string>
 
 #include "nlohmann/json.hpp"
@@ -42,7 +44,14 @@ public:
     void close();
     const std::string& path() const { return path_; }
     uint64_t files_opened() const { return files_opened_; }
-    uint64_t removed() const { return removed_; }
+    uint64_t removed() const { return removed_size_ + removed_age_ + removed_free_; }
+    uint64_t removed_size() const { return removed_size_; }
+    uint64_t removed_age() const { return removed_age_; }
+    uint64_t removed_free() const { return removed_free_; }
+    // 보존(retention.md): keep_s보다 오래된 파일, 디스크 빈 곳이 min_free 아래면 오래된 것부터. 0 = 안 봄.
+    // free_fn: 빈 곳 재기(바이트, 시험에서 바꿔 끼움. 없으면 statvfs). 쓰는 스레드에서만 부른다
+    void set_retention(double keep_s, uint64_t min_free_bytes, std::function<uint64_t()> free_fn = nullptr);
+    static constexpr double kPruneEveryS = 600;
 
 private:
     bool open(const std::string& path, std::string* error);
@@ -53,7 +62,11 @@ private:
     std::FILE* f_ = nullptr;
     uint64_t size_ = 0;
     double last_sync_ = 0;
-    uint64_t files_opened_ = 0, removed_ = 0;
+    uint64_t files_opened_ = 0;
+    std::atomic<uint64_t> removed_size_{0}, removed_age_{0}, removed_free_{0};
+    double keep_s_ = 0, last_prune_ = 0;
+    uint64_t min_free_ = 0;
+    std::function<uint64_t()> free_fn_;
 };
 
 // 찾기. q: since/until(사람 시각 문자열, 앞에서부터 비교), since_ns/until_ns(t_mono_ns, 이 부팅 파일만),

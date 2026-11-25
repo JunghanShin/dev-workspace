@@ -22,7 +22,9 @@ using Json = nlohmann::ordered_json;
 
 class PlatformRecorder {
 public:
-    explicit PlatformRecorder(double interval_s) : interval_(interval_s) {}
+    // interval_s: 실행 중 워커의 상태 줄 간격, stopped_interval_s: 실행 중이 아닌 워커(managers/record/retention.md)
+    explicit PlatformRecorder(double interval_s, double stopped_interval_s = 60)
+        : interval_(interval_s), stopped_interval_(stopped_interval_s) {}
 
     // 구독 한 줄({"event": ..., "data": ...}) → 남길 기록(0개 이상). now_s: 단조 시계(초)
     std::vector<Json> handle(const Json& msg, double now_s);
@@ -36,7 +38,7 @@ public:
     static const std::vector<std::string>& state_keys();
 
 private:
-    double interval_;
+    double interval_, stopped_interval_;
     std::map<std::string, Json> last_state_;     // 워커 id → 상태 키 값들
     std::map<std::string, double> last_written_;  // 워커 id → 마지막으로 남긴 시각
     Json last_system_;

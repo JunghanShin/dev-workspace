@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <fnmatch.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -150,10 +151,20 @@ bool RecordFile::open(const std::string& path_in, std::string* error) {
     return true;
 }
 
+void RecordFile::set_retention(double keep_s, uint64_t min_free_bytes, std::function<uint64_t()> free_fn) {
+    keep_s_ = keep_s;
+    min_free_ = min_free_bytes;
+    free_fn_ = std::move(free_fn);
+    prune();
+}
+
+// 오래된 파일(이름 = 처음 쓴 시각 순)부터, 셋 중 하나라도 걸리면 지운다: 전체 상한, 기간, 디스크 빈 곳. 지금 파일은 빼고
 void RecordFile::prune() {
+    last_prune_ = mono_s();
     struct Item {
         std::string path;
         uint64_t size;
+        time_t mtime;
     };
     std::vector<Item> files;
     uint64_t total = 0;
@@ -161,15 +172,26 @@ void RecordFile::prune() {
         const std::string p = dir_ + "/" + n;
         struct stat st {};
         if (::stat(p.c_str(), &st) != 0) continue;
-        files.push_back({p, static_cast<uint64_t>(st.st_size)});
+        files.push_back({p, static_cast<uint64_t>(st.st_size), st.st_mtime});
         total += st.st_size;
     }
+    auto free_now = [this]() -> uint64_t {
+        if (free_fn_) return free_fn_();
+        struct statvfs v {};
+        if (::statvfs(dir_.c_str(), &v) != 0) return UINT64_MAX;
+        return static_cast<uint64_t>(v.f_bavail) * v.f_frsize;
+    };
+    const time_t now = ::time(nullptr);
     for (const auto& it : files) {
-        if (total <= max_total_) break;
         if (it.path == path_) continue;
+        std::atomic<uint64_t>* why = nullptr;
+        if (total > max_total_) why = &removed_size_;
+        else if (keep_s_ > 0 && static_cast<double>(now - it.mtime) > keep_s_) why = &removed_age_;
+        else if (min_free_ > 0 && free_now() < min_free_) why = &removed_free_;
+        if (!why) break;
         if (::unlink(it.path.c_str()) == 0) {
             total -= it.size;
-            ++removed_;
+            why->fetch_add(1);
         }
     }
 }
@@ -191,7 +213,8 @@ bool RecordFile::write(const std::string& line, std::string* error) {
     }
     size_ += line.size();
     if (mono_s() - last_sync_ >= fsync_s_) sync();
-    if (size_ >= max_file_) open("", nullptr);
+    if (size_ >= max_file_) open("", nullptr);  // 새 파일을 열면 prune
+    else if (mono_s() - last_prune_ >= kPruneEveryS) prune();
     return true;
 }
 

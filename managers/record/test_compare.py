@@ -111,7 +111,7 @@ class TestSameAsLogger(unittest.TestCase):
         cfg = os.path.join(self.tmp, "rec.json")
         with open(cfg, "w") as f:
             json.dump({"id": "record-manager", "config_version": 1,
-                       "config": {"record": {"dir": out, "manager_socket": sock, "interval_s": 0.3}}}, f)
+                       "config": {"record": {"dir": out, "manager_socket": sock, "interval_s": 0.3, "stopped_interval_s": 0.3}}}, f)
         cpp = subprocess.Popen([BIN, "--config", cfg], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             self.assertTrue(fake.done.wait(15), "did not subscribe")

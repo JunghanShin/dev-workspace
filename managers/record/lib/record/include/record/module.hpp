@@ -36,8 +36,9 @@ namespace record {
 
 struct Settings {
     std::string dir, manager_socket;
-    double interval_s = 1.0;
-    double max_file_mb = 64, max_total_mb = 2048;
+    double interval_s = 5.0, stopped_interval_s = 60.0;  // 워커 상태 줄 간격(retention.md)
+    double max_file_mb = 64, max_total_mb = 8192;
+    double keep_days = 14, min_free_mb = 4096;
     double fsync_s = 5.0;
     Json topics, exclude;  // 주제 규칙(null이면 기본)
 };

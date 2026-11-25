@@ -1,6 +1,8 @@
 // record 코어 단위 시험: 플랫폼 규칙(예전 workspace-logger와 같은 줄), 기록 파일(이어 쓰기·나누기·지우기), 찾기
 #include <dirent.h>
 #include <sys/stat.h>
+#include <ctime>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -58,6 +60,15 @@ static void test_platform() {
     // 간격 지남: changed false로 남김
     r = p.handle(worker_msg("cam1", "running", 3), 11.0);
     CHECK(r.size() == 1 && r[0]["changed"] == false);
+    {  // 실행 중이 아닌 워커는 stopped 간격(retention.md): 상태가 바뀌면 바로, 그 뒤 60 s 안에는 안 남김
+        record::PlatformRecorder ps(5.0, 60.0);
+        CHECK(ps.handle(worker_msg("x", "stopped", 1), 100.0).size() == 1);
+        CHECK(ps.handle(worker_msg("x", "stopped", 2), 130.0).empty());
+        CHECK(ps.handle(worker_msg("x", "stopped", 3), 161.0).size() == 1);
+        CHECK(ps.handle(worker_msg("x", "running", 4), 162.0).size() == 1);  // 바뀜: 바로
+        CHECK(ps.handle(worker_msg("x", "running", 5), 165.0).empty());      // 실행 중 5 s 안
+        CHECK(ps.handle(worker_msg("x", "running", 6), 167.5).size() == 1);
+    }
     // 상태 바뀜: 간격 안이라도 바로
     r = p.handle(worker_msg("cam1", "stopping", 3), 11.1);
     CHECK(r.size() == 1 && r[0]["changed"] == true);
@@ -122,6 +133,26 @@ static void test_file() {
         record::RecordFile f(dir, 200, 100000, 0, "bootbbbb");
         CHECK(f.path().find("_bootbbbb.jsonl") != std::string::npos);
     }
+    // 보존(retention.md): 기간이 지난 파일, 디스크 빈 곳이 모자라면 오래된 것부터. 지금 파일은 안 지움
+    {
+        const std::string d2 = tmpdir();
+        for (const char* n : {"20200101-000000_old00001.jsonl", "20200102-000000_old00002.jsonl", "20200103-000000_old00003.jsonl"}) {
+            std::ofstream(d2 + "/" + n) << "x\n";
+        }
+        const std::string old1 = d2 + "/20200101-000000_old00001.jsonl";
+        timeval tv[2] = {{0, 0}, {0, 0}};
+        tv[0].tv_sec = tv[1].tv_sec = ::time(nullptr) - 30 * 86400;  // 30일 전
+        utimes(old1.c_str(), tv);
+        record::RecordFile f(d2, 1 << 20, 1 << 30, 0, "bootcccc");
+        CHECK(names(d2).size() == 4);
+        uint64_t free_b = 1ull << 40;
+        f.set_retention(14 * 86400.0, 100, [&] { return free_b; });  // 14일: 30일 된 파일 하나
+        CHECK(names(d2).size() == 3 && f.removed_age() == 1);
+        free_b = 50;  // 빈 곳 모자람: 지금 파일 빼고 다 지움
+        f.set_retention(14 * 86400.0, 100, [&] { return free_b; });
+        CHECK(names(d2).size() == 1 && f.removed_free() == 2 && names(d2)[0].find("bootcccc") != std::string::npos);
+        (void)!std::system(("rm -rf " + d2).c_str());
+    }
     (void)!std::system(("rm -rf " + dir).c_str());
 }
 
@@ -152,7 +183,14 @@ static void test_find() {
 }
 
 static void test_topics() {
-    record::TopicRules r;  // 기본: 모든 주제 1 s에 하나
+    {  // 기본 규칙(retention.md): 관리 요약 주제(status·payload)는 5 s, 그 밖 1 s
+        record::TopicRules d;
+        const int64_t S = 1000000000;
+        CHECK(d.take("status-manager", "system", 1 * S, false) && !d.take("status-manager", "system", 3 * S, false));
+        CHECK(d.take("status-manager", "system", 6 * S + 1, false));
+        CHECK(d.take("cam", "x", 1 * S, false) && d.take("cam", "x", 2 * S + 1, false));
+    }
+    record::TopicRules r;  // 기본: 그 밖 주제는 1 s에 하나
     const int64_t s = 1000000000;
     auto t = Json::parse(R"({"camera":{"fps":30,"t_mono_ns":777},"mount":{"yaw":1}})");
     auto ev = Json::parse(R"([{"t_mono_ns":555,"source":"cam1.link","severity":"warning","code":"link_down","text":"x"}])");

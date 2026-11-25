@@ -32,7 +32,9 @@ std::vector<Json> PlatformRecorder::handle(const Json& msg, double now_s) {
         const bool changed = ls == last_state_.end() || ls->second != state;
         auto lw = last_written_.find(wid);
         const double last = lw == last_written_.end() ? -1e9 : lw->second;
-        if (changed || now_s - last >= interval_) {
+        const Json st = get_or_null(data, "actual_state");
+        const double every = st.is_string() && st.get<std::string>() == "running" ? interval_ : stopped_interval_;
+        if (changed || now_s - last >= every) {
             // 예전 logger: {"type": "worker", "changed": .., **data}, data의 type은 빼서 맨 끝 worker_type으로
             Json rec = Json::object();
             rec["type"] = "worker";
