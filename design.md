@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.77 |
+| 문서 버전 | 0.78 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1580,6 +1580,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.75 | 워커 명령 오류 code를 9.6 목록에 맞춤: `fault.ack`·`config.diff`·`config.restore`·`payload.power`·`payload.power_group`이 없는 대상에 `not_found` 대신 **`bad_request`**(인자가 가리키는 것이 없음). Manager·게이트웨이 API의 `not_found`(404)는 그대로 |
 | 0.76 | 보드 확인 뒤 고침: nginx가 주는 화면 파일에 `Cache-Control: no-cache`(업데이트 뒤 브라우저가 옛 `panel.js`를 쓰던 문제, `docs/gateway.md`). 패널 "시스템" 명령 큐 빈 문구가 보낸 수를 반영 |
 | 0.77 | 화면 왼쪽 목록 **묶음을 셋으로 고정**(`ui/README.md`): **시스템**(공용 패널: 개요·모니터·로그·명령 이력·워크스페이스·연결, 전체 관리), **페이로드**(워커 패널·자동 화면, 들어간 모듈), **개발 도구**(replay). 워커가 `panel.json` `group`으로 새 묶음을 만들지 못함(점검 `dev/test_workers.py`, 화면은 밖의 이름을 페이로드·시스템으로). 처음 열리는 화면은 패널 "시스템" |
+| 0.78 | **설계만(구현 전)**: `docs/modes.md`(모드를 배포 형태로: 워크스페이스는 늘 개발, 제품 묶음은 늘 운용, 토글 없앰. 명령 조건·fault 대응은 두 곳에서 같게 검사하고 워크스페이스는 알리기만(`advisory`, 잡아 둔 대응) — 구현하면 원칙 17 고침), `ui/workspace-screen.md`(왼쪽 목록 넷: 시스템 모니터·워크스페이스·페이로드·개발 도구, 워크스페이스 탭 여섯: 개요·로그·명령 이력·워커 연결·설정·관리, 설정을 화면에서 바꿈) |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |
