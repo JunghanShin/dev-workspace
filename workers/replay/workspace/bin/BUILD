@@ -1,6 +1,6 @@
 # replay 워커 실행 파일(Jetson aarch64). dev/release-worker.sh가 만든다. 손으로 고치지 않는다
-source_commit: c5eef60
+source_commit: 67b886a
 build_env: jetson-dev 2.1
-built: 2026-11-23 21:52
+built: 2026-11-25 15:15
 sha256:
-  9227527b2a8b9226a25c93ba16a92ab3e830c504e0a780830a63f5f2583dc7ba  replay-worker
+  80760cfabea5be6dded0d9fb52829a02c4961230989dd484628c1cd6389008a2  replay-worker

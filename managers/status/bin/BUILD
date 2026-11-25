@@ -1,6 +1,6 @@
 # status 워커 실행 파일(Jetson aarch64). dev/release-worker.sh가 만든다. 손으로 고치지 않는다
-source_commit: d284d3f
+source_commit: 67b886a
 build_env: jetson-dev 2.1
-built: 2026-11-24 20:35
+built: 2026-11-25 15:13
 sha256:
-  2df510cad1fea0f38c0da1d22d858405cc2b9067eeebcb37e331301033194075  status-manager
+  16564cd4c323c8b9ffca7056d7d9fbcdb0554d48511d0fd15a87ec0b3997cef4  status-manager
