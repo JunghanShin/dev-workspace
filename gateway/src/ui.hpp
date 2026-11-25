@@ -35,7 +35,8 @@ public:
     bool available() const;  // shell.html이 있는가
     std::optional<StaticFile> static_file(const std::string& path) const;
     Json panels() const;
-    Json ui_info(const std::string& host_header, const std::string& data_dir, bool product) const;
+    // proto: 앞단(nginx)이 알려 준 X-Forwarded-Proto(https면 https). 상대 영상 주소(/media/...)는 완전한 주소로
+    Json ui_info(const std::string& host_header, const std::string& data_dir, bool product, const std::string& proto = "") const;
     // (상태 코드, 응답)
     std::pair<int, Json> remote(const std::string& name, const Params& params, Reads& reads) const;
     const UiConfig& config() const { return cfg_; }  // web·workers·refresh_ms(바뀌지 않음)

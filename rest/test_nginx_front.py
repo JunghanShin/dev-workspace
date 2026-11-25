@@ -112,8 +112,11 @@ class NginxFront(unittest.TestCase):
         self.assertEqual((st, json.loads(data)["path"]), (200, "/siyi/"))
         st, h, data = self.req("POST", "/media/siyi/whep", raw=b"v=0 offer", headers={"Content-Type": "application/sdp"})
         self.assertEqual((st, json.loads(data)["path"], json.loads(data)["body"]), (201, "/siyi/whep", "v=0 offer"))
-        st, h, data = self.req("GET", "/api/ui")
-        self.assertEqual(json.loads(data)["media"]["url"], "/media/{path}/")  # nginx 뒤(게이트웨이 TCP 안 엶)
+        st, h, data = self.req("GET", "/api/ui", headers={"Host": "board.test:8080"})
+        # nginx 뒤(게이트웨이 TCP 안 엶): 같은 주소의 /media/를 완전한 주소로(별도 UI가 읽어도 이 보드로)
+        self.assertEqual(json.loads(data)["media"]["url"], "http://board.test:8080/media/{path}/")
+        st, h, data = self.req("GET", "/api/ui", headers={"Host": "bo_ard:8080"})
+        self.assertEqual(json.loads(data)["media"]["url"], "/media/{path}/")  # 이상한 Host는 상대 그대로
 
     def req(self, method, path, body=None, headers=None, raw=None):
         import http.client
@@ -166,7 +169,7 @@ class NginxFront(unittest.TestCase):
             self.assertIn("board.test", json.loads(data)["media"]["url"])  # 영상 주소에 브라우저가 접속한 주소
         finally:
             self.assertEqual(put(None)[0], 200)
-        self.assertEqual(json.loads(self.req("GET", "/api/ui")[2])["media"]["url"], "/media/{path}/")  # 비우면 자동
+        self.assertTrue(json.loads(self.req("GET", "/api/ui")[2])["media"]["url"].endswith("/media/{path}/"))  # 비우면 자동
 
     def test_body_limit(self):
         st, _, _ = self.req("POST", "/workers/w1/command", raw=b"x" * (70 * 1024),

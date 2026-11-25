@@ -145,8 +145,13 @@ std::string Ui::media_url() const {
     return media_url_;
 }
 
-Json Ui::ui_info(const std::string& host_header, const std::string& data_dir, bool product) const {
+Json Ui::ui_info(const std::string& host_header, const std::string& data_dir, bool product, const std::string& proto) const {
     std::string url = media_url();
+    // 상대 주소(/media/{path}/, docs/media-proxy.md)는 요청이 온 주소로 완전하게: 다른 곳에서 띄운 화면(별도 UI)이 읽어도
+    // 이 보드로 간다. Host는 주소에 쓸 수 있는 글자만일 때만(아니면 상대 그대로)
+    if (!url.empty() && url[0] == '/' && !host_header.empty() &&
+        host_header.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:[]") == std::string::npos)
+        url = std::string(proto == "https" ? "https" : "http") + "://" + host_header + url;
     const std::string host = request_host(host_header);
     for (size_t pos = 0; (pos = url.find("{host}", pos)) != std::string::npos; pos += host.size())
         url.replace(pos, 6, host);

@@ -639,7 +639,7 @@ Reply Gateway::forward(const RequestView& rq, const std::function<Body()>& body,
         case UiKind::Panels:
             return json_reply(200, ui_.panels());
         case UiKind::UiInfo:
-            return json_reply(200, ui_.ui_info(rq.header("Host"), cfg_.data_dir, cfg_.product));
+            return json_reply(200, ui_.ui_info(rq.header("Host"), cfg_.data_dir, cfg_.product, rq.header("X-Forwarded-Proto")));
         case UiKind::Root:
         case UiKind::None:
             break;
