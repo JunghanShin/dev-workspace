@@ -40,13 +40,13 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - name: 도구 설치(nginx: 게이트웨이 앞단 시험)
+      - name: "도구 설치(nginx, 게이트웨이 앞단 시험)"
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends cmake g++ nginx
           sudo systemctl stop nginx || true
           cmake --version | head -1; g++ --version | head -1; python3 --version
-      - name: dev/check.sh (PR은 --no-tsan, 태그는 TSan 포함)
+      - name: "dev/check.sh (PR은 --no-tsan, 태그는 TSan 포함)"
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* || "${{ inputs.tsan }}" == true ]]; then bash dev/check.sh; else bash dev/check.sh --no-tsan; fi
       - name: 실패 로그 올리기
