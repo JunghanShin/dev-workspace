@@ -3,6 +3,7 @@
 #
 #   dev/check.sh            Python 시험 전부 + 템플릿과 모든 워커 PC 빌드·시험(WORKER_WORKSPACE=ON, OFF)
 #   dev/check.sh --quick    Python 시험만(빌드 생략)
+#   dev/check.sh --no-tsan  ThreadSanitizer 빌드만 뺌(CI의 PR 검사, .github/workflows/check.yml)
 #
 # Python: manager/test_schema.py(스키마·프리셋), dev/test_workers.py(워커 폴더 구성·사본 라이브러리·패널 id·Python 도우미·정의 파일 형식), dev/test_io_output.py(빌드 뒤 출력 대조),
 # Python 도구: workers/_template/python/test_comm.py(Python ↔ C++ 워커 통신, 틀 빌드 뒤)
@@ -12,8 +13,14 @@
 # Jetson(크로스 빌드 + QEMU) 시험은 확정할 때 워커마다 jetson-build --test (design.md 11.3)
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
-QUICK=0
-[[ "${1:-}" == --quick ]] && QUICK=1
+QUICK=0 TSAN=1
+for a in "$@"; do
+  case "$a" in
+    --quick) QUICK=1 ;;
+    --no-tsan) TSAN=0 ;;
+    *) echo "usage: dev/check.sh [--quick] [--no-tsan]" >&2; exit 2 ;;
+  esac
+done
 OUT="/tmp/workspace-check/$(basename "$ROOT")"  # 저장소마다 따로(같은 PC의 다른 워크스페이스와 CMake 캐시가 섞이지 않게)
 export WORKSPACE_CHECK_OUT="$OUT"  # 출력 대조(dev/test_io_output.py)가 연동 ON 빌드를 찾는 곳
 mkdir -p "$OUT"
@@ -130,6 +137,7 @@ if (( ! QUICK )); then
   # 출력 대조(design.md 6.6.7.2): io.json check가 있는 워커를 가짜 장치로 띄워 실제 출력(get_status·주제·명령 응답·지표)을 정의와 대조
   step "출력 대조"
   run_py test_io_output "$ROOT" dev/test_io_output.py
+  if (( TSAN )); then
   # 데이터 버스 동시성: ThreadSanitizer 빌드로 단위·스트레스 시험(경고가 하나라도 있으면 실패).
   # 최신 커널의 넓은 주소 무작위화와 TSan이 맞지 않아 setarch -R(그 실행만 무작위화 끔)로 돌린다
   tsan="-fsanitize=thread -g -O1"
@@ -173,6 +181,7 @@ if (( ! QUICK )); then
     echo "build failed: $b.build.log"
     fail+=("libframebus-tsan build")
   fi
+  fi  # TSAN
 fi
 
 echo

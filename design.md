@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.87 |
+| 문서 버전 | 0.88 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -524,7 +524,7 @@ workers/_template/
 ├─ test/test_worker.cpp      워커 통합 시험: 실행 파일 둘(a, b peer=a) — 명령·포트·데이터 버스·구독·명령 전달·다시 붙음, 가짜 장치 모드
 ├─ tools/example-sim.cpp     가짜 장치 프로그램 틀(가짜 장치 모드 6.6.8, 프리셋 sim)
 ├─ lib/
-│  ├─ libworker/             실행 뼈대 원본(0.9.1): Host·Module·WorkerThread·BoundedQueue·
+│  ├─ libworker/             실행 뼈대 원본(버전은 CMakeLists.txt): Host·Module·WorkerThread·BoundedQueue·
 │  │                         CommandServer·Publisher·ThreadWatch·config 도우미·자식 프로세스,
 │  │                         워커 간 통신 Subscriber·CommandClient(peer.hpp), manager_call   ②
 │  │  └─ src/workspace/      워크스페이스 연동(heartbeat, 데이터 폴더 경로)                  ③
@@ -562,7 +562,7 @@ dev/new-worker.sh [--video] <폴더> [type]    틀 복사·워커 이름 바꾸�
 
 | 모듈 | 원본 | 하는 일 |
 |---|---|---|
-| 프레임 탭 `tap` | `lib/libvideo` | `video::TapModule`(libvideo 0.3). 설정 `{"tap": {"enabled", "width", "height", "pixel", ...}}`: 카메라 RTSP를 자식 gst-launch로 풀어(NVDEC) 원본 프레임을 프레임 버스(6.7)로 낸다. 소켓 기본값 `default_socket(워커 id, "frames")`. 송출과 따로라 서로 영향 없음. 인식 같은 영상 처리 워커가 받아 감 |
+| 프레임 탭 `tap` | `lib/libvideo` | `video::TapModule`(libvideo 0.3부터). 설정 `{"tap": {"enabled", "width", "height", "pixel", ...}}`: 카메라 RTSP를 자식 gst-launch로 풀어(NVDEC) 원본 프레임을 프레임 버스(6.7)로 낸다. 소켓 기본값 `default_socket(워커 id, "frames")`. 송출과 따로라 서로 영향 없음. 인식 같은 영상 처리 워커가 받아 감 |
 | 영상 송출 `stream` | `lib/libvideo` | `video::StreamsModule`. 설정 `{"stream": {"streams": [...]}}`의 송출마다 자식 프로세스(gst-launch·ffmpeg)로 띄우고 감시·재시작. 명령 `stream.start|stop`, 지표 `stream_<이름>_link·_fps·_restarts`. 입력 기본값은 장치 모듈이 준다(`host.add<video::StreamsModule>([&dev]{ return dev.stream_defaults(); })`). 송출 항목 칸은 `stream-schema.json`이 원본 |
 | 데이터 버스 | `lib/libframebus` | 캡처 → 같은 워커 안 송출, 또는 다른 워커(AI 등)로 프레임·원시 레코드 공유(6.7) |
 | 워커 간 통신 | `lib/libworker` `peer.hpp` | 상대 워커 구독(`Subscriber`)·명령(`CommandClient`)(6.6.7) |
@@ -1098,7 +1098,7 @@ workers/<워커>/workspace/panel/       워커 패널(id = panel.json "id")
 
 ```json
 {
-  "id": "example", "type": "example_worker", "autostart": false, "preset": "default", "temp": false, "libworker": "0.9.1", "sim": false,
+  "id": "example", "type": "example_worker", "autostart": false, "preset": "default", "temp": false, "libworker": "0.19.0", "sim": false,
   "exec": "/home/user/dev-workspace/workers/example/workspace/bin/example-worker",
   "desired_state": "running", "actual_state": "running",
   "pid": 3884, "last_exit_code": null, "last_signal": null, "last_error": null,
@@ -1180,7 +1180,7 @@ stdout/stderr는 Manager가 `<데이터>/state/logs/{id}.log`로 직접 리다�
 | spawn보다 먼저 온 것 | 빨리 뜨는 워커는 Manager가 spawn을 마치기(pid를 기록하기) 전에 READY를 보낼 수 있다. 짝 없는 heartbeat는 pid별로 10 s 보관했다가 spawn 직후 처리한다(0.38, 전에는 버려져 10 s 뒤 "no READY"로 다시 시작) |
 
 ```text
-READY=1 id=example libworker=0.9.1
+READY=1 id=example libworker=0.19.0
 WATCHDOG=1 id=example progress=1834 config_version=4 source_seq=1834 peer_link=1
 ```
 
@@ -1366,7 +1366,8 @@ systemd workspace.service ──▶ bash workspace-start.sh --service (root, 계
 | `dev/deploy-worker.sh [--test\|--no-build\|--revert] <워커>` | 개발 중 빠른 반영: Jetson 빌드 → 보드 `workers/<워커>/build/`에 복사 → 보드 REST로 그 워커만 다시 시작하고 실행 파일·버전 표시. 워크스페이스 재시작·sudo·보드 깃 변경 없음. `--revert`는 개발 빌드를 지우고 확정으로. 보드 접속은 `dev/board.env`(깃 제외, `board.env.example`) |
 | `dev/new-worker.sh` | 템플릿으로 새 워커(6.6.5) |
 | `dev/workspace-dev.sh [--profile]` | PC(WSL)에서 워크스페이스 전체(Manager·REST·logger·워커) 실행. root·고정 IP·tegrastats 없이. 데이터 폴더 `WORKSPACE_DATA` |
-| `dev/check.sh [--quick]` | 커밋 전 검사 한 번에: Python 시험 전부 + 템플릿·모든 워커 PC 빌드·시험(ON·OFF) + 데이터 버스 동시성(ThreadSanitizer, 6.7) |
+| `dev/check.sh [--quick] [--no-tsan]` | 커밋 전 검사 한 번에: Python 시험 전부(문서의 라이브러리 버전 대조 포함) + 템플릿·모든 워커 PC 빌드·시험(ON·OFF) + 데이터 버스 동시성(ThreadSanitizer, 6.7). `--no-tsan`은 TSan만 뺌 |
+| `.github/workflows/check.yml` | CI: push마다 `--quick`, PR마다 `--no-tsan`(전체 빌드·ctest), 태그 `v*`는 TSan까지 |
 | `dev/test_workers.py` | 구조 검사(템플릿 포함): 워커·모듈 폴더 구성, 층 규칙(코어가 libworker를 쓰면 실패), 사본 라이브러리·Python 도우미 = 틀 원본, 패널 id 겹침. 미준수 목록(유닛 시험 없는 모듈, 설계서 3장 ICD 없는 워커)은 알림만 |
 | `manager/test_schema.py` | 스키마 형식, 프리셋이 스키마를 통과하는지, 모듈 schema.json = type 선언, `worker_id`·`peers` |
 | `manager/test_manager_api.py` | Manager API를 쓰는 워커: 임시 워크스페이스로 진짜 Manager를 띄워 다른 워커 시작·자기 제어 금지·읽기 전용 소켓, 제품 모드(설정 잠금·sim 거부) |
@@ -1594,6 +1595,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.85 | **영상 넘기기**(`docs/media-proxy.md`): nginx `location ^~ /media/` → MediaMTX WebRTC(127.0.0.1:8889, 앞의 `/media`를 뗌, render.sh `RENDER_MEDIA`). 게이트웨이가 nginx 뒤면 기본 영상 주소가 같은 주소 `/media/{path}/`라 HTTPS 화면에서도 영상이 막히지 않고 SSH 터널로도 신호가 같은 길로. `WORKSPACE_UI_MEDIA_URL`을 적으면 그 값, 설정 탭에서 비우면 자동 |
 | 0.86 | **모듈 이벤트·송출 끊김 이벤트**: libworker 0.18 `Host::event(module, severity, code, text, detail)`(모듈이 공통 이벤트를 냄, source `<워커>.<모듈>`, 스트림을 내는 모듈이 `take_events`로 발행). libvideo 0.4 `stream_down`·`stream_up`(이유·끊긴 시간)·`tap_down`·`tap_up`. 보드에서 카메라 끊김이 로그 글자로만 남고 기록에 없어 찾기 어려웠던 것을 고침 |
 | 0.87 | **검토에서 정한 한계 고침**(`docs/review-2026-11-25.md` 6장): ① 워커 거절 HTTP: `forbidden` 403·`busy` 409(9.6) ② 로그인을 켜면 영상도 같은 계정·토큰으로(`docs/media-auth.md`: nginx `/media/` `auth_request` + MediaMTX `authMethod: http` → 게이트웨이 `127.0.0.1:8079/api/auth/media`, 판정은 게이트웨이 한 곳) ③ 스트림 묶기 `GET /streams?ids=`(`docs/stream-mux.md`, 화면 하나에 연결 하나, 셸 `ctx.stream`) ④ 두 번 확인: 계약 명령 `confirm` → 셸이 보내기 전에 물음(`docs/command-confirm.md`) ⑤ libworker 0.19 `worker::stream_line`(스트림 한 줄을 만들며 호스트 이벤트를 저절로 실음) ⑥ 설정은 모두 바로 적용, 필요한 부분만 다시 적용하고 워크스페이스 전체 재시작 없음(`docs/live-settings.md`: 로그 수준 즉시·process-manager op `set_log_level`, 로그인 검사기 교체, HTTPS는 `gateway/nginx/apply.sh`로 nginx 설정 다시 만들고 reload) |
+| 0.88 | **CI와 문서 버전.** GitHub Actions `.github/workflows/check.yml`(push `--quick`, PR 전체 빌드·ctest `--no-tsan`, 태그 TSan), `dev/check.sh --no-tsan`. 문서의 라이브러리 버전: 지금 버전을 말하는 곳(예시 줄·"지금 x")은 틀 `CMakeLists.txt` VERSION과 같아야 하고 실제보다 높은 버전은 없어야 함(`dev/test_workers.py` `DocVersions`). 어긋난 곳(실행 뼈대 원본 0.9.1, 예시 `libworker` 0.9.1, "지금 0.18") 고침 |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |

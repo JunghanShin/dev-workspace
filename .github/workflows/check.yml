@@ -1,0 +1,58 @@
+# 커밋 검사(dev/check.sh)를 GitHub 러너에서.
+#   push(모든 브랜치)  → dev/check.sh --quick       Python 시험만(구조·계약·문서 버전)
+#   PR                 → dev/check.sh --no-tsan     전체 빌드·ctest(워커 WORKER_WORKSPACE ON/OFF), TSan 뺌
+#   태그 v*            → dev/check.sh               전체 + ThreadSanitizer
+#   손으로(Actions 탭) → 전체, tsan 고르면 TSan까지
+# Jetson(크로스 빌드·QEMU) 시험은 여기서 하지 않는다(design.md 11.3, 워커마다 jetson-build --test)
+name: check
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:   # 손으로 전체 검사(tsan: true면 TSan까지)
+    inputs:
+      tsan:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick:
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: dev/check.sh --quick
+        run: bash dev/check.sh --quick
+
+  full:
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: 도구 설치(nginx: 게이트웨이 앞단 시험)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends cmake g++ nginx
+          sudo systemctl stop nginx || true
+          cmake --version | head -1; g++ --version | head -1; python3 --version
+      - name: dev/check.sh (PR은 --no-tsan, 태그는 TSan 포함)
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* || "${{ inputs.tsan }}" == true ]]; then bash dev/check.sh; else bash dev/check.sh --no-tsan; fi
+      - name: 실패 로그 올리기
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-logs
+          path: /tmp/workspace-check/**/*.log
+          if-no-files-found: ignore

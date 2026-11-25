@@ -439,6 +439,56 @@ class Panels(unittest.TestCase):
                 self.assertIn(g, ("페이로드", "개발 도구"), "워커 패널 group은 페이로드 또는 개발 도구")
 
 
+LIB_VERSION = re.compile(r'project\(\s*(lib\w+)\s+VERSION\s+(\d+\.\d+\.\d+)')
+# 문서에서 "지금 버전"을 말하는 꼴: 예시 줄("libworker": "x", libworker=x)과 "<라이브러리> … 지금 x"
+DOC_CURRENT = (re.compile(r'"(libworker|libvideo|libframebus)":\s*"(\d+\.\d+(?:\.\d+)?)"'),
+               re.compile(r'\b(libworker|libvideo|libframebus)=(\d+\.\d+(?:\.\d+)?)'),
+               re.compile(r'\b(libworker|libvideo|libframebus)\b[^|\n]{0,30}?지금 (\d+\.\d+(?:\.\d+)?)'))
+CHANGE_ROW = re.compile(r"^\| \d+\.\d+ \|")
+DOC_ANY = re.compile(r'\b(libworker|libvideo|libframebus) (\d+\.\d+(?:\.\d+)?)\b')
+
+
+def lib_versions():
+    out = {}
+    for name in COPIED_LIBS:
+        m = LIB_VERSION.search(read(os.path.join(TEMPLATE, "lib", name, "CMakeLists.txt")))
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def vt(v):
+    return tuple(int(x) for x in v.split("."))
+
+
+class DocVersions(unittest.TestCase):
+    def test_docs_match_library_versions(self):
+        """문서의 공용 라이브러리 버전이 실제(틀 lib/<라이브러리>/CMakeLists.txt VERSION)와 어긋나지 않아야 한다.
+        ① 지금 버전을 말하는 곳(예시 줄, "지금 x")은 실제와 같아야 하고 ② 어디서든 실제보다 높은 버전은 없어야 한다.
+        "x부터"·바뀐 기록처럼 지난 버전을 적는 것은 그대로 둔다. 날짜가 박힌 검토 보고서(docs/review-*.md)와 변경 기록 줄(| 0.88 | …)은 그때 기록이라 뺀다"""
+        cur = lib_versions()
+        self.assertIn("libworker", cur)
+        bad = []
+        for dirpath, dirnames, filenames in os.walk(ROOT):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith("build")]
+            for f in filenames:
+                if not f.endswith(".md") or (f.startswith("review-") and os.path.basename(dirpath) == "docs"):
+                    continue
+                p = os.path.join(dirpath, f)
+                rel = os.path.relpath(p, ROOT).replace(os.sep, "/")
+                for n, line in enumerate(read(p).split("\n"), 1):
+                    if CHANGE_ROW.match(line):  # 변경 기록 줄은 그때 기록
+                        continue
+                    for rx in DOC_CURRENT:
+                        for m in rx.finditer(line):
+                            if not cur.get(m.group(1), "").startswith(m.group(2)):
+                                bad.append("%s:%d %s %s (지금 %s)" % (rel, n, m.group(1), m.group(2), cur.get(m.group(1))))
+                    for m in DOC_ANY.finditer(line):
+                        if m.group(1) in cur and vt(m.group(2)) > vt(cur[m.group(1)])[:len(vt(m.group(2)))]:
+                            bad.append("%s:%d %s %s 는 실제(%s)보다 높음" % (rel, n, m.group(1), m.group(2), cur[m.group(1)]))
+        self.assertEqual(bad, [], "\n".join(bad))
+
+
 class PythonHelper(unittest.TestCase):
     def test_python_helper_copies_match_template(self):
         """Python 워커 도우미(workspace_worker.py)의 사본은 원본(workers/_template/python/)과 같아야 한다"""
