@@ -87,15 +87,19 @@ export default {
       onClick: () => act("초기화", async () => {
         await command(ctx, "source.reset"); await command(ctx, "processor.reset"); await command(ctx, "peer.reset");
       }) });
+    // 탭(ui/worker-panels.md): 운용 = 주 값과 운용 조작(역할 명령), 상태 = 모듈별 상세 값, 도구 = 정비·시험(개발할 때만)
+    const run = h("div", {}, ui.tiles(els.seq, els.mean, els.rate),
+      h("div", { style: "margin-top:12px" }, ui.card("주기", h("div", { class: "btnrow" }, rateIn, setRate, els.peerRate))));
+    const status = h("div", { class: "cols2" },
+      ui.card("데이터 만들기(source)", els.src),
+      ui.card("워커 안 처리(processor, 포트로 받음)", els.proc),
+      ui.card("워커 간 받기(peer)", els.peer));
+    const tools = h("div", {}, ui.card("시험", h("div", { class: "btnrow" }, reset),
+      h("div", { class: "hint", style: "margin-top:6px" }, "셈을 처음부터(source·processor·peer)")));
     el.append(
       ui.panelHead({ title: id, badges: [els.pill, els.live], actions: [settingsBtn, h("span", { class: "ph-sep" }), els.controls] }),
-      ui.tiles(els.seq, els.mean, els.rate),
-      h("div", { class: "cols2", style: "margin-top:12px" },
-        ui.card("명령", h("div", { class: "btnrow" }, rateIn, setRate, els.peerRate, reset)),
-        ui.card("데이터 만들기(source)", els.src)),
-      h("div", { class: "cols2", style: "margin-top:12px" },
-        ui.card("워커 안 처리(processor, 포트로 받음)", els.proc),
-        ui.card("워커 간 받기(peer)", els.peer)),
+      ui.panelTabs([{ id: "run", label: "운용", body: run }, { id: "status", label: "상태", body: status },
+                    { id: "tools", label: "도구", body: tools, devOnly: true }]),
     );
     refresh(ctx);
     timer = setInterval(() => refresh(ctx), STATUS_MS);

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" font-family="sans-serif" font-size="12">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="900" height="360" fill="#fff"/>
+  <g stroke="#555">
+    <rect x="20" y="20" width="660" height="40" rx="6" fill="#f4f6fa"/>
+    <rect x="20" y="80" width="210" height="190" rx="6" fill="#e8eef9"/>
+    <rect x="245" y="80" width="210" height="190" rx="6" fill="#fafbfd"/>
+    <rect x="470" y="80" width="210" height="190" rx="6" fill="#fff4e6"/>
+    <rect x="720" y="80" width="160" height="190" rx="6" fill="#eaf4ea"/>
+  </g>
+  <g fill="#222">
+    <text x="34" y="45" font-weight="bold">머리: 워커 id · 상태 배지</text>
+    <text x="520" y="45">톱니(설정) · 시작/정지</text>
+  </g>
+  <g text-anchor="middle" fill="#222">
+    <text x="125" y="104" font-weight="bold">운용 (처음 탭)</text>
+    <text x="125" y="128">주 화면: 영상 · 계기</text>
+    <text x="125" y="148">운용 조작(역할 명령)</text>
+    <text x="125" y="168">모드 · 시동 · 짐벌 · 줌</text>
+    <text x="125" y="252" fill="#666" font-size="11">제품 화면은 이 탭만</text>
+    <text x="350" y="104" font-weight="bold">상태</text>
+    <text x="350" y="128">장치 · 링크 상세 값</text>
+    <text x="350" y="148">셈: 보냄 · 받음 · 손실</text>
+    <text x="350" y="168">최근 이벤트</text>
+    <text x="350" y="252" fill="#666" font-size="11">보기만, 내부 값은 여기</text>
+    <text x="575" y="104" font-weight="bold">도구</text>
+    <text x="575" y="128">명령 직접 보내기 · 주기</text>
+    <text x="575" y="148">영점 저장 · 재부팅(위험)</text>
+    <text x="575" y="168">영상 주소 · 시험</text>
+    <text x="575" y="252" fill="#666" font-size="11">개발할 때만(제품에 없음)</text>
+    <text x="800" y="104" font-weight="bold">설정 창</text>
+    <text x="800" y="128">워커 설정(스키마 폼)</text>
+    <text x="800" y="148">이 브라우저 값</text>
+    <text x="800" y="168">(버튼 감도 등)</text>
+    <text x="800" y="252" fill="#666" font-size="11">본문에 설정 칸 없음</text>
+  </g>
+  <g stroke="#333" stroke-width="1.5" fill="none" marker-end="url(#a)">
+    <path d="M640,60 L640,70 L800,70 L800,78"/>
+  </g>
+  <g font-size="11" fill="#444">
+    <text x="20" y="300">탭은 주소에 남음: #/&lt;패널&gt;/&lt;워커&gt;?tab=status · 숨긴 탭도 값은 갱신 · 영상은 운용 탭에서만 받음</text>
+    <text x="20" y="320">공용 부품 kit.js panelTabs(tabs, {initial, onChange}): 워크스페이스 탭과 같은 모양, 제품 모드면 devOnly 탭을 뺌</text>
+    <text x="20" y="340">탭이 하나뿐인 패널(자동 화면)은 탭 줄 없음 · 개발 도구 묶음(replay)은 운용·상태 둘</text>
+  </g>
+</svg>

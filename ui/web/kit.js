@@ -16,6 +16,7 @@
 //   select(options, value, onChange, title)  드롭다운([[값, 이름]...]). 항목이 많은 선택(예: 시스템 모니터 보기). .set(options, value)
 //   media(opts)                    16:9 영상 틀(iframe). .setUrl(url) .setMessage(text), onPoint(xr, yr) 클릭 위치(0~1)
 //   panelHead(opts)                패널 머리: 제목, 배지 자리, 오른쪽 아이콘 버튼 자리
+//   panelTabs(tabs, opts)          워커 패널 탭(운용·상태·도구, ui/worker-panels.md). 주소 ?tab=, 제품 모드면 devOnly 탭 뺌
 //   formRows(rows)                 [[이름, 입력 요소, 단위?]...] 설정 폼
 //   block(title, ...children)      오른쪽 열(side)의 제목 달린 묶음. 제목은 짧게(예: "짐벌", "줌 · 초점")
 //   section(title, ...children)    대화창 안의 제목 달린 묶음
@@ -319,6 +320,43 @@ export function panelHead({ title, badges = [], actions = [] } = {}) {
   head.badges = b;
   head.actions = a;
   return head;
+}
+
+// 워커 패널 탭(ui/worker-panels.md): 운용 · 상태 · 도구. tabs = [{id, label, body, devOnly?}].
+// 지금 탭은 주소 ?tab=(첫 탭이면 없음). 바꿔도 패널을 다시 띄우지 않는다(replaceState). 제품 모드면 devOnly 탭을 뺀다.
+// 탭이 하나면 탭 줄을 그리지 않는다. .set(id) .current()
+export function panelTabs(tabs, { initial, onChange } = {}) {
+  const list = tabs.filter((t) => t && !(PRODUCT && t.devOnly));
+  const want = new URLSearchParams(location.hash.split("?")[1] || "").get("tab");
+  let cur = list.some((t) => t.id === want) ? want : initial || (list[0] && list[0].id);
+  const links = {};
+  const strip = el("div", "tabs");
+  for (const t of list) {
+    const a = el("a", "tab", t.label);
+    a.href = "#";
+    a.setAttribute("role", "tab");
+    a.addEventListener("click", (e) => { e.preventDefault(); root.set(t.id); });
+    links[t.id] = a;
+    strip.appendChild(a);
+  }
+  const root = el("div", "ptabs", list.length > 1 ? strip : null, ...list.map((t) => t.body));
+  root.set = (id) => {
+    cur = id;
+    for (const t of list) {
+      t.body.style.display = t.id === id ? "" : "none";
+      links[t.id].classList.toggle("on", t.id === id);
+      links[t.id].setAttribute("aria-selected", t.id === id ? "true" : "false");
+    }
+    const [path, qs] = location.hash.split("?");
+    const p = new URLSearchParams(qs || "");
+    if (list[0] && id === list[0].id) p.delete("tab"); else p.set("tab", id);
+    const s = p.toString();
+    history.replaceState(null, "", path + (s ? "?" + s : ""));
+    if (onChange) onChange(id);
+  };
+  root.current = () => cur;
+  if (cur) root.set(cur);
+  return root;
 }
 
 export function formRows(rows) {

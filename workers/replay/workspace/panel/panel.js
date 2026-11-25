@@ -87,20 +87,23 @@ export default {
       onClick: () => act("재생 멈춤", () => command(ctx, "replay.play_stop")) });
     els.list = h("tbody");
 
-    el.append(
-      ui.panelHead({ title: id, badges: [els.pill, els.recPill, els.playPill],
-        actions: [settingsBtn, h("span", { class: "ph-sep" }), els.controls] }),
-      ui.tiles(els.recFrames, els.recMb, els.playFrames, els.consumers),
-      h("div", { class: "cols2", style: "margin-top:12px" },
+    // 탭(ui/worker-panels.md): 운용 = 녹화·재생·녹화 목록, 상태 = 셈 타일·상태. 개발 도구라 도구 탭 없음
+    const run = h("div", {},
+      h("div", { class: "cols2" },
         ui.card("녹화", h("div", { class: "btnrow" }, source, name, seconds, recStart, recStop),
           h("div", { class: "hint", style: "margin-top:6px" }, "받을 워커의 데이터 버스를 순서대로 전부 저장. 생산자가 아직 없으면 기다렸다가 붙음")),
         ui.card("재생", h("div", { class: "btnrow" }, h("span", {}, "배속"), els.speed,
           h("label", {}, els.loop, " 반복"), playStop),
           h("div", { class: "hint", style: "margin-top:6px" }, "아래 목록의 ▶로 시작. 받는 워커는 설정 상대 워커(peer)를 이 워커 id로"))),
-      h("div", { style: "margin-top:12px" }, ui.card("상태", els.state)),
       h("div", { style: "margin-top:12px" }, ui.card("녹화 목록", h("table", {},
         h("thead", {}, h("tr", {}, ["이름", "출처", "만든 시각", "형식", "프레임", "길이", "크기", ""].map((t) => h("th", {}, t)))),
-        els.list))),
+        els.list))));
+    const status = h("div", {}, ui.tiles(els.recFrames, els.recMb, els.playFrames, els.consumers),
+      h("div", { style: "margin-top:12px" }, ui.card("상태", els.state)));
+    el.append(
+      ui.panelHead({ title: id, badges: [els.pill, els.recPill, els.playPill],
+        actions: [settingsBtn, h("span", { class: "ph-sep" }), els.controls] }),
+      ui.panelTabs([{ id: "run", label: "운용", body: run }, { id: "status", label: "상태", body: status }]),
     );
     refresh(ctx);
     timer = setInterval(() => refresh(ctx), STATUS_MS);
