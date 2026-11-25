@@ -15,7 +15,7 @@
 |---|---|
 | ① nginx `/media/` | `location ^~ /media/` → `http://127.0.0.1:8889/`(앞의 `/media`를 떼고). HTTP·HTTPS 둘 다, 같은 인증서. 버퍼링 없음 |
 | ② 기본 영상 주소 | 게이트웨이가 nginx 뒤면(`WORKSPACE_GATEWAY_TCP=0`) 기본 틀을 **`/media/{path}/`**로. `/api/ui`는 요청이 온 주소(Host, `X-Forwarded-Proto`)로 완전하게 돌려준다(`https://<보드>:8443/media/{path}/`): 별도 UI(다른 주소에서 띄운 화면)가 읽어도 이 보드로 간다(보드에서 상대 주소를 돌려줬더니 별도 UI가 자기 주소로 풀어 영상이 끊김, 2026-11-25). nginx 없이 게이트웨이가 직접 받으면 지금처럼 `http://{host}:8889/{path}` |
-| ③ 영상 틀 | MediaMTX 보기 화면(`/<경로>/`)이 신호(WHEP)를 상대 주소(`whep`)로 보내므로 `/media/<경로>/whep`도 같은 길로 간다 |
+| ③ 영상 틀 | MediaMTX 보기 화면(`/<경로>/`)이 신호(WHEP)를 상대 주소(`whep`)로 보내므로 `/media/<경로>/whep`도 같은 길로 간다. 세션 주소(응답 `Location: /<경로>/whep/<id>`, 절대 경로)는 nginx `proxy_redirect`로 `/media/` 아래로 바꿔 PATCH·DELETE도 같은 길로(빠뜨렸더니 보드에서 DELETE가 게이트웨이로 가 404, 2026-11-25) |
 | ④ 영상 데이터 | WebRTC 영상 자체는 지금처럼 UDP(8189)로 바로(브라우저 ↔ 보드). 넘기는 것은 화면과 신호뿐 |
 
 - `WORKSPACE_UI_MEDIA_URL`을 적어 두면 그 값을 그대로 쓴다(원격 미디어 서버 등). 비우면 위 자동

@@ -41,12 +41,14 @@ class FakeMedia:
                 me.got.append((self.command, self.path, body))
                 out = json.dumps({"method": self.command, "path": self.path, "body": body.decode()}).encode()
                 self.send_response(201 if self.command == "POST" else 200)
+                if self.command == "POST":  # MediaMTX WHEP: 세션 주소는 절대 경로
+                    self.send_header("Location", self.path.rstrip("/") + "/abc123")
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(out)))
                 self.end_headers()
                 self.wfile.write(out)
 
-            do_GET = do_POST = do_PATCH = _reply
+            do_GET = do_POST = do_PATCH = do_DELETE = _reply
 
             def log_message(self, *a):
                 pass
@@ -112,6 +114,9 @@ class NginxFront(unittest.TestCase):
         self.assertEqual((st, json.loads(data)["path"]), (200, "/siyi/"))
         st, h, data = self.req("POST", "/media/siyi/whep", raw=b"v=0 offer", headers={"Content-Type": "application/sdp"})
         self.assertEqual((st, json.loads(data)["path"], json.loads(data)["body"]), (201, "/siyi/whep", "v=0 offer"))
+        self.assertEqual(h["location"], "/media/siyi/whep/abc123")  # 세션 주소도 /media/ 아래(PATCH·DELETE가 같은 길로)
+        st, h, data = self.req("DELETE", "/media/siyi/whep/abc123")
+        self.assertEqual((st, json.loads(data)["path"]), (200, "/siyi/whep/abc123"))
         st, h, data = self.req("GET", "/api/ui", headers={"Host": "board.test:8080"})
         # nginx 뒤(게이트웨이 TCP 안 엶): 같은 주소의 /media/를 완전한 주소로(별도 UI가 읽어도 이 보드로)
         self.assertEqual(json.loads(data)["media"]["url"], "http://board.test:8080/media/{path}/")
