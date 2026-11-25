@@ -335,3 +335,4 @@ input:disabled, select:disabled { opacity: .45; }
 .notice { border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; display: flex; gap: 6px; align-items: center; }
 .notice.warn { border-color: #8a6d2a; color: var(--warn); }
 @media (max-width: 640px) { .set-row { grid-template-columns: 1fr; gap: 4px; } }
+.set-k .mono { font-size: 11px; word-break: break-all; }
