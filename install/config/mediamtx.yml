@@ -1,5 +1,5 @@
 # 워크스페이스 로컬 미디어 서버(MediaMTX v1.21.3) 설정. 데이터 폴더(<데이터>/config/mediamtx.yml)에 없을 때만 복사된다.
-# 고친 뒤: sudo systemctl restart workspace-mediamtx
+# 고치면 MediaMTX가 저절로 다시 읽는다(안 되면 sudo systemctl restart workspace-mediamtx)
 # 여기 없는 항목은 MediaMTX 기본값을 쓴다(전체 항목: install/mediamtx/ 압축 파일 안의 mediamtx.yml).
 #
 #   워커 ──RTSP/SRT──▶ 이 서버(127.0.0.1) ──┬─▶ 로컬 브라우저 (WebRTC :8889, HLS :8888)
@@ -42,3 +42,7 @@ paths:
   #all_others:
   #  runOnAvailable: ffmpeg -hide_banner -loglevel warning -rtsp_transport tcp -i rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH -c copy -f rtsp -rtsp_transport udp -pkt_size 1200 rtsp://<원격 미디어 서버>:8554/$MTX_PATH
   #  runOnAvailableRestart: true
+
+# 영상 로그인(docs/media-auth.md): 게이트웨이가 WORKSPACE_AUTH에 맞춰 바꾼다(켬 http, 끔 internal). 손으로 고치지 않음
+authMethod: internal
+authHTTPAddress: http://127.0.0.1:8079/api/auth/media

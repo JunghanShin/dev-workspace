@@ -88,4 +88,36 @@ const User* media_token_user(const UsersDb& db, const MediaRequest& rq, std::str
     return db.by_token(rq.password, token_name);
 }
 
+std::string mediamtx_auth_yaml(const std::string& text, bool auth_on, int media_port) {
+    const bool http = auth_on && media_port > 0;
+    const std::string method = std::string("authMethod: ") + (http ? "http" : "internal");
+    const std::string addr =
+        "authHTTPAddress: http://127.0.0.1:" + std::to_string(media_port > 0 ? media_port : 8079) + "/api/auth/media";
+    std::string out;
+    bool seen_method = false, seen_addr = false;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t nl = text.find('\n', pos);
+        const bool has_nl = nl != std::string::npos;
+        std::string line = text.substr(pos, has_nl ? nl - pos : std::string::npos);
+        pos = has_nl ? nl + 1 : text.size();
+        if (line.rfind("authMethod:", 0) == 0) {
+            line = method;
+            seen_method = true;
+        } else if (line.rfind("authHTTPAddress:", 0) == 0) {
+            line = addr;
+            seen_addr = true;
+        }
+        out += line;
+        if (has_nl) out += '\n';
+    }
+    if (!seen_method || !seen_addr) {
+        if (!out.empty() && out.back() != '\n') out += '\n';
+        out += "\n# 영상 로그인(docs/media-auth.md): 게이트웨이가 WORKSPACE_AUTH에 맞춰 바꾼다(켬 http, 끔 internal). 손으로 고치지 않음\n";
+        if (!seen_method) out += method + "\n";
+        if (!seen_addr) out += addr + "\n";
+    }
+    return out;
+}
+
 }  // namespace gw

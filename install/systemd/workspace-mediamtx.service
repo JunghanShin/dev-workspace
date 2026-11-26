@@ -8,11 +8,8 @@ After=network-online.target
 [Service]
 Type=simple
 User=@WORKSPACE_USER@
-# 영상 로그인(docs/media-auth.md): 연결마다 게이트웨이(보드 안 127.0.0.1:8079)에 묻는다. 판정은 게이트웨이 한 곳:
-# 보드 안은 늘 허락, 로그인 꺼짐이면 모두 허락, 켬이면 바깥은 사용자별 토큰(또는 계정)으로 보기만. 로그인을 켜고 꺼도 여기는 그대로.
-# mediamtx.yml보다 앞선다(MTX_* 환경 변수). 게이트웨이 WORKSPACE_MEDIA_AUTH_PORT와 같은 포트
-Environment=MTX_AUTHMETHOD=http
-Environment=MTX_AUTHHTTPADDRESS=http://127.0.0.1:8079/api/auth/media
+# 영상 로그인(docs/media-auth.md)은 mediamtx.yml의 authMethod로: 게이트웨이가 로그인을 켜면 http(게이트웨이에 묻기),
+# 끄면 internal로 바꾸고 MediaMTX가 파일을 다시 읽는다. 여기에 MTX_AUTH* 환경 변수를 두지 않는다(파일보다 앞서서 바꿀 수 없게 됨)
 ExecStart=@WORKSPACE_ROOT@/install/mediamtx/mediamtx @WORKSPACE_DATA@/config/mediamtx.yml
 Restart=always
 RestartSec=3

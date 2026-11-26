@@ -145,6 +145,7 @@ public:
     std::shared_ptr<const AuthSlot> auth_slot();
     // 로그인 켜기·끄기(같으면 그대로: 세션 유지). 켤 때 세션은 비어서 시작
     void set_auth(bool on);
+    void sync_mediamtx(bool auth_on);  // <데이터>/config/mediamtx.yml의 authMethod를 로그인에 맞춤(docs/media-auth.md)
 
     // 영상 로그인 판정(MediaMTX가 POST하는 본문) → 상태 코드(200·401·403)
     int media_auth(const Json& body);

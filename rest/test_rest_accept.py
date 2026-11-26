@@ -2618,18 +2618,28 @@ class MediaAuth(unittest.TestCase):
         c.close()
         # 화면 쪽 포트에는 /api/auth/media가 없음(보드 안 포트에서만)
         self.assertNotEqual(srv.request("POST", "/api/auth/media", {"ip": "127.0.0.1"})[0], 200)
-        # 로그인을 끄면(설정 탭) 바깥도 모두 허락: MediaMTX는 다시 시작하지 않음
+        # 로그인을 끄면(설정 탭) 바깥도 모두 허락: MediaMTX는 서비스 재시작 없이 설정 파일만 다시 읽음
         root = tempfile.mkdtemp(prefix="maroot", dir=T["tmp"])
         os.makedirs(os.path.join(root, "install", "config"))
         shutil.copy(os.path.join(REPO, "install", "config", "workspace-settings.json"), os.path.join(root, "install", "config"))
+        # MediaMTX 설정(docs/media-auth.md 1장): 로그인을 켰을 때만 authMethod http. 옛 파일(두 줄 없음)에는 덧붙임
+        yml = os.path.join(data, "config", "mediamtx.yml")
+        with open(yml, "w") as f:
+            f.write("# 현장 주석\nlogLevel: info\nrtsp: true\n")
         srv2 = Server(dict(auth_env(data), WORKSPACE_ROOT=root, WORKSPACE_MEDIA_AUTH_PORT=str(free_port())), name="mediaauth2")
         self.addCleanup(srv2.stop)
         m2 = srv2.json("GET", "/health?detail=1")[1]["gateway"]["media_auth_port"]
+        text = open(yml).read()
+        self.assertIn("\nauthMethod: http\n", text)
+        self.assertIn("\nauthHTTPAddress: http://127.0.0.1:%d/api/auth/media\n" % m2, text)
+        self.assertTrue(text.startswith("# 현장 주석\nlogLevel: info\nrtsp: true\n"))
         self.assertEqual(self.media(m2, ip="10.1.1.1"), 401)
         st, obj, _ = srv2.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "off"}, headers={"Authorization": "Bearer " + tok})
         self.assertEqual(st, 200, obj)
         self.assertEqual(self.media(m2, ip="10.1.1.1"), 200)
         self.assertEqual(self.media(m2, ip="10.1.1.1", action="publish"), 200)  # 꺼짐은 예전과 같음
+        self.assertIn("\nauthMethod: internal\n", open(yml).read())  # 끄면 MediaMTX는 게이트웨이에 묻지 않음
+        self.assertNotIn("authMethod: http", open(yml).read())
 
     def test_check(self):
         data = auth_data_dir()

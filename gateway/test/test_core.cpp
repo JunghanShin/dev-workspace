@@ -743,6 +743,28 @@ void test_settings() {
 }
 
 // 워커 명령·Manager 오류 code → HTTP(design.md 6.4·9.6), 영상 로그인 판정(docs/media-auth.md)
+void test_mediamtx_yaml() {
+    // 없으면 덧붙임(끔 → internal), 켬 → http, 그 밖 줄은 그대로, 같은 값이면 글도 같음
+    const std::string base = "# c\nlogLevel: info\nrtsp: true";
+    const std::string off = mediamtx_auth_yaml(base, false, 8079);
+    CHECK(off.find("logLevel: info\nrtsp: true\n") != std::string::npos);
+    CHECK(off.find("\nauthMethod: internal\n") != std::string::npos);
+    CHECK(off.find("\nauthHTTPAddress: http://127.0.0.1:8079/api/auth/media\n") != std::string::npos);
+    const std::string on = mediamtx_auth_yaml(off, true, 8079);
+    CHECK(on.find("\nauthMethod: http\n") != std::string::npos && on.find("authMethod: internal") == std::string::npos);
+    CHECK(on.size() + 4 == off.size());  // 줄을 바꾸기만(덧붙이지 않음): "internal" → "http"
+    CHECK(mediamtx_auth_yaml(on, true, 8079) == on);
+    CHECK(mediamtx_auth_yaml(on, false, 8079) == off);
+    // 판정 포트가 없으면(0) 켬이어도 internal(물을 곳이 없음)
+    CHECK(mediamtx_auth_yaml(off, true, 0).find("\nauthMethod: internal\n") != std::string::npos);
+    // 다른 포트
+    CHECK(mediamtx_auth_yaml(base, true, 9001).find("authHTTPAddress: http://127.0.0.1:9001/api/auth/media") !=
+          std::string::npos);
+    // 들여쓴 줄(paths 아래 등)은 건드리지 않음
+    const std::string nested = "paths:\n  cam:\n    authMethod: x\n";
+    CHECK(mediamtx_auth_yaml(nested, true, 8079).find("    authMethod: x\n") != std::string::npos);
+}
+
 void test_media_auth() {
     CHECK_EQ(worker_error_status(Json("bad_request")), 400);
     CHECK_EQ(worker_error_status(Json("forbidden")), 403);
@@ -841,6 +863,7 @@ int main() {
     test_record_line();
     test_settings();
     test_media_auth();
+    test_mediamtx_yaml();
     std::cout << (g_fail ? "FAILED " : "OK ") << g_checks - g_fail << "/" << g_checks << " checks\n";
     return g_fail ? 1 : 0;
 }

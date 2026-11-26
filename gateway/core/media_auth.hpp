@@ -39,4 +39,9 @@ bool media_needs_identity(const MediaRequest& rq, bool auth_on);
 // 토큰으로 사용자 찾기: token 칸, 없거나 틀리면 password 칸을 토큰으로(SRT·RTSP는 이름+비밀번호 자리에 넣음). 없으면 nullptr
 const User* media_token_user(const UsersDb& db, const MediaRequest& rq, std::string* token_name = nullptr);
 
+// MediaMTX 설정(mediamtx.yml) 글에서 영상 로그인 두 줄만 맞춘 글(docs/media-auth.md 1장).
+// 로그인 켬이고 판정 포트가 있으면 authMethod: http(게이트웨이에 묻기), 아니면 internal(MediaMTX 기본: 모두 허락).
+// authMethod·authHTTPAddress 줄(맨 앞에서 시작)을 바꾸고, 없으면 끝에 덧붙인다. 그 밖 줄·주석은 그대로
+std::string mediamtx_auth_yaml(const std::string& text, bool auth_on, int media_port);
+
 }  // namespace gw

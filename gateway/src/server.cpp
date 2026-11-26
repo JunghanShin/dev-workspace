@@ -205,10 +205,34 @@ void Gateway::set_auth(bool on) {
     } else {
         slot->auth = std::make_shared<AuthOff>(cfg_.token, cfg_.ui_enabled);
     }
-    std::lock_guard<std::mutex> lock(auth_mu_);
-    const bool had = static_cast<bool>(auth_slot_);
-    auth_slot_ = slot;  // 진행 중인 요청은 옛 것을 끝까지 쓴다(shared_ptr)
+    bool had;
+    {
+        std::lock_guard<std::mutex> lock(auth_mu_);
+        had = static_cast<bool>(auth_slot_);
+        auth_slot_ = slot;  // 진행 중인 요청은 옛 것을 끝까지 쓴다(shared_ptr)
+    }
     if (had) GW_INFO("authentication turned %s (settings)", on ? "on" : "off");
+    sync_mediamtx(on);
+}
+
+void Gateway::sync_mediamtx(bool auth_on) {
+    // 로그인을 켰을 때만 MediaMTX가 게이트웨이에 묻는다(authMethod: http). 끄면 internal(묻지 않음: 게이트웨이가 멈춰도 영상은 돈다).
+    // MediaMTX는 설정 파일이 바뀌면 저절로 다시 읽는다(서비스 재시작·root 필요 없음). 파일이 없으면(MediaMTX 없음) 그대로
+    if (cfg_.data_dir.empty()) return;
+    const std::string path = path_join(path_join(cfg_.data_dir, "config"), "mediamtx.yml");
+    const auto text = read_file(path, 1 << 20);
+    if (!text) return;
+    const std::string want = mediamtx_auth_yaml(*text, auth_on, cfg_.media_auth_port);
+    if (want == *text) return;
+    struct stat st{};
+    const int fmode = ::stat(path.c_str(), &st) == 0 ? static_cast<int>(st.st_mode & 0777) : 0644;
+    std::string err;
+    if (!write_file_atomic(path, want, fmode, err)) {
+        GW_ERROR("mediamtx.yml: %s", err.c_str());
+        return;
+    }
+    GW_INFO("mediamtx.yml: authMethod %s (login %s)", auth_on && cfg_.media_auth_port > 0 ? "http" : "internal",
+            auth_on ? "on" : "off");
 }
 
 Gateway::~Gateway() {

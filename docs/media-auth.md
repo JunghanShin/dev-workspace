@@ -24,7 +24,11 @@
 | ② 프로그램(바로) | MediaMTX `authMethod: http` → 게이트웨이 보드 안 포트 `POST http://127.0.0.1:8079/api/auth/media` | 본문 `{user, password, token, ip, action, path, protocol, id, query}` → `200` 허락 · `401` 자격 물음 · `403` 거절 |
 
 - ①은 로그인 켬일 때만 nginx 설정에 들어간다(`render.sh` `RENDER_AUTH=on`, `apply.sh`가 `WORKSPACE_AUTH=on`·제품이면 켬). 꺼짐이면 예전과 같은 설정. nginx에 `auth_request` 모듈이 없으면 `/media/`를 빼고 경고(열어 두지 않음). 보드 nginx 1.18은 모듈 있음
-- ②는 늘 켜 둔다: MediaMTX 서비스(`install/systemd/workspace-mediamtx.service`)에 `Environment=MTX_AUTHMETHOD=http`, `MTX_AUTHHTTPADDRESS=http://127.0.0.1:8079/api/auth/media`(`mediamtx.yml`보다 앞섬). 로그인을 켜고 끄는 것은 게이트웨이 판정이 바뀔 뿐이라 MediaMTX를 다시 시작하지 않는다(`docs/live-settings.md`)
+- ②는 **로그인을 켰을 때만** 묻는다(0.89): 게이트웨이가 시작할 때와 로그인을 바꿀 때 `<데이터>/config/mediamtx.yml`의 두 줄을 맞춘다. 켬(제품은 늘)이면 `authMethod: http`, 끔이면 `authMethod: internal`(MediaMTX 기본: 모두 허락), `authHTTPAddress: http://127.0.0.1:<WORKSPACE_MEDIA_AUTH_PORT>/api/auth/media`. 줄이 없으면 끝에 덧붙이고, 그 밖 줄·주석은 그대로(원자적 쓰기). MediaMTX는 설정 파일이 바뀌면 저절로 다시 읽으므로 서비스 재시작·root가 필요 없다(`docs/live-settings.md`)
+  - 왜 끔일 때 묻지 않나: 평소(로그인 끔)에는 영상이 게이트웨이와 무관하게 돌아야 한다. 게이트웨이가 잠깐 멈췄다고 장비 영상이 막히면 고장이 번진다
+  - 대가: 로그인을 켜고 끄는 순간 MediaMTX가 설정을 다시 읽으며 보던 영상이 잠깐 끊겼다 다시 붙을 수 있다(로그인은 자주 바꾸는 값이 아님)
+  - 서비스 파일에는 `MTX_AUTH*` 환경 변수를 두지 않는다(0.87에 잠깐 두었음: 환경 변수는 파일보다 앞서 바꿀 수 없음)
+  - 판정 포트가 없으면(`WORKSPACE_MEDIA_AUTH_PORT=0`) 켬이어도 `internal`(물을 곳이 없음, 경고 대신 nginx `/media/`만 막힘)
 - ②의 포트는 게이트웨이가 따로 여는 보드 안 전용(127.0.0.1) 포트. 게이트웨이가 nginx 뒤에서 Unix 소켓만 열어도(`WORKSPACE_GATEWAY_TCP=0`), nginx가 없어도 같은 주소. 이 포트에는 `/api/auth/media` 하나만(그 밖 404), 화면 쪽 포트·소켓에는 이 경로가 없다
 - nginx가 넘긴 브라우저 요청은 MediaMTX에 127.0.0.1로 보이므로 ②에서 다시 묻지 않는다(①에서 이미 확인)
 
@@ -47,13 +51,14 @@
 | 키 | 뜻 | 기본 |
 |---|---|---|
 | `WORKSPACE_AUTH` | 로그인(화면·REST·영상 같이) | `off`, 제품 늘 `on` |
-| `WORKSPACE_MEDIA_AUTH_PORT`(게이트웨이 환경) | ② 판정 포트(127.0.0.1) | `8079`, `0`이면 안 엶. 바꾸면 MediaMTX 서비스 `MTX_AUTHHTTPADDRESS`도 같이 |
+| `WORKSPACE_MEDIA_AUTH_PORT`(게이트웨이 환경) | ② 판정 포트(127.0.0.1) | `8079`, `0`이면 안 엶. `mediamtx.yml`의 `authHTTPAddress`는 게이트웨이가 같이 맞춤 |
 | `RENDER_AUTH`(render.sh) | ① `/media/`에 `auth_request` | `apply.sh`가 정함 |
 
 ## 3. 시험
 
 | 무엇 | 어떻게 |
 |---|---|
+| `mediamtx.yml` 두 줄(core) | `test_core` `test_mediamtx_yaml`: 없으면 덧붙임, 켬 http·끔 internal, 같은 값이면 그대로, 포트 0이면 internal, 들여쓴 줄은 안 건드림 |
 | 판정(core) | `test_core` `test_media_auth`: 보드 안·꺼짐·켬 × read·playback·publish·api, 역할, 토큰 칸·비밀번호 칸 |
 | ② 포트 | `test_rest_accept` `MediaAuth.test_media_port`: 401(자격 없음)·토큰·비밀번호 자리 토큰·계정, 바깥 publish 403, 실패 제한, 설정 탭으로 끄면 바로 모두 허락 |
 | ① 확인 | `MediaAuth.test_check`: 204·401, 꺼짐이면 204, POST 405 |

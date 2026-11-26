@@ -15,7 +15,7 @@
 |---|---|---|
 | 화면 제목·영상 주소 틀·명령 응답 대기 | 게이트웨이 | 그대로(0.84부터) |
 | `WORKSPACE_LOG_LEVEL` | 게이트웨이, process-manager | 게이트웨이 `set_log_level`, process-manager op `set_log_level {"level"}`(게이트웨이 전용 소켓 `manager-rest.sock`, `set_access_mode`와 같은 자리). 메모리에만 |
-| `WORKSPACE_AUTH` | 게이트웨이 신분 확인, nginx `/media/`, MediaMTX | 게이트웨이가 신분 확인 묶음(AuthOff ↔ AuthOn)을 통째로 바꿔 끼움 + nginx 다시 만들기(`RENDER_AUTH`). MediaMTX는 늘 게이트웨이에 묻기 때문에 그대로(`docs/media-auth.md`) |
+| `WORKSPACE_AUTH` | 게이트웨이 신분 확인, nginx `/media/`, MediaMTX | 게이트웨이가 신분 확인 묶음(AuthOff ↔ AuthOn)을 통째로 바꿔 끼움 + nginx 다시 만들기(`RENDER_AUTH`) + `<데이터>/config/mediamtx.yml`의 `authMethod`(켬 http, 끔 internal)를 바꿔 MediaMTX가 파일을 다시 읽음(서비스 재시작·root 없음, 보던 영상이 잠깐 끊길 수 있음, `docs/media-auth.md` 1장) |
 | HTTPS 칸·평문 넘김 | nginx | `gateway/nginx/apply.sh --reload`: 인증서(없으면 자체 서명) → `render.sh` → `nginx -t` → `nginx -s reload` |
 
 - **시작과 같은 스크립트:** 시작 셸의 nginx 설정 만들기(인증서·`RENDER_TLS_*`·render·점검)를 `gateway/nginx/apply.sh`로 옮겼다. 시작 셸은 `--reload` 없이, 게이트웨이는 `--reload`로 부른다. 둘 다 워크스페이스 계정, 둘 다 `<데이터>/config/workspace.env`를 읽는다(환경 변수의 같은 키는 쓰지 않음: 설정 탭에서 지운 칸이 시작 값으로 남지 않게). 그래서 시작과 바로 적용이 늘 같은 설정

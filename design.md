@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.88 |
+| 문서 버전 | 0.89 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1596,6 +1596,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.86 | **모듈 이벤트·송출 끊김 이벤트**: libworker 0.18 `Host::event(module, severity, code, text, detail)`(모듈이 공통 이벤트를 냄, source `<워커>.<모듈>`, 스트림을 내는 모듈이 `take_events`로 발행). libvideo 0.4 `stream_down`·`stream_up`(이유·끊긴 시간)·`tap_down`·`tap_up`. 보드에서 카메라 끊김이 로그 글자로만 남고 기록에 없어 찾기 어려웠던 것을 고침 |
 | 0.87 | **검토에서 정한 한계 고침**(`docs/review-2026-11-25.md` 6장): ① 워커 거절 HTTP: `forbidden` 403·`busy` 409(9.6) ② 로그인을 켜면 영상도 같은 계정·토큰으로(`docs/media-auth.md`: nginx `/media/` `auth_request` + MediaMTX `authMethod: http` → 게이트웨이 `127.0.0.1:8079/api/auth/media`, 판정은 게이트웨이 한 곳) ③ 스트림 묶기 `GET /streams?ids=`(`docs/stream-mux.md`, 화면 하나에 연결 하나, 셸 `ctx.stream`) ④ 두 번 확인: 계약 명령 `confirm` → 셸이 보내기 전에 물음(`docs/command-confirm.md`) ⑤ libworker 0.19 `worker::stream_line`(스트림 한 줄을 만들며 호스트 이벤트를 저절로 실음) ⑥ 설정은 모두 바로 적용, 필요한 부분만 다시 적용하고 워크스페이스 전체 재시작 없음(`docs/live-settings.md`: 로그 수준 즉시·process-manager op `set_log_level`, 로그인 검사기 교체, HTTPS는 `gateway/nginx/apply.sh`로 nginx 설정 다시 만들고 reload) |
 | 0.88 | **CI와 문서 버전.** GitHub Actions `.github/workflows/check.yml`(push `--quick`, PR 전체 빌드·ctest `--no-tsan`, 태그 TSan), `dev/check.sh --no-tsan`. 문서의 라이브러리 버전: 지금 버전을 말하는 곳(예시 줄·"지금 x")은 틀 `CMakeLists.txt` VERSION과 같아야 하고 실제보다 높은 버전은 없어야 함(`dev/test_workers.py` `DocVersions`). 어긋난 곳(실행 뼈대 원본 0.9.1, 예시 `libworker` 0.9.1, "지금 0.18") 고침 |
+| 0.89 | **영상 로그인은 켰을 때만 묻기**(`docs/media-auth.md` 1장): MediaMTX 서비스의 `MTX_AUTH*` 환경 변수(늘 게이트웨이에 물음)를 없애고, 게이트웨이가 시작할 때와 로그인을 바꿀 때 `<데이터>/config/mediamtx.yml`의 `authMethod`(켬 `http`, 끔 `internal`)·`authHTTPAddress`를 맞춘다. MediaMTX는 파일을 다시 읽음(재시작·root 없음). 평소(끔)에는 게이트웨이가 멈춰도 영상이 돈다. `apply.sh --reload`는 옛 nginx worker가 새 연결을 그만 받을 때까지 기다림(`docs/live-settings.md`) |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |
