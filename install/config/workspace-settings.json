@@ -20,7 +20,5 @@
     {"key": "WORKSPACE_HTTPS_KEY", "label": "키 파일", "type": "string", "apply": "live", "default": "",
      "description": "인증서 키 파일(워크스페이스 계정이 읽을 수 있어야 함). 비우면 보드 자체 서명(<데이터>/config/tls/, 시작·적용할 때 만듦·갱신)"},
     {"key": "WORKSPACE_HTTP_REDIRECT", "label": "평문 → HTTPS 넘김", "type": "enum", "enum": ["on", "off"], "apply": "live", "default": "on",
-     "description": "평문 포트로 온 요청을 HTTPS로 넘길지(기본 on). 보드 안(127.0.0.1, SSH 터널)에서 온 것은 늘 그대로"},
-    {"key": "WORKSPACE_AUTH", "label": "로그인", "type": "enum", "enum": ["off", "on"], "apply": "live", "default": "off",
-     "description": "게이트웨이 신분 확인(기본 off). on이면 로그인·사용자별 토큰·역할(<데이터>/config/users.json, gateway user add, 사용자가 있어야 켤 수 있음). 켜면 영상(/media/, MediaMTX 포트)도 로그인한 사람만(docs/media-auth.md). 제품 모드는 늘 on"}]}
+     "description": "평문 포트로 온 요청을 HTTPS로 넘길지(기본 on). 보드 안(127.0.0.1, SSH 터널)에서 온 것은 늘 그대로"}]}
 ]}

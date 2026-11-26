@@ -1732,7 +1732,7 @@ class ProductBuild(unittest.TestCase):
         self.assertEqual((st, obj), (200, {"ok": True, "profile": "p1", "items": [{"key": "k", "label": "점검", "ok": True, "detail": "fine"}]}))
         for q in ("", "?profile=", "?profile=a/b"):
             self.assertEqual(srv.json("GET", "/system/product-build/check" + q)[0], 400)
-        for body in (b"{bad", b'{"x": 1}', b'{"profile": "a b"}', b'{"profile": "p1", "power_mode": "bad mode"}', b'[1]'):
+        for body in (b"{bad", b'{"x": 1}', b'{"profile": "a b"}', b'{"profile": "p1", "power_mode": "bad mode"}', b'{"profile": "p1", "login": "yes"}', b'[1]'):
             with self.subTest(body=body):
                 st, obj, _ = srv.json("POST", "/system/product-build", raw_body=body)
                 self.assertEqual((st, obj["error"]["code"]), (400, "bad_request"))
@@ -1778,7 +1778,8 @@ class ProductBuild(unittest.TestCase):
         self.assertEqual(obj["last"]["mb"], 0.0)
         self.assertEqual(obj["last"]["path"], os.path.join(out, "p1-bundle.tar.gz"))
         self.assertRegex(obj["last"]["created"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")
-        self.assertEqual(list(obj)[:9], ["state", "profile", "power_mode", "pct", "step", "started", "finished", "error", "result"])
+        self.assertIsNone(obj["login"])  # 고르지 않음 = product.json
+        self.assertEqual(list(obj)[:10], ["state", "profile", "power_mode", "login", "pct", "step", "started", "finished", "error", "result"])
         with open(os.path.join(out, "args.json")) as f:
             self.assertEqual(json.load(f), ["p1", "--local", "--replace", "--out", out, "--power-mode", "MAXN"])
         st, hdrs, data = srv.request("GET", "/system/product-build/download")
@@ -2078,10 +2079,19 @@ class AuthLimits(unittest.TestCase):
         self.assertIn("10.9.9.9", {l["remote"] for l in lines})
         self.assertIn("127.0.0.1", {l["remote"] for l in lines})
 
-    def test_product_forces_auth(self):
-        """제품 모드: WORKSPACE_AUTH=off여도 켬. 사용자 파일이 없으면 /health 말고 모두 503, 사용자를 넣으면 다시 시작 없이 열림"""
+    def test_product_login_chosen_at_build(self):
+        """제품 모드도 로그인은 빌드에서 고른 값(시작 셸이 WORKSPACE_AUTH로 넘김, docs/modes.md). 강제로 켜지 않는다.
+        넣은 묶음(on)은 사용자 파일이 없으면 /health 말고 모두 503, 사용자를 넣으면 다시 시작 없이 열림"""
+        data = tempfile.mkdtemp(prefix="prodoff", dir=T["tmp"])
+        off = Server(auth_env(data, WORKSPACE_PRODUCT="1", WORKSPACE_AUTH="off"), name="prodoff")
+        try:
+            self.assertEqual(off.json("GET", "/workers")[0], 200)  # 로그인 없음
+            self.assertEqual(off.json("GET", "/api/auth/me")[1]["auth"], "off")
+            self.assertNotIn("forced on", slurp(off.log_path))
+        finally:
+            off.stop()
         data = tempfile.mkdtemp(prefix="prod", dir=T["tmp"])
-        srv = Server(auth_env(data, WORKSPACE_PRODUCT="1", WORKSPACE_AUTH="off", WORKSPACE_LOG_LEVEL="INFO"), name="prodauth")
+        srv = Server(auth_env(data, WORKSPACE_PRODUCT="1", WORKSPACE_AUTH="on", WORKSPACE_LOG_LEVEL="INFO"), name="prodauth")
         try:
             self.assertEqual(srv.json("GET", "/health")[0], 200)
             self.assertEqual(srv.json("GET", "/api/board/health")[0], 200)
@@ -2090,9 +2100,7 @@ class AuthLimits(unittest.TestCase):
                 with self.subTest(path=path):
                     st, obj, _ = srv.json(method, path)
                     self.assertEqual((st, obj["error"]["code"]), (503, "unavailable"))
-            log = slurp(srv.log_path)
-            self.assertIn("authentication forced on", log)
-            self.assertIn("no users in", log)
+            self.assertIn("no users in", slurp(srv.log_path))
             add_user(data, "m1", "maintainer", PASSWORDS["m1"])
             self.assertTrue(wait_for(lambda: users_count(srv) == 1, 5))
             s = Session(srv)
@@ -2486,37 +2494,14 @@ class Settings(unittest.TestCase):
         srv.json("PUT", "/workspace/settings", {"WORKSPACE_LOG_LEVEL": "WARNING", "WORKSPACE_HTTPS_PORT": None})
         self.assertEqual(self.fields(srv.json("GET", "/workspace/settings")[1])["WORKSPACE_LOG_LEVEL"]["effective"], "WARNING")
 
-    def test_put_auth_live(self):
-        """로그인 켜기·끄기가 바로(다음 요청부터). 사용자가 없으면 켜기를 받지 않음"""
-        empty = self.start()
-        st, obj, _ = empty.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "on"})
-        self.assertEqual((st, list(obj["error"]["fields"])), (400, ["WORKSPACE_AUTH"]))
-        self.assertIn("no users", obj["error"]["fields"]["WORKSPACE_AUTH"])
-        self.assertEqual(empty.json("GET", "/workers")[0], 200)  # 그대로 꺼짐
-        data = auth_data_dir()
-        srv = self.start(data=data)
-        self.assertEqual(srv.request("GET", "/api/auth/check")[0], 204)  # 꺼짐: 늘 들여보냄
+    def test_no_login_setting(self):
+        """로그인은 설정 탭에 없다(docs/modes.md: 워크스페이스는 늘 없음, 제품은 빌드에서 고름)"""
+        srv = self.start(data=auth_data_dir())
+        self.assertNotIn("WORKSPACE_AUTH", self.fields(srv.json("GET", "/workspace/settings")[1]))
         st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "on"})
-        self.assertEqual((st, obj["applied"], obj["failed"]), (200, ["WORKSPACE_AUTH"], {}))  # nginx 없음: 게이트웨이만
-        self.assertEqual(srv.json("GET", "/workers")[0], 401)
-        self.assertEqual(srv.json("GET", "/api/auth/me")[1]["auth"], "on")
-        self.assertEqual(srv.request("GET", "/api/auth/check")[0], 401)
-        tok = {"Authorization": "Bearer " + AUTH_USERS_TOKEN[data]}
-        self.assertEqual(srv.json("GET", "/workers", headers=tok)[0], 200)
-        self.assertEqual(srv.request("GET", "/api/auth/check", headers=tok)[0], 204)
-        s = Session(srv)
-        self.assertEqual(s.login("v1", PASSWORDS["v1"])[0], 200)
-        self.assertEqual(s.json("GET", "/workers")[0], 200)
-        fs = self.fields(srv.json("GET", "/workspace/settings", headers=tok)[1])
-        self.assertEqual((fs["WORKSPACE_AUTH"]["effective"], fs["WORKSPACE_AUTH"]["pending"]), ("on", False))
-        self.assertEqual(s.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "off"})[0], 403)  # viewer는 못 바꿈
-        st, obj, _ = srv.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "off"}, headers=tok)
-        self.assertEqual((st, obj["applied"]), (200, ["WORKSPACE_AUTH"]))
-        self.assertEqual(srv.json("GET", "/workers")[0], 200)
-        self.assertEqual(srv.json("GET", "/api/auth/me")[1]["auth"], "off")
-        # 다시 켜면 세션은 비어서 시작(로그인 다시)
-        self.assertEqual(srv.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "on"})[0], 200)
-        self.assertEqual(s.json("GET", "/workers")[0], 401)
+        self.assertEqual((st, obj["error"]["fields"]), (400, {"WORKSPACE_AUTH": "unknown setting"}))
+        self.assertEqual(srv.json("GET", "/workers")[0], 200)  # 그대로 꺼짐
+        self.assertEqual(srv.request("GET", "/api/auth/check")[0], 204)
 
     def test_bad_values(self):
         srv = self.start()
@@ -2529,7 +2514,7 @@ class Settings(unittest.TestCase):
         self.assertEqual(obj["error"]["fields"], {
             "WORKSPACE_UI_TITLE": "must be a string", "WORKSPACE_REST_COMMAND_TIMEOUT": "out of range (min 0.5, max 60)",
             "WORKSPACE_LOG_LEVEL": "must be one of DEBUG, INFO, WARNING, ERROR", "WORKSPACE_HTTPS_PORT": "must be an integer",
-            "WORKSPACE_REST_PORT": "unknown setting"})
+            "WORKSPACE_REST_PORT": "unknown setting", "WORKSPACE_AUTH": "unknown setting"})
         for body in ([1], "x", {"WORKSPACE_UI_TITLE": "a#b"}, {"WORKSPACE_REST_COMMAND_TIMEOUT": True},
                      {"WORKSPACE_REST_TOKEN": "t"}, {"WORKSPACE_HTTPS_PORT": 70000}):
             with self.subTest(body=body):
@@ -2618,27 +2603,25 @@ class MediaAuth(unittest.TestCase):
         c.close()
         # 화면 쪽 포트에는 /api/auth/media가 없음(보드 안 포트에서만)
         self.assertNotEqual(srv.request("POST", "/api/auth/media", {"ip": "127.0.0.1"})[0], 200)
-        # 로그인을 끄면(설정 탭) 바깥도 모두 허락: MediaMTX는 서비스 재시작 없이 설정 파일만 다시 읽음
-        root = tempfile.mkdtemp(prefix="maroot", dir=T["tmp"])
-        os.makedirs(os.path.join(root, "install", "config"))
-        shutil.copy(os.path.join(REPO, "install", "config", "workspace-settings.json"), os.path.join(root, "install", "config"))
         # MediaMTX 설정(docs/media-auth.md 1장): 로그인을 켰을 때만 authMethod http. 옛 파일(두 줄 없음)에는 덧붙임
         yml = os.path.join(data, "config", "mediamtx.yml")
         with open(yml, "w") as f:
             f.write("# 현장 주석\nlogLevel: info\nrtsp: true\n")
-        srv2 = Server(dict(auth_env(data), WORKSPACE_ROOT=root, WORKSPACE_MEDIA_AUTH_PORT=str(free_port())), name="mediaauth2")
-        self.addCleanup(srv2.stop)
+        srv2 = Server(dict(auth_env(data), WORKSPACE_MEDIA_AUTH_PORT=str(free_port())), name="mediaauth2")
         m2 = srv2.json("GET", "/health?detail=1")[1]["gateway"]["media_auth_port"]
         text = open(yml).read()
         self.assertIn("\nauthMethod: http\n", text)
         self.assertIn("\nauthHTTPAddress: http://127.0.0.1:%d/api/auth/media\n" % m2, text)
         self.assertTrue(text.startswith("# 현장 주석\nlogLevel: info\nrtsp: true\n"))
         self.assertEqual(self.media(m2, ip="10.1.1.1"), 401)
-        st, obj, _ = srv2.json("PUT", "/workspace/settings", {"WORKSPACE_AUTH": "off"}, headers={"Authorization": "Bearer " + tok})
-        self.assertEqual(st, 200, obj)
-        self.assertEqual(self.media(m2, ip="10.1.1.1"), 200)
-        self.assertEqual(self.media(m2, ip="10.1.1.1", action="publish"), 200)  # 꺼짐은 예전과 같음
-        self.assertIn("\nauthMethod: internal\n", open(yml).read())  # 끄면 MediaMTX는 게이트웨이에 묻지 않음
+        srv2.stop()
+        # 로그인 없음(워크스페이스·로그인 안 넣은 제품): 바깥도 모두 허락, MediaMTX는 게이트웨이에 묻지 않음
+        srv3 = Server(dict(auth_env(data), WORKSPACE_AUTH="off", WORKSPACE_MEDIA_AUTH_PORT=str(free_port())), name="mediaauth3")
+        self.addCleanup(srv3.stop)
+        m3 = srv3.json("GET", "/health?detail=1")[1]["gateway"]["media_auth_port"]
+        self.assertEqual(self.media(m3, ip="10.1.1.1"), 200)
+        self.assertEqual(self.media(m3, ip="10.1.1.1", action="publish"), 200)  # 꺼짐은 예전과 같음
+        self.assertIn("\nauthMethod: internal\n", open(yml).read())
         self.assertNotIn("authMethod: http", open(yml).read())
 
     def test_check(self):

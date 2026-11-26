@@ -132,6 +132,11 @@ details.sec > .inner { padding: 4px 16px 16px; }
 .pill.info { border-color: #3a6fa8; background: #1b3352; }
 .pill.warn { border-color: #9a7428; background: #45351a; }
 .pill.bad { border-color: #9a3c3c; background: #4a1e1e; }
+/* 배지 원칙(ui/README.md "배지"): 배지는 봐야 할 상태(info 알릴 것·warn 주의·bad 이상)만.
+   정상(ok)·평상(idle)은 배지 모양 없이 보통 글자로, 패널 머리·위 띠에서는 아예 숨긴다(정상이면 아무것도 안 보임) */
+.pill.ok, .pill.idle { border-color: transparent; background: none; padding-left: 0; padding-right: 0; color: var(--muted); }
+.pill.ok .icon, .pill.idle .icon { display: none; }
+.ph-badges > .pill.ok, .ph-badges > .pill.idle, #topbar .pill.ok, #topbar .pill.idle { display: none; }
 /* 표 안의 아이콘 + 짧은 글자(iconTag): 송신(info)·수신(ok)·경고(warn)·실패(bad) */
 .itag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--idle); white-space: nowrap; }
 .itag .icon { width: 15px; height: 15px; }

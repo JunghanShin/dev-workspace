@@ -95,13 +95,17 @@ function buildDialog(ctx) {
   b.profile.addEventListener("change", () => { pickPower(); runCheck(ctx); });
   // 전원 모드: 장비에 설치할 때 맞출 nvpmodel 모드. 기본은 프로필 product.json의 power_mode
   b.power = h("select", { title: "장비 설치(install.sh)가 맞출 Jetson 전원 모드. 그대로 = 장비 설정을 건드리지 않음" });
+  // 로그인: 제품에 넣을지(docs/modes.md). 기본은 product.json login(없으면 넣지 않음)
+  b.login = h("select", { title: "제품 화면·REST·영상에 로그인을 넣을지. 워크스페이스(개발)에는 로그인이 없다" },
+    h("option", { value: "off" }, "없음"), h("option", { value: "on" }, "넣음"));
   b.checks = h("tbody");
   b.checkHint = h("div", { class: "hint" });
   b.start = ui.iconButton({ icon: "play", label: "빌드 시작", kind: "primary", onClick: () => startBuild(ctx) });
   b.recheck = ui.iconButton({ icon: "refresh", label: "다시 점검", onClick: () => runCheck(ctx) });
   b.checkBox = h("div", {},
     h("div", { class: "btnrow", style: "align-items:center" }, h("span", { class: "muted" }, "프로필"), b.profile,
-      h("span", { class: "muted", style: "margin-left:12px" }, "전원 모드"), b.power),
+      h("span", { class: "muted", style: "margin-left:12px" }, "전원 모드"), b.power,
+      h("span", { class: "muted", style: "margin-left:12px" }, "로그인"), b.login),
     h("table", { style: "margin-top:8px" }, b.checks), b.checkHint,
     h("div", { class: "btnrow", style: "margin-top:10px" }, b.start, b.recheck));
   b.step = h("div", { class: "muted" });
@@ -155,6 +159,7 @@ function pickPower() {
   const want = (p && p.power_mode) || "keep";
   if (![...b.power.options].some((o) => o.value === want)) b.power.append(new Option(want, want));
   b.power.value = want;
+  b.login.value = (p && p.login) || "off";
 }
 
 function showCheck(ctx) {
@@ -186,7 +191,7 @@ async function startBuild(ctx) {
   const b = els.buildDlg.b;
   b.start.disabled = true;
   try {
-    renderBuild(ctx, await ctx.api("POST", "/system/product-build", { profile: b.profile.value, power_mode: b.power.value }));
+    renderBuild(ctx, await ctx.api("POST", "/system/product-build", { profile: b.profile.value, power_mode: b.power.value, login: b.login.value }));
     poll(ctx);
   } catch (e) {
     ctx.toast("빌드 시작 실패: " + e.message, "bad");
@@ -233,6 +238,7 @@ function renderBuild(ctx, s) {
       ["걸린 시간", mmss(s.elapsed || 0)],
       ["심볼 제거", s.result.stripped ? "됨" : "안 됨"],
       ["전원 모드(설치 시)", s.result.power_mode === "keep" ? "그대로(장비 설정)" : s.result.power_mode],
+      ["로그인", s.result.login === "on" ? "넣음" : "없음"],
       ["SHA-256", s.result.sha256.slice(0, 16) + "…"],
     ]);
     load(ctx);

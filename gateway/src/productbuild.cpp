@@ -141,7 +141,7 @@ Json ProductBuild::status() {
     return s;
 }
 
-Json ProductBuild::start(const std::string& profile, const std::string& power_mode) {
+Json ProductBuild::start(const std::string& profile, const std::string& power_mode, const std::string& login) {
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (st_.st.value("state", "") == "running")
@@ -156,6 +156,10 @@ Json ProductBuild::start(const std::string& profile, const std::string& power_mo
         cmd.push_back("--power-mode");
         cmd.push_back(power_mode);
     }
+    if (!login.empty()) {
+        cmd.push_back("--login");
+        cmd.push_back(login);
+    }
     // 새 세션: 취소할 때 Nuitka·gcc 자식까지 한 번에(프로세스 그룹)
     const Child c = spawn_stream(cmd, env_extra(), true);
     if (c.pid < 0) throw std::runtime_error("start build: " + errno_text(c.err));
@@ -166,6 +170,7 @@ Json ProductBuild::start(const std::string& profile, const std::string& power_mo
         st["state"] = "running";
         st["profile"] = profile;
         st["power_mode"] = power_mode.empty() ? Json(nullptr) : Json(power_mode);
+        st["login"] = login.empty() ? Json(nullptr) : Json(login);
         st["pct"] = 0;
         st["step"] = "시작";
         st["started"] = wall_now();

@@ -8,7 +8,7 @@
 //   WORKSPACE_LOG_LEVEL, WORKSPACE_REST_TOKEN, WORKSPACE_UI, WORKSPACE_PRODUCT, WORKSPACE_UI_DIR, WORKSPACE_UI_MEDIA_URL,
 //   WORKSPACE_UI_REFRESH_MS, WORKSPACE_UI_TITLE
 // 게이트웨이에만: WORKSPACE_GATEWAY_SOCKET(Unix 소켓도 엶, nginx용), WORKSPACE_GATEWAY_TCP=0(TCP를 열지 않음, nginx 뒤), WORKSPACE_GATEWAY_THREADS(동시 요청 상한, 기본 48: SSE도 연결마다 하나를 차지해 화면 여러 개를 넉넉히),
-//   WORKSPACE_AUTH=on|off(기본 off, 제품 모드는 늘 on, 설정 탭에서 바로 바뀜), WORKSPACE_GATEWAY_CACHE=0(Manager 캐시 끔),
+//   WORKSPACE_AUTH=on|off(기본 off. 시작 셸이 정함: 워크스페이스 늘 off, 제품은 빌드 선택), WORKSPACE_GATEWAY_CACHE=0(Manager 캐시 끔),
 //   WORKSPACE_MEDIA_AUTH_PORT(영상 로그인 판정, 127.0.0.1, 기본 8079, 0이면 안 엶), WORKSPACE_NGINX_DIR(nginx 실행 폴더, 기본 <데이터>/run/nginx)
 // 설정 명령: gateway user add|passwd|del|list, gateway token add|del (users_cli.hpp)
 //
@@ -141,11 +141,8 @@ int main(int argc, char** argv) {
         GW_ERROR("WORKSPACE_AUTH=%s: must be on or off", auth.c_str());
         return 2;
     }
+    // 정책은 시작 셸이 정한다(docs/modes.md): 워크스페이스(개발)는 늘 off, 제품은 빌드에서 고른 값(PRODUCT_LOGIN)
     cfg.auth_on = auth == "on";
-    if (cfg.product && !cfg.auth_on) {  // 제품 묶음은 늘 켬(꺼 두고 내보내지 않게)
-        GW_WARN("product mode: authentication forced on (WORKSPACE_AUTH=%s ignored)", auth.c_str());
-        cfg.auth_on = true;
-    }
     if (cfg.auth_on && !cfg.token.empty())
         GW_WARN("WORKSPACE_REST_TOKEN is ignored while authentication is on (use per-user tokens: gateway token add)");
     cfg.cache = env_or("WORKSPACE_GATEWAY_CACHE", "1") != "0";

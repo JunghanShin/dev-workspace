@@ -59,8 +59,9 @@ function render(ctx, d) {
   els.form.replaceChildren(...(d.groups || []).map((g) => ui.section({ title: g.title },
     ...g.fields.map((f) => {
       const inp = inputFor(ctx, f);
+      // 모든 칸이 바로 적용(docs/live-settings.md)이라 알릴 것이 있을 때만 배지
       const tag = f.pending ? ui.pill("refresh", "다시 시작 기다림", "warn")
-        : f.apply === "live" ? ui.pill("check", "바로 적용", "idle") : ui.pill("refresh", "다시 시작하면 적용", "idle");
+        : f.apply !== "live" ? ui.pill("refresh", "다시 시작하면 적용", "info") : null;
       const err = h("div", { class: "field-err" });
       const row = h("div", { class: "set-row" },
         h("div", { class: "set-k" }, h("div", {}, f.label), h("div", { class: "mono faint" }, f.key)),

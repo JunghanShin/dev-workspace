@@ -34,7 +34,7 @@ int command_status(const Json& code) { return worker_error_status(code); }
 // nginx 쪽이 쓰는 설정 칸(바꾸면 apply.sh로 nginx 설정을 다시 만들어 다시 읽음, docs/live-settings.md)
 bool nginx_key(const std::string& k) {
     return k == "WORKSPACE_HTTPS" || k == "WORKSPACE_HTTPS_PORT" || k == "WORKSPACE_HTTPS_CERT" ||
-           k == "WORKSPACE_HTTPS_KEY" || k == "WORKSPACE_HTTP_REDIRECT" || k == "WORKSPACE_AUTH";
+           k == "WORKSPACE_HTTPS_KEY" || k == "WORKSPACE_HTTP_REDIRECT";
 }
 
 Reply json_reply(int status, const Json& body) {
@@ -189,7 +189,6 @@ std::shared_ptr<const Gateway::AuthSlot> Gateway::auth_slot() {
 }
 
 void Gateway::set_auth(bool on) {
-    if (cfg_.product) on = true;  // 제품은 늘 켬
     {
         std::lock_guard<std::mutex> lock(auth_mu_);
         if (auth_slot_ && auth_slot_->auth->on() == on) return;  // 같으면 그대로(세션 유지)
@@ -921,7 +920,6 @@ Reply Gateway::settings(const std::string& method, const std::function<Body()>& 
         if (key == "WORKSPACE_UI_MEDIA_URL") return ui_.media_url();
         if (key == "WORKSPACE_REST_COMMAND_TIMEOUT") return command_timeout_.load();
         if (key == "WORKSPACE_LOG_LEVEL") return log_level_name();
-        if (key == "WORKSPACE_AUTH") return auth_slot()->auth->on() ? "on" : "off";
         if (nginx_key(key)) {  // nginx가 지금 쓰는 값(시작 값 → 바로 적용에 성공한 값)
             std::lock_guard<std::mutex> lock(applied_mu_);
             auto it = nginx_applied_.find(key);
@@ -978,18 +976,6 @@ Reply Gateway::settings(const std::string& method, const std::function<Body()>& 
         if (!fields.empty()) eo["fields"] = fields;
         return json_reply(400, Json{{"error", eo}});
     }
-    // 로그인을 켜는데 사용자가 없으면 받지 않는다(켜자마자 모두 503이 되어 화면에서 되돌릴 수도 없게 되므로)
-    for (const auto& ch : changes) {
-        if (ch.first != "WORKSPACE_AUTH" || !ch.second || *ch.second != "on" || auth_slot()->auth->on()) continue;
-        UsersDb db;
-        std::string uerr;
-        const std::string uf = cfg_.users_file.empty() ? path_join(path_join(cfg_.data_dir, "config"), "users.json") : cfg_.users_file;
-        if (!load_users(uf, db, uerr) || db.users.empty()) {
-            Json eo = Json{{"code", "bad_request"}, {"message", "invalid settings"}};
-            eo["fields"] = Json{{"WORKSPACE_AUTH", "no users yet: add one first (gateway user add)"}};
-            return json_reply(400, Json{{"error", eo}});
-        }
-    }
     Json saved = Json::array(), live = Json::array(), restart = Json::array(), applied = Json::array();
     Json failed = Json::object();
     std::lock_guard<std::mutex> lock(settings_mu_);
@@ -1032,8 +1018,6 @@ Reply Gateway::settings(const std::string& method, const std::function<Body()>& 
             } catch (const ManagerUnavailable& e) {
                 failed[ch.first] = std::string("process-manager unavailable: ") + e.what();
             }
-        } else if (ch.first == "WORKSPACE_AUTH") {
-            set_auth(v == "on");  // 게이트웨이 신분 확인을 바꿔 끼움. /media/ 막기는 nginx 쪽(아래)
         }
         if (nginx_key(ch.first)) nginx_changed.push_back(ch.first);
         else if (!failed.contains(ch.first)) applied.push_back(ch.first);
@@ -1056,9 +1040,8 @@ Reply Gateway::settings(const std::string& method, const std::function<Body()>& 
             }
         }
         for (const auto& k : nginx_changed) {
-            // 로그인은 nginx 없이도 게이트웨이에서 적용됨(nginx가 없으면 /media/도 없음)
-            if (ok || (k == "WORKSPACE_AUTH" && !behind_nginx())) applied.push_back(k);
-            else failed[k] = k == "WORKSPACE_AUTH" ? "gateway applied; nginx (/media/): " + msg : msg;
+            if (ok) applied.push_back(k);
+            else failed[k] = msg;
         }
     }
     GW_INFO("settings saved: %s%s%s", py_dumps(saved).c_str(), failed.empty() ? "" : ", not applied: ",
@@ -1316,8 +1299,13 @@ Reply Gateway::product_build(const std::string& method, const std::string& path,
         const Json power = obj.is_object() ? obj.value("power_mode", Json(nullptr)) : Json(nullptr);
         if (!power.is_null() && (!power.is_string() || !valid_power_mode(power.get<std::string>())))
             return json_error(400, "bad_request", "power_mode must be a mode name or keep");
+        // 제품에 로그인을 넣을지(docs/modes.md): "on"/"off", 없으면 product.json "login"(기본 off)
+        const Json login = obj.is_object() ? obj.value("login", Json(nullptr)) : Json(nullptr);
+        if (!login.is_null() && (!login.is_string() || (login != "on" && login != "off")))
+            return json_error(400, "bad_request", "login must be on or off");
         try {
-            return json_reply(202, build_.start(profile.get<std::string>(), power.is_null() ? "" : power.get<std::string>()));
+            return json_reply(202, build_.start(profile.get<std::string>(), power.is_null() ? "" : power.get<std::string>(),
+                                                login.is_null() ? "" : login.get<std::string>()));
         } catch (const Busy& e) {
             return json_error(409, "conflict", e.what());
         }

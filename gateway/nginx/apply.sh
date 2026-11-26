@@ -10,8 +10,8 @@
 #                  옛 worker가 새 연결을 그만 받을 때까지 기다린 뒤 돌아옴(최대 5 s)
 #
 # 읽는 키(<데이터>/config/workspace.env, 파일에 없으면 기본값. 환경 변수의 같은 키는 쓰지 않는다: 지운 칸이 시작 값으로 남지 않게)
-#   WORKSPACE_REST_BIND·_PORT, WORKSPACE_UI, WORKSPACE_HTTPS·_PORT·_CERT·_KEY, WORKSPACE_HTTP_REDIRECT, WORKSPACE_AUTH
-#   로그인: WORKSPACE_AUTH=on 또는 제품(환경 WORKSPACE_PRODUCT=1)이면 RENDER_AUTH=on(/media/도 로그인, docs/media-auth.md)
+#   WORKSPACE_REST_BIND·_PORT, WORKSPACE_UI, WORKSPACE_HTTPS·_PORT·_CERT·_KEY, WORKSPACE_HTTP_REDIRECT
+#   로그인: 환경 WORKSPACE_AUTH=on(시작 셸이 정함: 제품 빌드에서 고른 경우만)이면 RENDER_AUTH=on(/media/도 로그인, docs/media-auth.md)
 # 실행 폴더: WORKSPACE_NGINX_DIR(기본 <데이터>/run/nginx). nginx: NGINX_BIN 또는 PATH. RENDER_MEDIA·CERT_*는 그대로 넘긴다.
 #
 # 결과: 표준 출력 마지막 줄 "nginx: applied ..." / 실패면 표준 오류 마지막 줄에 이유, 종료 코드 1(설정 없음·점검 실패, 옛 설정 그대로),
@@ -30,7 +30,7 @@ fail() { echo "nginx: $*" >&2; exit "${code:-1}"; }
 
 # workspace.env 읽기(실행하지 않음, workspace-start.sh read_kv와 같은 규칙: # 뒤 버림, 끝 공백·앞뒤 " 뗌, 같은 키는 뒤의 것)
 KEYS=(WORKSPACE_REST_BIND WORKSPACE_REST_PORT WORKSPACE_UI WORKSPACE_HTTPS WORKSPACE_HTTPS_PORT WORKSPACE_HTTPS_CERT
-      WORKSPACE_HTTPS_KEY WORKSPACE_HTTP_REDIRECT WORKSPACE_AUTH)
+      WORKSPACE_HTTPS_KEY WORKSPACE_HTTP_REDIRECT)
 for k in "${KEYS[@]}"; do unset "$k"; done
 envf="$data/config/workspace.env"
 if [[ -f "$envf" ]]; then
@@ -68,7 +68,7 @@ if [[ "${WORKSPACE_HTTPS:-off}" == on ]]; then
   fi
 fi
 auth=off
-[[ "${WORKSPACE_AUTH:-off}" == on || "${WORKSPACE_PRODUCT:-0}" == 1 ]] && auth=on
+[[ "${WORKSPACE_AUTH:-off}" == on ]] && auth=on  # 시작 셸이 정한 값(환경). 파일에서 읽지 않음
 
 mkdir -p "$dir" || fail "cannot make $dir"
 new="$dir/nginx.conf.new"

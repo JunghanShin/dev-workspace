@@ -22,7 +22,7 @@
 | 묶음 "개발 도구" | 개발할 때만 쓰는 워커 패널 | 예: replay. 제품 화면에는 없음 |
 
 - 화면에서 "시스템"이라는 말은 시스템 모니터에만 남긴다. 위 띠의 "시스템 정상"은 **"정상"·"주의"·"이상"**만(누르면 워크스페이스 › 개요)
-- 위 띠 오른쪽: "개발"(워크스페이스) 또는 "제품" 표시, 로그인. 모드 토글 없음(`docs/modes.md`)
+- 위 띠 오른쪽: 시계와 문제가 있을 때만 배지(보드 응답 없음, 상태 주의·이상). "개발"·"제품"·"인증 꺼짐"은 보이지 않는다(0.90, ui/README.md 배지 원칙). 로그인을 넣은 제품만 사용자·로그아웃. 모드 토글 없음(`docs/modes.md`)
 
 **워크스페이스 탭**
 
@@ -46,7 +46,6 @@
 | 명령 | 명령 응답 대기(`WORKSPACE_REST_COMMAND_TIMEOUT`, 초) | 바로 |
 | 로그 | 로그 수준(`WORKSPACE_LOG_LEVEL`): 게이트웨이·process-manager | 바로(0.86) |
 | 보안 | HTTPS 켬·포트·인증서·평문 넘김(`WORKSPACE_HTTPS*`, `WORKSPACE_HTTP_REDIRECT`): nginx 설정 다시 만들기·다시 읽기 | 바로(0.86, nginx 뒤일 때) |
-| 보안 | 로그인(`WORKSPACE_AUTH`): 게이트웨이 신분 확인 바꿔 끼우기 + nginx `/media/` 막기 | 바로(0.86) |
 
 - 폼은 워커 설정 창과 같은 부품(`kit.js` 스키마 폼, design.md 6.10)으로 그린다. 칸 정의는 **`install/config/workspace-settings.json`**(키·묶음·이름·형식·범위·적용 `apply`·설명). 0.86부터 모든 칸 `live`(`docs/live-settings.md`), `restart`는 형식으로만 남김. 지금 `workspace.env` 주석에 있는 설명을 옮긴다
 - 저장 → 게이트웨이가 `<데이터>/config/workspace.env`의 그 줄만 바꿈(주석·순서 그대로, 원자적 쓰기), 명령 이력에 남김. 칸마다 그 값을 쓰는 곳만 바로 다시 적용(워크스페이스 전체를 다시 시작하지 않음, `docs/live-settings.md`). 적용하지 못한 칸은 응답 `failed`에 이유(예: nginx 없음, 인증서 못 읽음): 값은 저장돼 다음 시작에 쓰인다. `pending`은 늘 `false`(칸은 그대로 둠)

@@ -30,7 +30,8 @@ public:
 
     Json status();
     Json check(const std::string& profile);
-    Json start(const std::string& profile, const std::string& power_mode);  // 진행 중이면 Busy
+    // login: "on"/"off"(제품에 로그인을 넣을지, 빈 글이면 product.json). 진행 중이면 Busy
+    Json start(const std::string& profile, const std::string& power_mode, const std::string& login = "");
     bool cancel();
     // 마지막 묶음 {file, path, mb, created} 또는 null
     Json last() const;

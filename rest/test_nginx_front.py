@@ -333,8 +333,9 @@ class NginxHttps(unittest.TestCase):
 
 @unittest.skipUnless(t.REST_BIN and NGINX and shutil.which("openssl"), "C++ 게이트웨이(REST_BIN)·nginx·openssl이 있어야 함")
 class NginxLive(unittest.TestCase):
-    """설정 바로 적용(docs/live-settings.md)과 영상 로그인(docs/media-auth.md): 시작 셸과 같은 apply.sh로 nginx를 띄우고,
-    설정 탭 PUT으로 로그인·HTTPS를 바꾸면 게이트웨이가 apply.sh --reload로 nginx를 다시 읽힌다(nginx는 그대로 같은 프로세스)"""
+    """설정 바로 적용(docs/live-settings.md): 시작 셸과 같은 apply.sh로 nginx를 띄우고, 설정 탭 PUT으로 HTTPS를 바꾸면
+    게이트웨이가 apply.sh --reload로 nginx를 다시 읽힌다(nginx는 그대로 같은 프로세스). 로그인은 시작할 때 정한다(NginxLogin)"""
+    AUTH = "off"
 
     @classmethod
     def setUpClass(cls):
@@ -353,10 +354,10 @@ class NginxLive(unittest.TestCase):
         cls.sock = os.path.join(cls.data, "run", "gateway.sock")
         cls.media = FakeMedia()
         cls.env = dict(os.environ, RENDER_MEDIA="127.0.0.1:%d" % cls.media.port, CERT_IPS="192.0.2.10",
-                       WORKSPACE_NGINX_DIR=cls.prefix)
+                       WORKSPACE_NGINX_DIR=cls.prefix, WORKSPACE_AUTH=cls.AUTH)
         out = subprocess.check_output(["bash", APPLY, cls.data, root, cls.sock], env=cls.env, text=True)  # 시작 셸처럼
         assert "config ready" in out, out
-        cls.gw = t.Server(t.auth_env(cls.data, WORKSPACE_AUTH="off", WORKSPACE_GATEWAY_SOCKET=cls.sock, WORKSPACE_GATEWAY_TCP="0",
+        cls.gw = t.Server(t.auth_env(cls.data, WORKSPACE_AUTH=cls.AUTH, WORKSPACE_GATEWAY_SOCKET=cls.sock, WORKSPACE_GATEWAY_TCP="0",
                                      RENDER_MEDIA=cls.env["RENDER_MEDIA"], CERT_IPS="192.0.2.10", WORKSPACE_NGINX_DIR=cls.prefix),
                           name="gw-live", unix_only=cls.sock)
         cls.ng_log = open(os.path.join(cls.prefix, "nginx.log"), "wb")
@@ -384,14 +385,51 @@ class NginxLive(unittest.TestCase):
                                headers={"Content-Type": "application/json", "Authorization": "Bearer " + self.token})
         return st, json.loads(data)
 
-    def test_live_auth_and_https(self):
+    def test_live_https(self):
         pid = self.ng.pid
-        self.assertEqual(self.req("GET", "/media/cam/")[0], 200)  # 로그인 꺼짐: 예전처럼 열림
-        # 로그인 켜기 → nginx 다시 읽기 → /media/도 로그인한 사람만
+        self.assertEqual(self.req("GET", "/media/cam/")[0], 200)  # 로그인 없음: 열림
+        bearer = {"Authorization": "Bearer " + self.token}
+        # 로그인은 설정 탭에 없음(docs/modes.md)
         st, obj = self.put({"WORKSPACE_AUTH": "on"})
-        self.assertEqual((st, obj["applied"], obj["failed"]), (200, ["WORKSPACE_AUTH"], {}), obj)
-        # nginx -s reload는 신호만 보내고 돌아온다: 새 worker가 받기 전 잠깐은 옛 worker가 옛 설정으로 답할 수 있다
-        self.assertTrue(t.wait_for(lambda: self.req("GET", "/media/cam/")[0] == 401, 5, 0.05))
+        self.assertEqual((st, obj["error"]["fields"]), (400, {"WORKSPACE_AUTH": "unknown setting"}))
+        # HTTPS 켜기 → 자체 서명 인증서를 만들고 HTTPS 포트를 연다(nginx는 같은 프로세스)
+        st, obj = self.put({"WORKSPACE_HTTPS": "on", "WORKSPACE_HTTPS_PORT": self.tport})
+        self.assertEqual((st, sorted(obj["applied"]), obj["failed"]), (200, ["WORKSPACE_HTTPS", "WORKSPACE_HTTPS_PORT"], {}), obj)
+        self.assertTrue(t.wait_for(lambda: NginxFront._open(self.tport), 5, 0.05))
+        import http.client
+        import ssl
+        ctx = ssl.create_default_context(cafile=os.path.join(self.data, "config", "tls", "workspace.crt"))
+        c = http.client.HTTPSConnection("localhost", self.tport, timeout=10, context=ctx)
+        c.request("GET", "/api/board/workers")
+        self.assertEqual(c.getresponse().status, 200)
+        c.close()
+        st, _, data = self.req("GET", "/api/board/workspace/settings", headers=bearer)
+        fs = {f["key"]: f for g in json.loads(data)["groups"] for f in g["fields"]}
+        self.assertEqual((fs["WORKSPACE_HTTPS"]["effective"], fs["WORKSPACE_HTTPS_PORT"]["effective"]), ("on", self.tport))
+        # 읽을 수 없는 인증서: 옛 설정 그대로 두고 failed
+        st, obj = self.put({"WORKSPACE_HTTPS_CERT": "/no/such.crt", "WORKSPACE_HTTPS_KEY": "/no/such.key"})
+        self.assertEqual((st, obj["applied"]), (200, []))
+        self.assertIn("not readable", obj["failed"]["WORKSPACE_HTTPS_CERT"])
+        self.assertTrue(NginxFront._open(self.tport))
+        self.put({"WORKSPACE_HTTPS_CERT": None, "WORKSPACE_HTTPS_KEY": None})
+        # 끄기
+        st, obj = self.put({"WORKSPACE_HTTPS": "off"})
+        self.assertEqual((st, obj["failed"]), (200, {}), obj)
+        self.assertTrue(t.wait_for(lambda: not NginxFront._open(self.tport), 5, 0.05))
+        self.assertEqual(self.ng.pid, pid)
+        self.assertIsNone(self.ng.poll())  # 다시 시작이 아니라 다시 읽기
+
+
+class NginxLogin(NginxLive):
+    """로그인을 넣은 제품(docs/media-auth.md): 시작 셸이 WORKSPACE_AUTH=on을 넘기면 /media/도 로그인한 사람만"""
+    AUTH = "on"
+
+    def test_live_https(self):  # 부모 시험은 로그인 없음 전용
+        pass
+
+    def test_media_login(self):
+        st, h, body = self.req("GET", "/media/cam/")
+        self.assertEqual(st, 401)
         self.assertEqual(self.req("GET", "/api/board/workers")[0], 401)
         bearer = {"Authorization": "Bearer " + self.token}
         st, h, data = self.req("GET", "/media/cam/", headers=bearer)
@@ -406,34 +444,6 @@ class NginxLive(unittest.TestCase):
         self.assertEqual(self.req("DELETE", "/media/cam/whep/abc123", headers=cookie)[0], 200)
         self.assertEqual(self.req("DELETE", "/media/cam/whep/abc123")[0], 401)
         self.assertEqual(self.req("GET", "/_media_auth")[0], 404)  # 안쪽 위치는 바깥에서 못 부름
-        # HTTPS 켜기 → 자체 서명 인증서를 만들고 HTTPS 포트를 연다(nginx는 같은 프로세스)
-        st, obj = self.put({"WORKSPACE_HTTPS": "on", "WORKSPACE_HTTPS_PORT": self.tport})
-        self.assertEqual((st, sorted(obj["applied"]), obj["failed"]), (200, ["WORKSPACE_HTTPS", "WORKSPACE_HTTPS_PORT"], {}), obj)
-        self.assertTrue(t.wait_for(lambda: NginxFront._open(self.tport), 5, 0.05))
-        import http.client
-        import ssl
-        ctx = ssl.create_default_context(cafile=os.path.join(self.data, "config", "tls", "workspace.crt"))
-        c = http.client.HTTPSConnection("localhost", self.tport, timeout=10, context=ctx)
-        c.request("GET", "/api/board/workers", headers=bearer)
-        self.assertEqual(c.getresponse().status, 200)
-        c.close()
-        st, _, data = self.req("GET", "/api/board/workspace/settings", headers=bearer)
-        fs = {f["key"]: f for g in json.loads(data)["groups"] for f in g["fields"]}
-        self.assertEqual((fs["WORKSPACE_HTTPS"]["effective"], fs["WORKSPACE_HTTPS_PORT"]["effective"]), ("on", self.tport))
-        # 읽을 수 없는 인증서: 옛 설정 그대로 두고 failed
-        st, obj = self.put({"WORKSPACE_HTTPS_CERT": "/no/such.crt", "WORKSPACE_HTTPS_KEY": "/no/such.key"})
-        self.assertEqual((st, obj["applied"]), (200, []))
-        self.assertIn("not readable", obj["failed"]["WORKSPACE_HTTPS_CERT"])
-        self.assertTrue(NginxFront._open(self.tport))
-        self.put({"WORKSPACE_HTTPS_CERT": None, "WORKSPACE_HTTPS_KEY": None})
-        # 끄기
-        st, obj = self.put({"WORKSPACE_HTTPS": "off", "WORKSPACE_AUTH": "off"})
-        self.assertEqual((st, obj["failed"]), (200, {}), obj)
-        self.assertTrue(t.wait_for(lambda: not NginxFront._open(self.tport), 5, 0.05))
-        self.assertTrue(t.wait_for(lambda: self.req("GET", "/media/cam/")[0] == 200, 5, 0.05))
-        self.assertEqual(self.ng.pid, pid)
-        self.assertIsNone(self.ng.poll())  # 다시 시작이 아니라 다시 읽기
-
 
 class Render(unittest.TestCase):
     """render.sh가 nginx 빌드에 맞춰 설정을 만드는지(nginx 없이: 가짜 nginx -V). 보드의 Ubuntu 22.04 nginx-light는

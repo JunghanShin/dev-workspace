@@ -20,7 +20,7 @@
 
 - `WORKSPACE_UI_MEDIA_URL`을 적어 두면 그 값을 그대로 쓴다(원격 미디어 서버 등). 비우면 위 자동
 - 설정 탭(화면 › 영상 주소 틀)에서 비우면 자동으로 돌아간다
-- 화면 로그인(`WORKSPACE_AUTH=on`, 제품은 늘)을 켜면 `/media/`도 로그인한 사람만(0.86, `docs/media-auth.md`): nginx `auth_request`로 게이트웨이 `/api/auth/check`에 묻는다. MediaMTX 포트(8554·8889·8888·8890)를 바로 여는 프로그램도 게이트웨이가 판정(MediaMTX `authMethod: http`). 꺼져 있으면 예전처럼 열림
+- 화면 로그인(`WORKSPACE_AUTH=on`, 로그인을 넣은 제품)을 켜면 `/media/`도 로그인한 사람만(0.86, `docs/media-auth.md`): nginx `auth_request`로 게이트웨이 `/api/auth/check`에 묻는다. MediaMTX 포트(8554·8889·8888·8890)를 바로 여는 프로그램도 게이트웨이가 판정(MediaMTX `authMethod: http`). 꺼져 있으면 예전처럼 열림
 
 ## 2. 설정
 
@@ -28,7 +28,7 @@
 |---|---|---|
 | `WORKSPACE_UI_MEDIA_URL` | 영상 주소 틀(`{host}`·`{path}`) | 비움 = 자동(nginx 뒤 `/media/{path}/`, 아니면 `http://{host}:8889/{path}`) |
 | `RENDER_MEDIA`(render.sh) | `/media/`가 넘길 곳 | `127.0.0.1:8889`, `off`면 `/media/` 없음 |
-| `RENDER_AUTH`(render.sh) | `/media/`에 로그인 확인(`docs/media-auth.md`) | `apply.sh`가 `WORKSPACE_AUTH=on`·제품이면 `on` |
+| `RENDER_AUTH`(render.sh) | `/media/`에 로그인 확인(`docs/media-auth.md`) | `apply.sh`가 시작 셸이 정한 `WORKSPACE_AUTH=on`이면 `on` |
 
 ## 3. 시험
 

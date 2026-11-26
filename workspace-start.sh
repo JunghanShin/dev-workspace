@@ -137,8 +137,18 @@ read_kv() {
 
 # 실행 설정. 경로 관련 키는 받지 않는다(이 스크립트가 데이터 폴더 기준으로 정한다)
 read_kv "$DATA/config/workspace.env" WORKSPACE_REST_BIND WORKSPACE_REST_PORT WORKSPACE_REST_COMMAND_TIMEOUT WORKSPACE_UI_MEDIA_URL WORKSPACE_UI_TITLE WORKSPACE_LOG_LEVEL \
-  WORKSPACE_REST_TOKEN WORKSPACE_UI WORKSPACE_AUTH WORKSPACE_GATEWAY_CACHE WORKSPACE_ACCESS_MODE \
+  WORKSPACE_REST_TOKEN WORKSPACE_UI WORKSPACE_GATEWAY_CACHE WORKSPACE_ACCESS_MODE \
   WORKSPACE_HTTPS WORKSPACE_HTTPS_PORT WORKSPACE_HTTPS_CERT WORKSPACE_HTTPS_KEY WORKSPACE_HTTP_REDIRECT
+
+# 로그인(docs/modes.md): 워크스페이스(개발)는 늘 없음. 제품은 빌드할 때 고른 값(묶음의 PRODUCT_LOGIN, 기본 off).
+# workspace.env의 WORKSPACE_AUTH는 읽지 않는다
+WORKSPACE_AUTH=off
+if [[ "${WORKSPACE_PRODUCT:-0}" == 1 && -f "$ROOT/PRODUCT_LOGIN" ]]; then
+  [[ "$(tr -d '[:space:]' < "$ROOT/PRODUCT_LOGIN")" == on ]] && WORKSPACE_AUTH=on
+fi
+export WORKSPACE_AUTH
+grep -qE '^[[:space:]]*WORKSPACE_AUTH=on' "$DATA/config/workspace.env" 2>/dev/null \
+  && log "ignored WORKSPACE_AUTH in workspace.env (login: workspace none, product chosen at build)"
 
 # ---- 2. 보드 상태 수집, 네트워크, 워커 준비 (root) -----------------------------------
 # tegrastats는 root로 돌려야 EMC·NVENC·VIC·DLA 항목이 나온다. 최신 한 줄을 sysmon이 읽는다.

@@ -91,16 +91,11 @@ function renderWho() {
   modeEl.replaceChildren();
   whoEl.replaceChildren();
   if (!auth || auth.auth === "none") return;
-  if (auth.mode) {  // 배포 형태 표시(docs/modes.md): 워크스페이스 "개발", 제품 "제품", 운용 미리보기 "운용"
-    const dev = auth.mode === "development";
-    const label = dev ? "개발" : state.ui && state.ui.product ? "제품" : "운용";
-    modeEl.appendChild(ui.pill(dev ? "wrench" : "check", label, dev ? "info" : "ok"));
-  }
-  if (auth.auth === "on" && auth.name) {
-    whoEl.append(ui.pill("lock", `${auth.name} · ${ROLE_KO[auth.role] || auth.role}`, "info"),
+  // 배지 원칙(ui/README.md): 워크스페이스는 늘 개발·로그인 없음이라 따로 알리지 않는다. 운용 미리보기만 알림
+  if (auth.mode === "operation" && !(state.ui && state.ui.product)) modeEl.appendChild(ui.pill("lock", "운용 미리보기", "warn"));
+  if (auth.auth === "on" && auth.name) {  // 로그인을 넣은 제품: 누구인지 글자로 + 로그아웃
+    whoEl.append(h("span", { class: "muted" }, `${auth.name} · ${ROLE_KO[auth.role] || auth.role}`),
       ui.iconButton({ icon: "power", title: "로그아웃", onClick: logout }));
-  } else if (auth.auth === "off") {
-    whoEl.appendChild(ui.pill("lock", "인증 꺼짐", "idle"));
   }
 }
 
@@ -331,7 +326,7 @@ function renderTop() {
     topPills = { link: ui.pill("link", "연결 확인 중", "idle") };
     document.getElementById("link").replaceChildren(topPills.link);
   }
-  if (state.connected) topPills.link.set("check", "보드 연결됨", "ok");
+  if (state.connected) topPills.link.set("check", "보드 연결됨", "ok");  // 정상이면 숨김(shell.css 배지 원칙)
   else topPills.link.set("alert", "보드 응답 없음", "bad");
   const d = new Date();
   document.getElementById("clock").textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]

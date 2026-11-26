@@ -4,7 +4,7 @@
 |---|---|
 | 상태 | 구현(2026-11-25, 0.86), 켰을 때만 묻기(0.89). 보드 확인(2026-11-26): 끔이면 `authMethod: internal`·바깥 RTSP 허락, 켬이면 `http`·화면 `/workers`·`/media/` 401(토큰 200), 바깥 RTSP 자격 없음 401·토큰 h264, 보드 안 127.0.0.1 그대로 |
 | 대상 | nginx `/media/`(화면 영상 틀), MediaMTX 포트를 바로 여는 프로그램(RTSP 8554·WebRTC 8889·HLS 8888·SRT 8890), 게이트웨이 판정 두 곳 |
-| 왜 | 로그인(`WORKSPACE_AUTH=on`, 제품은 늘)을 켜도 영상은 누구나 볼 수 있었다(`docs/review-2026-11-25.md` 6장 2번). `/media/`는 8889를 그대로 넘기고, MediaMTX 기본 설정은 아무 이름이나 받는다 |
+| 왜 | 로그인(`WORKSPACE_AUTH=on`, 지금은 로그인을 넣은 제품만)을 켜도 영상은 누구나 볼 수 있었다(`docs/review-2026-11-25.md` 6장 2번). `/media/`는 8889를 그대로 넘기고, MediaMTX 기본 설정은 아무 이름이나 받는다 |
 | 바탕 | `docs/media-proxy.md`(`/media/`), `docs/gateway.md` 3장(사용자·토큰·역할), `docs/live-settings.md`(로그인 바로 켜고 끄기), MediaMTX v1.21.3 문서 "Authentication"(HTTP-based) |
 
 ## 1. 구조
@@ -23,8 +23,8 @@
 | ① 화면(브라우저) | nginx `/media/` → `auth_request /_media_auth` → 게이트웨이 `GET /api/auth/check` | 쿠키·Bearer로 로그인한 사람이면 `204`(넘김), 아니면 `401`(nginx가 그대로 401). 안쪽 확인은 `proxy_method GET`·본문 없이(WHEP는 POST·PATCH·DELETE) |
 | ② 프로그램(바로) | MediaMTX `authMethod: http` → 게이트웨이 보드 안 포트 `POST http://127.0.0.1:8079/api/auth/media` | 본문 `{user, password, token, ip, action, path, protocol, id, query}` → `200` 허락 · `401` 자격 물음 · `403` 거절 |
 
-- ①은 로그인 켬일 때만 nginx 설정에 들어간다(`render.sh` `RENDER_AUTH=on`, `apply.sh`가 `WORKSPACE_AUTH=on`·제품이면 켬). 꺼짐이면 예전과 같은 설정. nginx에 `auth_request` 모듈이 없으면 `/media/`를 빼고 경고(열어 두지 않음). 보드 nginx 1.18은 모듈 있음
-- ②는 **로그인을 켰을 때만** 묻는다(0.89): 게이트웨이가 시작할 때와 로그인을 바꿀 때 `<데이터>/config/mediamtx.yml`의 두 줄을 맞춘다. 켬(제품은 늘)이면 `authMethod: http`, 끔이면 `authMethod: internal`(MediaMTX 기본: 모두 허락), `authHTTPAddress: http://127.0.0.1:<WORKSPACE_MEDIA_AUTH_PORT>/api/auth/media`. 줄이 없으면 끝에 덧붙이고, 그 밖 줄·주석은 그대로(원자적 쓰기). MediaMTX는 설정 파일이 바뀌면 저절로 다시 읽으므로 서비스 재시작·root가 필요 없다(`docs/live-settings.md`)
+- ①은 로그인 켬일 때만 nginx 설정에 들어간다(`render.sh` `RENDER_AUTH=on`, `apply.sh`가 시작 셸이 정한 `WORKSPACE_AUTH=on`이면 켬). 꺼짐이면 예전과 같은 설정. nginx에 `auth_request` 모듈이 없으면 `/media/`를 빼고 경고(열어 두지 않음). 보드 nginx 1.18은 모듈 있음
+- ②는 **로그인을 켰을 때만** 묻는다(0.89): 게이트웨이가 시작할 때와 로그인을 바꿀 때 `<데이터>/config/mediamtx.yml`의 두 줄을 맞춘다. 켬(로그인을 넣은 제품)이면 `authMethod: http`, 끔이면 `authMethod: internal`(MediaMTX 기본: 모두 허락), `authHTTPAddress: http://127.0.0.1:<WORKSPACE_MEDIA_AUTH_PORT>/api/auth/media`. 줄이 없으면 끝에 덧붙이고, 그 밖 줄·주석은 그대로(원자적 쓰기). MediaMTX는 설정 파일이 바뀌면 저절로 다시 읽으므로 서비스 재시작·root가 필요 없다(`docs/live-settings.md`)
   - 왜 끔일 때 묻지 않나: 평소(로그인 끔)에는 영상이 게이트웨이와 무관하게 돌아야 한다. 게이트웨이가 잠깐 멈췄다고 장비 영상이 막히면 고장이 번진다
   - 대가: 로그인을 켜고 끄는 순간 MediaMTX가 설정을 다시 읽으며 RTSP·WebRTC·HLS·SRT 서버를 모두 다시 연다. 보드 실측: 워커 송출이 약 2 s 뒤 다시 붙고, 그 사이 보던 화면·바깥 수신은 끊겼다 다시 붙는다(그 2 s 동안 오는 요청은 404). 로그인은 자주 바꾸는 값이 아님
   - 서비스 파일에는 `MTX_AUTH*` 환경 변수를 두지 않는다(0.87에 잠깐 두었음: 환경 변수는 파일보다 앞서 바꿀 수 없음)
@@ -50,7 +50,7 @@
 
 | 키 | 뜻 | 기본 |
 |---|---|---|
-| `WORKSPACE_AUTH` | 로그인(화면·REST·영상 같이) | `off`, 제품 늘 `on` |
+| `WORKSPACE_AUTH` | 로그인(화면·REST·영상 같이). 시작 셸이 정함(`docs/modes.md` 로그인) | 워크스페이스 늘 `off`, 제품은 빌드 선택(기본 `off`) |
 | `WORKSPACE_MEDIA_AUTH_PORT`(게이트웨이 환경) | ② 판정 포트(127.0.0.1) | `8079`, `0`이면 안 엶. `mediamtx.yml`의 `authHTTPAddress`는 게이트웨이가 같이 맞춤 |
 | `RENDER_AUTH`(render.sh) | ① `/media/`에 `auth_request` | `apply.sh`가 정함 |
 

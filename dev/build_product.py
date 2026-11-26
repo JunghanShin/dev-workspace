@@ -3,7 +3,7 @@
 워크스페이스(개발 작업대)에서 개발 부품을 걷어내고 장비에 올릴 결과물 하나를 만든다:
   넣음: 확정 워커 실행 파일(workspace/bin, 소스와 같은지 확인), Manager·게이트웨이·시스템 모니터·매니저(C++ 확정 실행 파일),
         잠근 설정(워커마다 고른 프리셋 하나), 프로필, 시작 셸, 제품 설치 스크립트(서비스·되돌리기),
-        기본 화면(셸 + 시스템 모니터 + 워커 패널, product.json ui=true일 때), 전원 모드(설치가 맞춤, power_mode)
+        기본 화면(셸 + 시스템 모니터 + 워커 패널, product.json ui=true일 때), 전원 모드(설치가 맞춤, power_mode), 로그인(넣을지 고름, login 기본 없음)
   뺌:   소스·깃·문서·배포 키·빌드 도구, 가짜 장치(*-sim, libfake_*), 다른 프리셋, 개발 빌드 후보(build/),
         진단·설정 화면(로그·명령 이력·워크스페이스)
 결과: <out>/<이름>-<버전>.tar.gz (풀어서 sudo bash install.sh --owner <계정>)
@@ -13,7 +13,7 @@ Python 부분 컴파일(Nuitka)과 심볼 제거는 aarch64에서 해야 한다:
   - PC에서 실행하면(dev/build-product.sh) dev/board.env의 WORKSPACE_BOARD에 보내 임시 폴더에서 하고 결과만 가져온다
     (보드의 워크스페이스는 건드리지 않음)
 
-    python3 dev/build_product.py <프로필> [--out dist] [--local] [--replace] [--power-mode <이름|keep>] [--allow-dirty] [--skip-compile]
+    python3 dev/build_product.py <프로필> [--out dist] [--local] [--replace] [--power-mode <이름|keep>] [--login on|off] [--allow-dirty] [--skip-compile]
     python3 dev/build_product.py <프로필> --check [--json] [--local]     # 빌드 전 점검만
     python3 dev/build_product.py --profiles                              # product.json이 있는 프로필 목록(JSON)
 
@@ -88,8 +88,13 @@ def profiles():
             continue
         out.append({"profile": os.path.basename(os.path.dirname(pj)), "name": p.get("name"),
                     "workers": sorted(p.get("workers", {})), "ui": bool(p.get("ui")),
-                    "power_mode": p.get("power_mode") or "keep"})
+                    "power_mode": p.get("power_mode") or "keep", "login": login_of(p)})
     return out
+
+
+def login_of(product):
+    """제품에 로그인을 넣을지(docs/modes.md): product.json "login"(true/false, 기본 false) → "on"/"off""""
+    return "on" if product.get("login") is True else "off"
 
 
 def load_product(profile):
@@ -280,6 +285,7 @@ def stage_tree(product, info, stage, version):
     for name, val in (("PRODUCT_NAME", product["name"]), ("VERSION", version),
                       ("PRODUCT_UI", "1" if product.get("ui") else "0"),
                       ("PRODUCT_POWER_MODE", product.get("power_mode") or "keep"),
+                      ("PRODUCT_LOGIN", login_of(product)),
                       ("PRODUCT_CONFIG_WRITE", "1" if product.get("config_write") else "0")):
         open(os.path.join(stage, name), "w").write(val + "\n")
 
@@ -377,6 +383,8 @@ def build(a):
     product = load_product(a.profile)
     if a.power_mode:  # 화면 빌드 모달에서 고른 값이 product.json보다 우선
         product["power_mode"] = a.power_mode
+    if a.login:  # 로그인 넣기(on/off): 고른 값이 product.json보다 우선
+        product["login"] = a.login == "on"
     if not re.match(r"^[A-Za-z0-9_]{1,32}$", product.get("power_mode") or "keep"):
         raise BuildError("bad power_mode: %r" % product.get("power_mode"))
     benv = board_env()
@@ -403,7 +411,7 @@ def build(a):
         manifest = {"name": product["name"], "version": version, "commit": commit, "profile": a.profile,
                     "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "ui": bool(product.get("ui")),
                     "config_write": bool(product.get("config_write")), "power_mode": product.get("power_mode") or "keep",
-                    "workers": info,
+                    "login": login_of(product), "workers": info,
                     "compiled": not a.skip_compile, "stripped": not a.skip_compile,
                     "note": "worker binaries are stripped; workspace/bin/BUILD sha256 refers to the unstripped release"}
         json.dump(manifest, open(os.path.join(stage, "MANIFEST.json"), "w", encoding="utf-8"), indent=2, ensure_ascii=False)
@@ -423,7 +431,7 @@ def build(a):
     sha = hashlib.sha256(open(out, "rb").read()).hexdigest()
     result = {"file": os.path.basename(out), "path": out, "mb": round(os.path.getsize(out) / 1e6, 1), "sha256": sha,
               "version": version, "profile": a.profile, "stripped": not a.skip_compile,
-              "power_mode": product.get("power_mode") or "keep"}
+              "power_mode": product.get("power_mode") or "keep", "login": login_of(product)}
     progress(100, "완료")
     print("##RESULT " + json.dumps(result, ensure_ascii=False), flush=True)
     print("product bundle: %s (%.1f MB)" % (out, os.path.getsize(out) / 1e6))
@@ -437,6 +445,7 @@ def main():
     ap.add_argument("--local", action="store_true", help="compile here (this machine is the aarch64 board)")
     ap.add_argument("--replace", action="store_true", help="after success, remove other bundles in --out")
     ap.add_argument("--power-mode", help="power mode the device install sets (e.g. MAXN_SUPER, 25W, keep); default product.json power_mode")
+    ap.add_argument("--login", choices=("on", "off"), help="put login into the product (default product.json login, else off)")
     ap.add_argument("--check", action="store_true", help="only run the pre-build checks")
     ap.add_argument("--json", action="store_true", help="with --check: print JSON")
     ap.add_argument("--profiles", action="store_true", help="list profiles that have product.json (JSON)")

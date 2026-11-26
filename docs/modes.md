@@ -88,3 +88,14 @@
 | 3 | 대응 직접 실행 | `fault.run_action {id, stage?}`, 워크스페이스에서만 |
 | 4 | `PUT /mode` | 없앰(405). `GET /mode`는 남김(`fixed: true`) |
 | 5 | 버전 | 역할 정의 `mission` 1.3, `fault` 1.2. libworker·공통 정의는 그대로 |
+
+## 로그인 (0.90)
+
+| 배포 형태 | 로그인 | 정하는 곳 |
+|---|---|---|
+| 워크스페이스(개발) | **없음.** 늘 끔 | 시작 셸(`workspace-start.sh`)이 `WORKSPACE_AUTH=off`로 넘김. `workspace.env`에 적어도 읽지 않고 로그 한 줄. 설정 탭에도 칸 없음 |
+| 제품 | **빌드할 때 고름**(기본 없음) | `dev/build_product.py --login on\|off`, 화면 빌드 창 "로그인", product.json `"login": true`. 묶음의 `PRODUCT_LOGIN`을 시작 셸이 읽음 |
+
+- 로그인을 넣은 제품: 화면·REST·영상(`/media/`, MediaMTX 포트) 모두 로그인한 사람만(`docs/media-auth.md`). 설치가 첫 계정 `admin`과 원격 토큰을 만들어 한 번 보여 준다
+- 게이트웨이는 받은 값만 따른다(정책은 시작 셸 한 곳). 그래서 시험은 게이트웨이에 `WORKSPACE_AUTH=on`을 직접 넘겨 로그인 동작을 본다
+- 0.89까지: 제품은 늘 켬, 워크스페이스는 설정 탭에서 켜고 끌 수 있었다. "개발 상태에는 로그인이 없고, 넣는 것은 제품 빌드의 선택"으로 바꿈

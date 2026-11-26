@@ -96,12 +96,13 @@ grep -q '^WORKSPACE_UI=' "$ENV_FILE" || printf 'WORKSPACE_UI=%s\n' "$(cat "$REL/
 chmod 600 "$ENV_FILE"
 chown -R "$(id -u "$OWNER"):$(id -g "$OWNER")" "$DATA"
 
-# 첫 계정(docs/gateway.md 3장): 제품 모드는 게이트웨이 신분 확인이 늘 켜져 사용자 파일(config/users.json)이 있어야 열린다.
+# 첫 계정(docs/gateway.md 3장): 로그인을 넣은 묶음(PRODUCT_LOGIN=on, 빌드에서 고름)만. 그때는 사용자 파일(config/users.json)이 있어야 열린다.
 # 사용자가 하나도 없으면 관리 계정 admin(maintainer)과 원격 화면용 토큰 remote를 만들어 한 번만 보여 준다.
 # 나중에 바꾸기: sudo -u <계정> WORKSPACE_DATA=<데이터> <PREFIX>/current/gateway/bin/gateway user passwd admin / token add …
 GW="$REL/gateway/bin/gateway"
 gw_cli() { sudo -u "$OWNER" env WORKSPACE_DATA="$DATA" "$GW" "$@"; }
-if [[ -x "$GW" ]] && [[ -z "$(gw_cli user list 2>/dev/null)" ]]; then
+LOGIN="$(cat "$REL/PRODUCT_LOGIN" 2>/dev/null || echo off)"
+if [[ "$LOGIN" == on && -x "$GW" ]] && [[ -z "$(gw_cli user list 2>/dev/null)" ]]; then
   PASS="$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   if printf '%s\n%s\n' "$PASS" "$PASS" | gw_cli user add admin maintainer >/dev/null \
      && RTOKEN="$(gw_cli token add admin remote 2>/dev/null)"; then
