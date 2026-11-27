@@ -12,6 +12,11 @@
 #   RENDER_REDIRECT=on|off(기본 on): 평문 포트로 온 요청을 HTTPS로 넘김(308). 보드 안(127.0.0.1)에서 온 것은 그대로(SSH 터널)
 # 영상 넘기기(docs/media-proxy.md): RENDER_MEDIA=<주소:포트>(기본 127.0.0.1:8889, MediaMTX WebRTC), off면 /media/ 없음
 # 영상 로그인(docs/media-auth.md): RENDER_AUTH=on이면 /media/에 auth_request(게이트웨이 /api/auth/check). 모듈이 없으면 /media/를 뺀다
+# 지도 타일(docs/map-tiles.md): RENDER_MAPS=<폴더>(보통 <데이터>/maps, 없거나 off면 /maps/ 없음)
+#   /maps/<종류>/<z>/<x>/<y>: <폴더>/<종류>/<z>/<x>/<y>.png|.jpg(오프라인 타일) → 없으면 온라인에서 받아 <폴더>/cache에 캐시 → 그것도 안 되면 204
+#   RENDER_MAPS_ONLINE=on|off(기본 on): off면 오프라인 폴더만. RENDER_MAPS_CACHE_MB(기본 2048): 캐시 상한
+#   RENDER_MAPS_SOURCES: "<종류>=<주소 틀> ..."({z} {x} {y}), 기본 osm(OpenStreetMap)·satellite(Esri World Imagery)
+#   로그인 켬이면 /media/와 같이 로그인한 사람만(모듈이 없으면 /maps/도 뺀다)
 # 이 스크립트를 직접 부르는 곳은 apply.sh(시작 셸·설정 탭 바로 적용이 같이 씀)와 시험
 # nginx에 ssl 모듈이 없으면 HTTPS를 빼고(경고), rewrite 모듈이 없으면 넘김만 뺀다.
 set -euo pipefail
@@ -21,7 +26,7 @@ mkdir -p "$prefix/tmp"
 mime=/etc/nginx/mime.types
 if [[ ! -f "$mime" ]]; then
   mime="$prefix/mime.types"
-  echo 'types { text/html html; text/css css; text/javascript js; application/json json; image/svg+xml svg; image/png png; }' > "$mime"
+  echo 'types { text/html html; text/css css; text/javascript js; application/json json; image/svg+xml svg; image/png png; image/jpeg jpg; }' > "$mime"
 fi
 nginx_bin="${NGINX_BIN:-$(command -v nginx 2>/dev/null || echo /usr/sbin/nginx)}"
 if "$nginx_bin" -V 2>&1 | grep -q -- "--without-http_limit_conn_module"; then
@@ -72,18 +77,19 @@ if [[ -n "${RENDER_TLS_LISTEN:-}" ]]; then
   fi
 fi
 media="${RENDER_MEDIA:-127.0.0.1:8889}"
-mediloc=''
+maps="${RENDER_MAPS:-off}"
+mediloc='' mapsloc='' mapscache=''
 mauth='' mcheck=''
-if [[ "$media" != off && "${RENDER_AUTH:-off}" == on ]]; then
+if [[ ( "$media" != off || "$maps" != off ) && "${RENDER_AUTH:-off}" == on ]]; then
   # 로그인 켬(docs/media-auth.md): /media/도 로그인한 사람만. 판정은 게이트웨이(/api/auth/check, 204 들여보냄·401)
   if [[ -z "${nv:-}" ]]; then nv="$("$nginx_bin" -V 2>&1 || true)"; fi
   if ! grep -q -- "--with-http_auth_request_module" <<<"$nv"; then
-    echo "render.sh: this nginx has no auth_request module; /media/ left out (login is on)" >&2
-    media=off  # 막을 수 없으면 열어 두지 않는다
+    echo "render.sh: this nginx has no auth_request module; /media/ and /maps/ left out (login is on)" >&2
+    media=off maps=off  # 막을 수 없으면 열어 두지 않는다
   else
     mauth="
             auth_request /_media_auth;  # 로그인 확인(쿠키·Bearer, docs/media-auth.md)"
-    mcheck="        # /media/ 로그인 확인(auth_request가 부르는 안쪽 요청): 본문 없이 GET으로 게이트웨이에 묻는다(WHEP는 POST·PATCH·DELETE)
+    mcheck="        # /media/·/maps/ 로그인 확인(auth_request가 부르는 안쪽 요청): 본문 없이 GET으로 게이트웨이에 묻는다(WHEP는 POST·PATCH·DELETE)
         location = /_media_auth {
             internal;
             proxy_pass http://gateway/api/auth/check;
@@ -107,14 +113,79 @@ if [[ "$media" != off ]]; then
             proxy_set_header Host \$http_host;
             proxy_read_timeout 60s;
         }"
-  [[ -n "$mcheck" ]] && mediloc+="
-$mcheck"
 fi
-awk -v prefix="$prefix" -v sock="$sock" -v listen="$listen" -v mime="$mime" -v uiloc="$uiloc" -v zone="$zone" -v conn="$conn" -v tls="$tls" -v mediloc="$mediloc" '
+if [[ "$maps" != off ]]; then
+  # 온라인 타일 주소는 변수로 만들므로 이름 풀이(resolver)가 필요하다: 보드의 /etc/resolv.conf 첫 nameserver
+  ns="$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf 2>/dev/null || true)"
+  [[ "$ns" == *:* ]] && ns="[$ns]"
+  online="${RENDER_MAPS_ONLINE:-on}"
+  sources="${RENDER_MAPS_SOURCES:-}"
+  [[ -n "$sources" ]] || sources='osm=https://tile.openstreetmap.org/{z}/{x}/{y}.png satellite=https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+  [[ -n "$ns" ]] || { [[ "$online" == on ]] && echo "render.sh: no nameserver in /etc/resolv.conf; map tiles offline only" >&2; online=off; }
+  cache_mb="${RENDER_MAPS_CACHE_MB:-2048}"
+  mapsloc="        # 지도 타일(docs/map-tiles.md): 오프라인 폴더 → 온라인(받아서 캐시) → 없으면 204(화면은 빈 칸)
+        location = /_maps_none {
+            internal;
+            return 204;
+        }"
+  if [[ "$online" == on ]]; then
+    mapscache="    # 지도 타일 캐시(docs/map-tiles.md): 한 번 받은 타일은 보드에 남겨 다시 받지 않는다
+    proxy_cache_path $maps/cache levels=1:2 keys_zone=maps:8m max_size=${cache_mb}m inactive=365d use_temp_path=off;"
+  fi
+  for s in $sources; do
+    name="${s%%=*}" url="${s#*=}"
+    [[ "$name" =~ ^[a-z0-9_-]+$ && "$url" == http*://* ]] || { echo "render.sh: bad map source: $s" >&2; continue; }
+    host="${url#*://}" host="${host%%/*}"
+    up="${url//\{z\}/\$mt_z}" up="${up//\{x\}/\$mt_x}" up="${up//\{y\}/\$mt_y}"
+    if [[ "$online" == on ]]; then fallback="@maps_$name"; else fallback="/_maps_none"; fi
+    mapsloc+="
+        location ~ ^/maps/$name/([0-9]+)/([0-9]+)/([0-9]+)\$ {$mauth
+            set \$mt_z \$1;
+            set \$mt_x \$2;
+            set \$mt_y \$3;
+            root $maps;
+            add_header Cache-Control \"max-age=86400\" always;
+            add_header X-Map-Source offline always;
+            try_files /$name/\$mt_z/\$mt_x/\$mt_y.png /$name/\$mt_z/\$mt_x/\$mt_y.jpg $fallback;
+        }"
+    if [[ "$online" == on ]]; then
+      mapsloc+="
+        location @maps_$name {
+            resolver $ns valid=300s ipv6=off;
+            resolver_timeout 3s;
+            proxy_pass $up;
+            proxy_ssl_server_name on;
+            proxy_set_header Host $host;
+            proxy_set_header User-Agent \"workspace-map-tiles/1.0\";
+            proxy_set_header Cookie \"\";
+            proxy_hide_header Set-Cookie;
+            proxy_ignore_headers Cache-Control Expires Set-Cookie;
+            proxy_cache maps;
+            proxy_cache_key $name/\$mt_z/\$mt_x/\$mt_y;
+            proxy_cache_valid 200 365d;
+            proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+            proxy_cache_lock on;
+            proxy_connect_timeout 3s;
+            proxy_read_timeout 10s;
+            proxy_intercept_errors on;
+            error_page 400 403 404 410 429 500 502 503 504 =204 /_maps_none;
+            add_header Cache-Control \"max-age=86400\" always;
+            add_header X-Map-Source \"online \$upstream_cache_status\" always;
+        }"
+    fi
+  done
+fi
+export UILOC="$uiloc" ZONE="$zone" CONN="$conn" TLS="$tls" MEDILOC="$mediloc" MAPSLOC="$mapsloc" MAPSCACHE="$mapscache" MCHECK="$mcheck"
+awk -v prefix="$prefix" -v sock="$sock" -v listen="$listen" -v mime="$mime" '
+  BEGIN { uiloc = ENVIRON["UILOC"]; zone = ENVIRON["ZONE"]; conn = ENVIRON["CONN"]; tls = ENVIRON["TLS"]; mediloc = ENVIRON["MEDILOC"]
+          mapsloc = ENVIRON["MAPSLOC"]; mapscache = ENVIRON["MAPSCACHE"]; mcheck = ENVIRON["MCHECK"] }
   { gsub(/@PREFIX@/, prefix); gsub(/@SOCK@/, sock); gsub(/@LISTEN@/, listen); gsub(/@MIME@/, mime)
     if ($0 == "@UI_LOCATION@") print uiloc
     else if ($0 == "@LIMIT_ZONE@") print zone
     else if ($0 == "@LIMIT_CONN@") print conn
     else if ($0 == "@TLS@") { if (tls != "") print tls }
     else if ($0 == "@MEDIA_LOCATION@") { if (mediloc != "") print mediloc }
+    else if ($0 == "@MAPS_LOCATION@") { if (mapsloc != "") print mapsloc }
+    else if ($0 == "@MAPS_CACHE@") { if (mapscache != "") print mapscache }
+    else if ($0 == "@AUTH_CHECK@") { if (mcheck != "") print mcheck }
     else print }' "$here/nginx.conf.in" > "$out"

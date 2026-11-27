@@ -11,6 +11,7 @@
 #
 # 읽는 키(<데이터>/config/workspace.env, 파일에 없으면 기본값. 환경 변수의 같은 키는 쓰지 않는다: 지운 칸이 시작 값으로 남지 않게)
 #   WORKSPACE_REST_BIND·_PORT, WORKSPACE_UI, WORKSPACE_HTTPS·_PORT·_CERT·_KEY, WORKSPACE_HTTP_REDIRECT
+#   WORKSPACE_MAPS(on/off, 기본 on)·WORKSPACE_MAPS_ONLINE(on/off, 기본 on): 지도 타일 /maps/(<데이터>/maps, docs/map-tiles.md)
 #   로그인: 환경 WORKSPACE_AUTH=on(시작 셸이 정함: 제품 빌드에서 고른 경우만)이면 RENDER_AUTH=on(/media/도 로그인, docs/media-auth.md)
 # 실행 폴더: WORKSPACE_NGINX_DIR(기본 <데이터>/run/nginx). nginx: NGINX_BIN 또는 PATH. RENDER_MEDIA·CERT_*는 그대로 넘긴다.
 #
@@ -30,7 +31,7 @@ fail() { echo "nginx: $*" >&2; exit "${code:-1}"; }
 
 # workspace.env 읽기(실행하지 않음, workspace-start.sh read_kv와 같은 규칙: # 뒤 버림, 끝 공백·앞뒤 " 뗌, 같은 키는 뒤의 것)
 KEYS=(WORKSPACE_REST_BIND WORKSPACE_REST_PORT WORKSPACE_UI WORKSPACE_HTTPS WORKSPACE_HTTPS_PORT WORKSPACE_HTTPS_CERT
-      WORKSPACE_HTTPS_KEY WORKSPACE_HTTP_REDIRECT)
+      WORKSPACE_HTTPS_KEY WORKSPACE_HTTP_REDIRECT WORKSPACE_MAPS WORKSPACE_MAPS_ONLINE)
 for k in "${KEYS[@]}"; do unset "$k"; done
 envf="$data/config/workspace.env"
 if [[ -f "$envf" ]]; then
@@ -70,9 +71,16 @@ fi
 auth=off
 [[ "${WORKSPACE_AUTH:-off}" == on ]] && auth=on  # 시작 셸이 정한 값(환경). 파일에서 읽지 않음
 
+# 지도 타일(docs/map-tiles.md): <데이터>/maps(오프라인 타일 폴더 + 온라인 캐시)
+maps=off
+if [[ "${WORKSPACE_MAPS:-on}" != off ]]; then
+  maps="$data/maps"
+  mkdir -p "$maps" || fail "cannot make $maps"
+fi
+
 mkdir -p "$dir" || fail "cannot make $dir"
 new="$dir/nginx.conf.new"
-env ${tls_env[@]+"${tls_env[@]}"} RENDER_AUTH="$auth" bash "$here/render.sh" "$new" "$dir" "$sock" "$bind:$port" "$root" \
+env ${tls_env[@]+"${tls_env[@]}"} RENDER_AUTH="$auth" RENDER_MAPS="$maps" RENDER_MAPS_ONLINE="${WORKSPACE_MAPS_ONLINE:-on}" bash "$here/render.sh" "$new" "$dir" "$sock" "$bind:$port" "$root" \
   "${WORKSPACE_UI:-1}" || fail "render.sh failed"
 if ! out="$("$nginx_bin" -t -q -p "$dir" -c "$new" -g 'daemon off;' 2>&1)"; then
   rm -f "$new"

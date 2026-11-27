@@ -60,7 +60,7 @@ DNS=                              # 비우면 설정 안 함
 | `WORKSPACE_UI` | `1` | `0`이면 보드가 화면을 내주지 않음(별도 제어 UI가 REST만 씀) |
 
 - `KEY=값` 한 줄씩. 셸로 실행하지 않고 읽기만 한다. 경로(소켓, 데이터 폴더)는 넣지 않는다
-- HTTPS(`WORKSPACE_HTTPS`·`_PORT`·`_CERT`·`_KEY`, `WORKSPACE_HTTP_REDIRECT`)도 여기(`docs/https.md`). 로그인(`WORKSPACE_AUTH`)은 여기서 켜지 않는다: 워크스페이스(개발)는 늘 없음, 제품은 빌드할 때 넣을지 고름(기본 없음, `docs/modes.md` 로그인)
+- HTTPS(`WORKSPACE_HTTPS`·`_PORT`·`_CERT`·`_KEY`, `WORKSPACE_HTTP_REDIRECT`)도 여기(`docs/https.md`). 지도 타일(`WORKSPACE_MAPS`·`WORKSPACE_MAPS_ONLINE`, 기본 둘 다 on, 타일은 `<데이터>/maps`)도 여기(`docs/map-tiles.md`). 로그인(`WORKSPACE_AUTH`)은 여기서 켜지 않는다: 워크스페이스(개발)는 늘 없음, 제품은 빌드할 때 넣을지 고름(기본 없음, `docs/modes.md` 로그인)
 - 화면 **워크스페이스 › 설정** 탭에서 고칠 수 있는 키는 `install/config/workspace-settings.json`에 정의한 것만(제목·영상 주소 틀·명령 응답 대기는 바로, 나머지는 다시 시작하면 적용). 게이트웨이가 그 줄만 바꾼다(주석·순서 그대로). 받는 주소·포트·토큰·화면 켬은 파일에서만
 
 ### `manager.json` — Manager 동작

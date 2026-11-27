@@ -15,6 +15,7 @@
 |---|---|---|
 | 화면 파일 내주기(ui/web, 워커 패널) | nginx | 지금은 REST가 함 |
 | HTTPS, 요청 크기·접속 수·속도 제한, 압축 | nginx | 새로 |
+| 영상 넘기기 `/media/`(`docs/media-proxy.md`), 지도 타일 `/maps/`(오프라인 폴더·캐시·온라인, 0.91 `docs/map-tiles.md`) | nginx | 새로 |
 | 신분 확인(로그인 세션 · API 토큰)과 역할 | 게이트웨이 | 새로 |
 | 모드(원칙 17, 0.79 `docs/modes.md`): 시작할 때 정함(워크스페이스 개발, 제품 운용, `WORKSPACE_ACCESS_MODE`), 바꾸지 않음(`PUT /mode` 405), process-manager에 알림. 운용 모드에서 막는 명령 종류는 `docs/command-path.md` 3장. mission 응답의 `advisory`는 머리 `X-Workspace-Advisory`로 | 게이트웨이 | 새로 |
 | 전달: Manager API(워커 관리), 워커 명령, 스트림 중계(SSE), 보드 읽기(로그·기록·프로세스), 계약(`/io`) | 게이트웨이 | 지금과 같음 |

@@ -5,6 +5,8 @@
 #   @LIMIT_ZONE@ @LIMIT_CONN@ 주소당 연결 제한(nginx에 limit_conn 모듈이 있을 때만, render.sh가 정함)
 #   @TLS@ HTTPS 받기·평문 → HTTPS 넘김(켰을 때만, docs/https.md)
 #   @MEDIA_LOCATION@ /media/ → MediaMTX WebRTC(docs/media-proxy.md, RENDER_MEDIA=off면 없음)
+#   @MAPS_CACHE@ @MAPS_LOCATION@ 지도 타일 /maps/(docs/map-tiles.md, RENDER_MAPS가 없거나 off면 없음)
+#   @AUTH_CHECK@ 로그인 확인 안쪽 위치(RENDER_AUTH=on일 때만, /media/·/maps/가 같이 씀)
 worker_processes 1;
 pid @PREFIX@/nginx.pid;
 error_log stderr warn;          # 시작 셸 로그(journal)로
@@ -34,6 +36,8 @@ http {
     keepalive_timeout 15s;
 @LIMIT_ZONE@
 
+@MAPS_CACHE@
+
     gzip on;
     gzip_types text/css text/javascript application/javascript application/json image/svg+xml;
 
@@ -56,6 +60,10 @@ http {
 @UI_LOCATION@
 
 @MEDIA_LOCATION@
+
+@MAPS_LOCATION@
+
+@AUTH_CHECK@
 
         # 스트림(SSE): 버퍼링하면 화면에 늦게 도착하므로 끈다. 오래 열려 있다
         # (/workers/{id}/stream, 여럿을 한 연결로 /streams — docs/stream-mux.md)

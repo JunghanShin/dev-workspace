@@ -6,6 +6,7 @@
 확인: 화면 파일은 nginx가 직접(게이트웨이가 꺼져도 나옴), 없는 경로(API·워커 패널 파일)는 게이트웨이로, Host 전달,
 스트림(SSE)은 버퍼링 없이 바로, 본문 상한(64 KiB) 넘으면 413, 명령 기록의 보낸 쪽 주소는 nginx가 넣은 값.
 HTTPS(docs/https.md): 보드 자체 서명 인증서(make-cert.sh)로 TLS·이름 확인, 화면·API·스트림, 평문 → HTTPS 넘김(보드 안 127.0.0.1은 그대로).
+지도 타일(docs/map-tiles.md): 오프라인 폴더 → 온라인(가짜 타일 서버) 받아서 캐시 → 안 되면 204.
 nginx나 REST_BIN이 없으면 건너뛴다.
 """
 import json
@@ -80,8 +81,15 @@ class NginxFront(unittest.TestCase):
         conf = os.path.join(prefix, "nginx.conf")
         os.makedirs(prefix, exist_ok=True)
         cls.media = FakeMedia()
+        # 지도 타일: 오프라인 폴더에 하나, 온라인은 가짜 서버(FakeMedia가 받은 경로를 남김)와 닫힌 포트
+        cls.maps = os.path.join(t.T["tmp"], "maps")
+        os.makedirs(os.path.join(cls.maps, "fake", "5", "1"), exist_ok=True)
+        with open(os.path.join(cls.maps, "fake", "5", "1", "2.png"), "wb") as f:
+            f.write(b"offline-tile")
+        sources = "fake=http://127.0.0.1:%d/tiles/{z}/{x}/{y}.png dead=http://127.0.0.1:1/{z}/{y}/{x}" % cls.media.port
         subprocess.check_call(["bash", RENDER, conf, prefix, cls.sock, "127.0.0.1:%d" % cls.port, t.T["root"], "1"],
-                              env=dict(os.environ, RENDER_MEDIA="127.0.0.1:%d" % cls.media.port))
+                              env=dict(os.environ, RENDER_MEDIA="127.0.0.1:%d" % cls.media.port, RENDER_MAPS=cls.maps,
+                                       RENDER_MAPS_SOURCES=sources))
         subprocess.check_call([NGINX, "-t", "-q", "-p", prefix, "-c", conf, "-g", "daemon off;"])
         cls.ng_log = open(os.path.join(prefix, "nginx.log"), "wb")
         cls.ng = subprocess.Popen([NGINX, "-p", prefix, "-c", conf, "-g", "daemon off;"], stdout=cls.ng_log, stderr=cls.ng_log)
@@ -108,6 +116,22 @@ class NginxFront(unittest.TestCase):
         cls.stream.close()
         cls.media.close()
         t.tearDownModule()
+
+    def test_map_tiles(self):
+        """지도 타일(docs/map-tiles.md): 오프라인 폴더 → 온라인 받아서 캐시(두 번째는 캐시) → 안 되면 204. 안쪽 위치는 바깥에서 못 부름"""
+        st, h, data = self.req("GET", "/maps/fake/5/1/2")
+        self.assertEqual((st, data, h.get("x-map-source")), (200, b"offline-tile", "offline"))
+        before = len(self.media.got)
+        st, h, data = self.req("GET", "/maps/fake/3/6/4")
+        self.assertEqual((st, h.get("x-map-source")), (200, "online MISS"))
+        self.assertEqual(json.loads(data)["path"], "/tiles/3/6/4.png")
+        st, h, data = self.req("GET", "/maps/fake/3/6/4")
+        self.assertEqual((st, h.get("x-map-source")), (200, "online HIT"))
+        self.assertEqual(len(self.media.got), before + 1)  # 캐시에서: 다시 받지 않음
+        self.assertTrue(os.listdir(os.path.join(self.maps, "cache")))
+        self.assertEqual(self.req("GET", "/maps/dead/3/6/4")[0], 204)  # 온라인도 안 되면 빈 칸
+        self.assertEqual(self.req("GET", "/_maps_none")[0], 404)
+        self.assertEqual(self.req("GET", "/maps/fake/1/2/x")[0], 404)  # 타일 모양이 아니면 게이트웨이로(없음)
 
     def test_media_proxy(self):
         """영상 넘기기(docs/media-proxy.md): /media/<경로>/ → MediaMTX /<경로>/, 신호(WHEP POST)도. 기본 영상 주소는 같은 주소"""
@@ -493,6 +517,34 @@ class Render(unittest.TestCase):
         off = self.render("configure arguments: --with-http_auth_request_module")
         self.assertIn("location ^~ /media/", off)
         self.assertNotIn("auth_request", off)
+
+    def test_map_tiles(self):
+        """지도 타일(docs/map-tiles.md): RENDER_MAPS가 있어야 /maps/, 기본 종류 osm·satellite, 온라인 끔이면 캐시 없이 오프라인만,
+        로그인 켬이면 auth_request(영상이 꺼져 있어도), 모듈이 없으면 /maps/를 뺀다"""
+        mod = "configure arguments: --with-http_auth_request_module"
+        none = self.render(mod)
+        self.assertNotIn("location ~ ^/maps/", none)
+        self.assertNotIn("proxy_cache_path", none)
+        on = self.render(mod, dict(RENDER_MAPS="/m"))
+        self.assertIn("proxy_cache_path /m/cache ", on)
+        self.assertIn("location ~ ^/maps/osm/([0-9]+)/([0-9]+)/([0-9]+)$ {", on)
+        self.assertIn("proxy_pass https://tile.openstreetmap.org/$mt_z/$mt_x/$mt_y.png;", on)
+        self.assertIn("/World_Imagery/MapServer/tile/$mt_z/$mt_y/$mt_x;", on)  # 위성은 z/y/x
+        self.assertIn("try_files /osm/$mt_z/$mt_x/$mt_y.png /osm/$mt_z/$mt_x/$mt_y.jpg @maps_osm;", on)
+        self.assertNotIn("auth_request", on)
+        off = self.render(mod, dict(RENDER_MAPS="/m", RENDER_MAPS_ONLINE="off"))
+        self.assertNotIn("proxy_cache_path", off)
+        self.assertNotIn("@maps_osm", off)
+        self.assertIn("/osm/$mt_z/$mt_x/$mt_y.jpg /_maps_none;", off)
+        auth = self.render(mod, dict(RENDER_MAPS="/m", RENDER_MEDIA="off", RENDER_AUTH="on"))
+        self.assertNotIn("location ^~ /media/", auth)
+        self.assertIn("location = /_media_auth", auth)
+        self.assertEqual(auth.count("auth_request /_media_auth;"), 2)  # osm, satellite
+        nomod = self.render("configure arguments: --with-http_ssl_module", dict(RENDER_MAPS="/m", RENDER_AUTH="on"))
+        self.assertNotIn("location ~ ^/maps/", nomod)
+        bad = self.render(mod, dict(RENDER_MAPS="/m", RENDER_MAPS_SOURCES="Bad=x ok=http://h/{z}/{x}/{y}"))
+        self.assertIn("location ~ ^/maps/ok/", bad)
+        self.assertNotIn("/maps/Bad/", bad)
 
     def test_with_and_without_limit_conn(self):
         full = self.render("configure arguments: --with-http_ssl_module")

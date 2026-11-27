@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.90 |
+| 문서 버전 | 0.91 |
 | 대상 | 워크스페이스(워커를 실행·감시·설정·관찰하는 플랫폼)와 워커 템플릿(워커를 만드는 틀) |
 | 대상 보드 | Jetson Orin NX 16GB, JetPack 6.2.2 (시험: L4T R36.5.2, Ubuntu 22.04.5). 개발 PC: WSL·Linux |
 | 워커 설계 | 각 워커 폴더 `workers/<이름>/design.md`. 이 문서는 특정 워커를 모른다 |
@@ -1598,6 +1598,7 @@ heartbeat 송신 주기 1 s. 초기화가 `watchdog_sec`보다 오래 걸리면 
 | 0.88 | **CI와 문서 버전.** GitHub Actions `.github/workflows/check.yml`(push `--quick`, PR 전체 빌드·ctest `--no-tsan`, 태그 TSan), `dev/check.sh --no-tsan`. 문서의 라이브러리 버전: 지금 버전을 말하는 곳(예시 줄·"지금 x")은 틀 `CMakeLists.txt` VERSION과 같아야 하고 실제보다 높은 버전은 없어야 함(`dev/test_workers.py` `DocVersions`). 어긋난 곳(실행 뼈대 원본 0.9.1, 예시 `libworker` 0.9.1, "지금 0.18") 고침 |
 | 0.89 | **영상 로그인은 켰을 때만 묻기**(`docs/media-auth.md` 1장): MediaMTX 서비스의 `MTX_AUTH*` 환경 변수(늘 게이트웨이에 물음)를 없애고, 게이트웨이가 시작할 때와 로그인을 바꿀 때 `<데이터>/config/mediamtx.yml`의 `authMethod`(켬 `http`, 끔 `internal`)·`authHTTPAddress`를 맞춘다. MediaMTX는 파일을 다시 읽음(재시작·root 없음). 평소(끔)에는 게이트웨이가 멈춰도 영상이 돈다. `apply.sh --reload`는 옛 nginx worker가 새 연결을 그만 받을 때까지 기다림(`docs/live-settings.md`) |
 | 0.90 | **로그인은 제품 빌드의 선택**(`docs/modes.md` 로그인): 워크스페이스(개발)는 늘 없음(시작 셸이 `WORKSPACE_AUTH=off`, 설정 탭 칸 없앰), 제품은 빌드할 때 넣을지 고름(`--login`, 빌드 창, product.json `login`, 기본 없음 → `PRODUCT_LOGIN`). 게이트웨이의 "제품이면 늘 켬"을 없앰. **배지 원칙**(ui/README.md): 배지는 info·warn·bad만, ok·idle은 보통 글자이고 패널 머리·위 띠에서는 숨김. 위 띠 "개발"·"인증 꺼짐"·"보드 연결됨", 설정 칸 "바로 적용" 없앰 |
+| 0.91 | **지도 타일**(`docs/map-tiles.md`): nginx `/maps/<종류>/<z>/<x>/<y>` = 오프라인 폴더(`<데이터>/maps`) → 보드가 온라인에서 받아 캐시 → `204`. 기본 종류 `osm`·`satellite`, `WORKSPACE_MAPS`·`WORKSPACE_MAPS_ONLINE`, 로그인 켬이면 `/media/`처럼 로그인한 사람만. 워커 패널에 **"제어" 탭**(선택: 운용 탭이 지도·영상으로 차서 운용 명령을 따로 둘 때, ui/worker-panels.md) |
 | 0.51 | **nginx 앞단**(`docs/gateway.md` 6.1): 설정 틀·`render.sh`, 시작 셸이 데이터 폴더에 설정을 만들어 워크스페이스 계정으로 띄움(시스템 nginx 안 씀, 점검 실패·없음이면 게이트웨이가 TCP로), 게이트웨이 `WORKSPACE_GATEWAY_TCP=0`, 시험 `rest/test_nginx_front.py`·`check.sh` |
 | 0.50 | **게이트웨이 C++ 판 구현**(`gateway/` CMake: core·src·lib 사본(cpp-httplib v0.18.3)·단위 시험). HTTP 수락 시험 `rest/test_rest_accept.py` 새로(`REST_BIN`으로 판을 고름). 시작 셸 `WORKSPACE_REST_IMPL=cpp`·`config/rest_impl`(기본 Python), `dev/release-worker.sh gateway`, `dev/check.sh`가 빌드·단위·수락·TSan. Python 판과 다른 점은 `docs/gateway.md` 6.1 |
 | 0.49 | **게이트웨이 설계 확정**(`docs/gateway.md`, 그림 `docs/gateway.svg`): Python REST → nginx(웹서버: 화면 파일·HTTPS·제한, 시작 셸이 워크스페이스 계정으로) + C++ 게이트웨이(Unix 소켓만, `gw.http`·`gw.up.<워커>`·`gw.mgr`·`gw.log`). 경로·응답 그대로, 신분 확인·역할·운용/정비 모드·명령 기록·Manager 캐시, 화면 전용 기능 금지 |
